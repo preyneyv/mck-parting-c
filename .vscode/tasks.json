@@ -1,0 +1,61 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Compile Project",
+      "type": "process",
+      "isBuildCommand": true,
+      "command": "${userHome}/.pico-sdk/ninja/v1.12.1/ninja",
+      "args": ["-C", "${workspaceFolder}/build"],
+      "group": "build",
+      "problemMatcher": "$gcc",
+      "windows": {
+        "command": "${env:USERPROFILE}/.pico-sdk/ninja/v1.12.1/ninja.exe"
+      }
+    },
+    {
+      "label": "Boot into Bootsel",
+      "type": "process",
+      "command": "${env:HOME}/.pico-sdk/picotool/2.1.1/picotool/picotool",
+      "args": ["reboot", "-f", "-u"],
+      "windows": {
+        "command": "${env:USERPROFILE}/.pico-sdk/picotool/2.1.1/picotool/picotool.exe"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "Run Project",
+      "type": "process",
+      "command": "${env:HOME}/.pico-sdk/picotool/2.1.1/picotool/picotool",
+      "args": ["load", "${command:raspberry-pi-pico.launchTargetPath}", "-fx"],
+      "problemMatcher": [],
+      "windows": {
+        "command": "${env:USERPROFILE}/.pico-sdk/picotool/2.1.1/picotool/picotool.exe"
+      },
+      "dependsOn": ["Boot into Bootsel"],
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      }
+    },
+    {
+      "label": "Flash",
+      "type": "process",
+      "command": "${userHome}/.pico-sdk/openocd/0.12.0+dev/openocd.exe",
+      "args": [
+        "-s",
+        "${userHome}/.pico-sdk/openocd/0.12.0+dev/scripts",
+        "-f",
+        "interface/cmsis-dap.cfg",
+        "-f",
+        "target/${command:raspberry-pi-pico.getTarget}.cfg",
+        "-c",
+        "adapter speed 5000; program \"${command:raspberry-pi-pico.launchTargetPath}\" verify reset exit"
+      ],
+      "problemMatcher": [],
+      "windows": {
+        "command": "${env:USERPROFILE}/.pico-sdk/openocd/0.12.0+dev/openocd.exe"
+      }
+    }
+  ]
+}
