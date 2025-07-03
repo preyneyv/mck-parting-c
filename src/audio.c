@@ -111,8 +111,8 @@ void audio_init()
 
 // Synthesis parameters
 const float note_hz = 440.0f;
-const float vibr_hz = 10.f;
-const float vibr_depth = 20.0f;
+const float vibr_hz = 0.2f;
+const float vibr_depth = 500.0f;
 
 float note_phase = 0.0f;
 float vibr_phase = 0.0f;
