@@ -33,7 +33,8 @@ project(mck-parting-c C CXX ASM)
 # Initialise the Raspberry Pi Pico SDK
 pico_sdk_init()
 
-# Add executable. Default name is the project name, version 0.1
+# Add the u8g2 graphics library
+add_subdirectory(lib/u8g2)
 
 # Sources in src/
 add_executable(mck-parting-c
@@ -55,6 +56,7 @@ target_link_libraries(mck-parting-c
         hardware_spi
         hardware_pwm
         m
+        u8g2
         )
 
 # Add the standard include files to the build
