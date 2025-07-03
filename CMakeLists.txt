@@ -64,4 +64,6 @@ target_include_directories(mck-parting-c PRIVATE
         ${CMAKE_CURRENT_LIST_DIR}/src
 )
 
+target_compile_options(mck-parting-c PRIVATE -ffast-math)
+
 pico_add_extra_outputs(mck-parting-c)

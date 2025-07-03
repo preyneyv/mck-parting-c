@@ -20,6 +20,34 @@ volatile bool need_fill_second_half = false;
 int AUDIO_PIN_SLICE = -1;
 int SAMPLE_REPEAT_SHIFT = 3;
 
+// Sine lookup table
+#define SIN_LUT_SIZE 1024
+static float sin_lut[SIN_LUT_SIZE];
+
+// Exponential lookup table for 2^x over x in [-0.5, 0.5]
+#define EXP_LUT_SIZE 128
+static float exp_lut[EXP_LUT_SIZE];
+#define INV_1200F (1.0f / 1200.0f)
+
+// Fast sine lookup (phase in [0,1))
+static inline float f_sin(float phase)
+{
+    int idx = (int)(phase * SIN_LUT_SIZE) & (SIN_LUT_SIZE - 1);
+    return sin_lut[idx];
+}
+
+static inline float f_exp(float x)
+{
+    // clamp to LUT range
+    if (x < -0.5f)
+        x = -0.5f;
+    else if (x > 0.5f)
+        x = 0.5f;
+    // map to index
+    int idx = (int)((x + 0.5f) * (EXP_LUT_SIZE - 1) + 0.5f);
+    return exp_lut[idx];
+}
+
 static void _audio_pwm_wrap_irq_handler()
 {
     int buffer_index = buffer_position >> SAMPLE_REPEAT_SHIFT;
@@ -43,6 +71,19 @@ static void _audio_pwm_wrap_irq_handler()
 
 void audio_init()
 {
+    // Initialize sine lookup table
+    for (int i = 0; i < SIN_LUT_SIZE; i++)
+    {
+        sin_lut[i] = sinf((float)i / SIN_LUT_SIZE * 2.0f * M_PI);
+    }
+
+    // Initialize exponential lookup table
+    for (int i = 0; i < EXP_LUT_SIZE; i++)
+    {
+        float x = (float)i / (EXP_LUT_SIZE - 1) - 0.5f; // [-0.5 .. +0.5]
+        exp_lut[i] = exp2f(x);
+    }
+
     AUDIO_PIN_SLICE = pwm_gpio_to_slice_num(AUDIO_DAC_PIN);
 
     float clk_div = 8.0f;
@@ -70,16 +111,17 @@ void audio_init()
 
 // Synthesis parameters
 const float note_hz = 440.0f;
-const float vibr_hz = 0.0f;
-const float vibr_depth = 0.0f;
+const float vibr_hz = 10.f;
+const float vibr_depth = 20.0f;
 
 float note_phase = 0.0f;
 float vibr_phase = 0.0f;
 float d_vibr_phase = vibr_hz / AUDIO_DAC_SAMPLE_RATE;
 
-inline float add_cents(float freq, float cents)
+static inline float add_cents(float freq, float cents)
 {
-    return freq * powf(2.0f, cents / 1200.0f);
+    float x = cents * INV_1200F;
+    return freq * f_exp(x);
 }
 
 inline float incr_wrap(float value, float inc)
@@ -95,15 +137,16 @@ static inline float _get_sample()
     float inst_freq = note_hz;
     if (vibr_hz > 0.0f)
     {
-        float vibr_lfo = sinf(vibr_phase * 2.0f * M_PI);
-        // Calculate the frequency modulation using vibrato
+        // Use lookup table for vibrato LFO
+        float vibr_lfo = f_sin(vibr_phase);
         inst_freq = add_cents(note_hz, vibr_lfo * vibr_depth);
     }
 
     note_phase = incr_wrap(note_phase, inst_freq / AUDIO_DAC_SAMPLE_RATE);
     vibr_phase = incr_wrap(vibr_phase, d_vibr_phase);
 
-    return sinf(note_phase * 2.0f * M_PI);
+    // Return sample from lookup table
+    return f_sin(note_phase);
 }
 
 // Synthesis function - generates audio samples
