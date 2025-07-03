@@ -42,6 +42,7 @@
     "stdlib.h": "c",
     "pwm.h": "c",
     "irq.h": "c",
-    "clocks.h": "c"
+    "clocks.h": "c",
+    "sample.h": "c"
   }
 }
