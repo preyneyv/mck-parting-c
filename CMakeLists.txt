@@ -47,18 +47,15 @@ pico_enable_stdio_usb(mck-parting-c 1)
 # Add the standard library to the build
 target_link_libraries(mck-parting-c
         pico_stdlib
+        pico_multicore
+        hardware_spi
+        hardware_pwm
+        m
         )
 
 # Add the standard include files to the build
 target_include_directories(mck-parting-c PRIVATE
         ${CMAKE_CURRENT_LIST_DIR}
 )
-
-# Add any user requested libraries
-target_link_libraries(mck-parting-c 
-        hardware_spi
-        hardware_pwm
-        m
-        )
 
 pico_add_extra_outputs(mck-parting-c)
