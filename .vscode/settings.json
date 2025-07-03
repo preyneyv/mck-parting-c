@@ -38,11 +38,15 @@
   "raspberry-pi-pico.cmakePath": "${HOME}/.pico-sdk/cmake/v3.31.5/bin/cmake",
   "raspberry-pi-pico.ninjaPath": "${HOME}/.pico-sdk/ninja/v1.12.1/ninja",
   "files.associations": {
+    "*.ejs": "html",
+    ".env": "plaintext",
+    "*.pyde": "python",
     "*.css": "tailwindcss",
     "stdlib.h": "c",
     "pwm.h": "c",
     "irq.h": "c",
     "clocks.h": "c",
-    "sample.h": "c"
+    "sample.h": "c",
+    "sync.h": "c"
   }
 }
