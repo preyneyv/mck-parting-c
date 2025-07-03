@@ -35,7 +35,11 @@ pico_sdk_init()
 
 # Add executable. Default name is the project name, version 0.1
 
-add_executable(mck-parting-c main.c audio.c )
+# Sources in src/
+add_executable(mck-parting-c
+        src/main.c
+        src/audio.c
+)
 
 pico_set_program_name(mck-parting-c "mck-parting-c")
 pico_set_program_version(mck-parting-c "0.1")
@@ -55,7 +59,7 @@ target_link_libraries(mck-parting-c
 
 # Add the standard include files to the build
 target_include_directories(mck-parting-c PRIVATE
-        ${CMAKE_CURRENT_LIST_DIR}
+        ${CMAKE_CURRENT_LIST_DIR}/src
 )
 
 pico_add_extra_outputs(mck-parting-c)
