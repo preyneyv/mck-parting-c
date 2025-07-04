@@ -1,30 +1,33 @@
-/**
- * core 0: game logic and ui
- * core 1: audio synthesis and playback
- */
-
-#include <math.h>
-#include <stdio.h>
-
-#include <hardware/clocks.h>
-#include <hardware/irq.h>
-#include <hardware/pwm.h>
-#include <hardware/spi.h>
-#include <hardware/sync.h>
-#include <pico/multicore.h>
 #include <pico/stdlib.h>
 
+#include <SDL.h>
 #include <u8g2.h>
 
+#include <shared/config.h>
 #include <shared/utils/timing.h>
 
-#include "audio.h"
-#include "config.h"
 #include "display.h"
 
 display_t display;
 
-void core0_main() {
+static void inline handle_sdl_events() {
+  static SDL_Event event;
+  while (SDL_PollEvent(&event)) {
+    switch (event.type) {
+    case SDL_QUIT:
+      exit(0);
+      break;
+    case SDL_KEYDOWN:
+      switch (event.key.keysym.sym) {
+      case SDLK_q:
+        exit(0);
+        break;
+      };
+    }
+  }
+}
+
+int main() {
   display_init(&display);
 
   TimingInstrumenter ti_tick;
@@ -39,6 +42,7 @@ void core0_main() {
 
   u8g2_t *u8g2 = display_get_u8g2(&display);
   while (1) {
+    handle_sdl_events();
     ti_start(&ti_tick);
     i = (i + 1) % DISP_PIX;
     uint8_t x = i % DISP_WIDTH;
@@ -78,24 +82,4 @@ void core0_main() {
       last_frame_us = now;
     }
   }
-}
-
-void core1_main() {
-  // todo: audio, synth init
-  while (1) {
-    __wfi();
-  }
-}
-
-int main() {
-  stdio_init_all();
-  // set clock for audio PWM reasons
-  set_sys_clock_khz(SYS_CLOCK_KHZ, true);
-
-  // kick off audio core
-  multicore_reset_core1();
-  multicore_launch_core1(core1_main);
-
-  // kick off main core
-  core0_main();
 }

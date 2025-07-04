@@ -32,10 +32,7 @@
         "command": "${env:USERPROFILE}/.pico-sdk/picotool/2.1.1/picotool/picotool.exe"
       },
       "dependsOn": ["rp2: bootsel"],
-      "group": {
-        "kind": "build",
-        "isDefault": true
-      }
+      "group": "build"
     },
     {
       "label": "rp2: flash",
@@ -65,6 +62,21 @@
       "problemMatcher": "$gcc",
       "windows": {
         "command": "${env:USERPROFILE}/.pico-sdk/ninja/v1.12.1/ninja.exe"
+      }
+    },
+    {
+      "label": "host: run",
+      "type": "process",
+      "command": "${workspaceFolder}/build_host/mck-parting-c",
+      "args": [],
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      },
+      "problemMatcher": [],
+      "dependsOn": ["host: compile"],
+      "windows": {
+        "command": "${workspaceFolder}/build_host/mck-parting-c.exe"
       }
     },
     {

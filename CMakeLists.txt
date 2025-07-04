@@ -27,7 +27,7 @@ include(pico_sdk_import.cmake)
 project(mck-parting-c C CXX ASM)
 pico_sdk_init()
 
-# --- vendored dependencies ---
+# --- shared dependencies ---
 add_subdirectory(lib/u8g2)
 
 # --- shared lib ---
@@ -39,18 +39,33 @@ add_library(shared STATIC ${SHARED_SOURCES})
 target_include_directories(shared PRIVATE ${CMAKE_CURRENT_LIST_DIR}/src)
 target_link_libraries(shared PUBLIC u8g2 m pico_stdlib)
 
-# -- executable target(s) ---
 if(PICO_PLATFORM STREQUAL "host")
-    # --- host build (tools, development)
-    file(GLOB host_entrypoints CONFIGURE_DEPENDS "src/host/test_*.c")
-    foreach(ts IN LISTS host_entrypoints)
-        get_filename_component(test_name ${ts} NAME_WE)
-        add_executable(${test_name} ${ts})
-        target_link_libraries(${test_name} PRIVATE shared)
-        target_include_directories(${test_name} PRIVATE ${CMAKE_CURRENT_LIST_DIR}/src)
-        target_compile_options(${test_name} PRIVATE -ffast-math)
+    # --- host build (emulated) ---
+    find_package(SDL2 REQUIRED CONFIG REQUIRED COMPONENTS SDL2)
+    add_executable(mck-parting-c
+        src/host/main.c
+        src/host/display.c
+    )
+    target_link_libraries(mck-parting-c PRIVATE
+        shared
+        SDL2::SDL2
+    )
+    target_include_directories(mck-parting-c PRIVATE ${CMAKE_CURRENT_LIST_DIR}/src)
+    target_compile_options(mck-parting-c PRIVATE -ffast-math)
+    # file(GLOB U8G2_SYS_SDL "lib/u8g2/sys/sdl/common/*.c")
 
-    endforeach()
+    # --- host executable targets ---
+    # file(GLOB host_entrypoints CONFIGURE_DEPENDS "src/host/test_*.c")
+    # foreach(ts IN LISTS host_entrypoints)
+    #     get_filename_component(test_name ${ts} NAME_WE)
+    #     add_executable(${test_name} ${ts} ${U8G2_SYS_SDL})
+    #     target_link_libraries(${test_name} PRIVATE 
+    #         shared 
+    #         SDL2::SDL2
+    #     )
+    #     target_include_directories(${test_name} PRIVATE ${CMAKE_CURRENT_LIST_DIR}/src)
+    #     target_compile_options(${test_name} PRIVATE -ffast-math)
+    # endforeach()
 else()
     # --- rp2 build ---
     set(PICO_BOARD pico CACHE STRING "Board type")
@@ -59,8 +74,8 @@ else()
         src/rp2/display.c
         src/rp2/audio.c
     )
-    target_link_libraries(mck-parting-c
-        PRIVATE shared
+    target_link_libraries(mck-parting-c PRIVATE
+        shared
         pico_stdlib
         pico_multicore
         hardware_spi
