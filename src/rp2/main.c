@@ -17,9 +17,9 @@
 
 #include <u8g2.h>
 
-#include "../common/audio.h"
-#include "../common/config.h"
-#include "../common/utils/timing.h"
+#include <shared/audio.h>
+#include <shared/config.h>
+#include <shared/utils/timing.h>
 
 u8g2_t u8g2;
 
@@ -115,13 +115,13 @@ void setup_display() {
   u8g2_SetPowerSave(&u8g2, 0);
 }
 
-// void core1_main() {
-//   audio_init();
-//   while (1) {
-//     synth_fill_buffers();
-//     __wfi();
-//   }
-// }
+void core1_main() {
+  audio_init();
+  while (1) {
+    synth_fill_buffers();
+    __wfi();
+  }
+}
 
 const uint8_t WIDTH = 128;
 const uint8_t HEIGHT = 64;
@@ -131,8 +131,8 @@ int main() {
   set_sys_clock_khz(SYS_CLOCK_KHZ, true);
   stdio_init_all();
 
-  //   multicore_reset_core1();
-  //   multicore_launch_core1(core1_main);
+  multicore_reset_core1();
+  multicore_launch_core1(core1_main);
 
   setup_display();
 

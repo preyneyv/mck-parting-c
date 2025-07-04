@@ -1,5 +1,4 @@
-#ifndef CONFIG_H
-#define CONFIG_H
+#pragma once
 
 #include <stdint.h>
 
@@ -20,4 +19,3 @@
 #endif
 
 static const uint32_t TARGET_FRAME_INTERVAL_US = 1000000 / TARGET_FPS;
-#endif // CONFIG_H
