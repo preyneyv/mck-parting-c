@@ -33,10 +33,11 @@ add_subdirectory(lib/u8g2)
 # --- shared lib ---
 set(SHARED_SOURCES
     src/shared/audio.c
+    src/shared/display.c
 )
 add_library(shared STATIC ${SHARED_SOURCES})
 target_include_directories(shared PRIVATE ${CMAKE_CURRENT_LIST_DIR}/src)
-target_link_libraries(shared PUBLIC u8g2 m)
+target_link_libraries(shared PUBLIC u8g2 m pico_stdlib)
 
 # -- executable target(s) ---
 if(PICO_PLATFORM STREQUAL "host")
@@ -46,8 +47,8 @@ if(PICO_PLATFORM STREQUAL "host")
         get_filename_component(test_name ${ts} NAME_WE)
         add_executable(${test_name} ${ts})
         target_link_libraries(${test_name} PRIVATE shared)
+        target_include_directories(${test_name} PRIVATE ${CMAKE_CURRENT_LIST_DIR}/src)
         target_compile_options(${test_name} PRIVATE -ffast-math)
-        target_include_directories(${test_name} ${CMAKE_CURRENT_LIST_DIR}/src)
 
     endforeach()
 else()
@@ -55,6 +56,8 @@ else()
     set(PICO_BOARD pico CACHE STRING "Board type")
     add_executable(mck-parting-c
         src/rp2/main.c
+        src/rp2/display.c
+        src/rp2/audio.c
     )
     target_link_libraries(mck-parting-c
         PRIVATE shared
@@ -63,8 +66,8 @@ else()
         hardware_spi
         hardware_pwm
     )
+    target_include_directories(mck-parting-c PRIVATE ${CMAKE_CURRENT_LIST_DIR}/src)
     target_compile_options(mck-parting-c PRIVATE -ffast-math)
-   target_include_directories(mck-parting-c PRIVATE ${CMAKE_CURRENT_LIST_DIR}/src)
 
 
     pico_enable_stdio_uart(mck-parting-c 0)

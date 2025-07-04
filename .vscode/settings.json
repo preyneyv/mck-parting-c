@@ -43,6 +43,7 @@
     "*.pyde": "python",
     "*.css": "tailwindcss",
     "*.h": "c",
-    "*.c": "c"
+    "*.c": "c",
+    "cstdint": "c"
   }
 }
