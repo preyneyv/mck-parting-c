@@ -7,265 +7,15 @@
 
 #include "display.h"
 
-/* return ascii key value or -1 */
-int u8g_sdl_get_key(void) {
-  SDL_Event event;
-  /* https://wiki.libsdl.org/SDL_PollEvent */
-  if (SDL_PollEvent(&event) != 0) {
-    switch (event.type) {
-    case SDL_QUIT:
-      exit(0);
-      break;
-    case SDL_KEYDOWN:
-      switch (event.key.keysym.sym) {
-      /*     /usr/include/SDL/SDL_keysym.h */
-      /* /usr/include/SDL2/SDL_keycode.h */
-      case SDLK_a:
-        return 'a';
-      case SDLK_b:
-        return 'b';
-      case SDLK_c:
-        return 'c';
-      case SDLK_d:
-        return 'd';
-      case SDLK_e:
-        return 'e';
-      case SDLK_f:
-        return 'f';
-      case SDLK_g:
-        return 'g';
-      case SDLK_h:
-        return 'h';
-      case SDLK_i:
-        return 'i';
-      case SDLK_j:
-        return 'j';
-      case SDLK_k:
-        return 'k';
-      case SDLK_l:
-        return 'l';
-      case SDLK_m:
-        return 'm';
-      case SDLK_n:
-        return 'n';
-      case SDLK_o:
-        return 'o';
-      case SDLK_p:
-        return 'p';
-      case SDLK_q:
-        return 'q';
-      case SDLK_r:
-        return 'r';
-      case SDLK_s:
-        return 's';
-      case SDLK_t:
-        return 't';
-      case SDLK_u:
-        return 'u';
-      case SDLK_v:
-        return 'v';
-      case SDLK_w:
-        return 'w';
-      case SDLK_x:
-        return 'x';
-      case SDLK_y:
-        return 'y';
-      case SDLK_z:
-        return 'z';
-      case SDLK_SPACE:
-        return ' ';
-      case SDLK_UP:
-        return 273;
-      case SDLK_DOWN:
-        return 274;
-      case SDLK_RIGHT:
-        return 275;
-      case SDLK_LEFT:
-        return 276;
-      case SDLK_PERIOD:
-        return '.';
+const uint8_t RES_MULT = 3;
 
-      default:
-        return 0;
-      }
-    }
-  }
-  return -1;
-}
-
-// #define HEIGHT (64)
-// #define WIDTH 128
-
-#define W(x, w) (((x) * (w)) / 100)
-
-SDL_Window *u8g_sdl_window;
-SDL_Surface *u8g_sdl_screen;
-
-int u8g_sdl_multiple = 3;
-uint32_t u8g_sdl_color[256];
-int u8g_sdl_height, u8g_sdl_width;
-
-static void u8g_sdl_set_pixel(int x, int y, int idx) {
-  uint32_t *ptr;
-  uint32_t offset;
-  int i, j;
-
-  if (y >= u8g_sdl_height)
-    return;
-  if (y < 0)
-    return;
-  if (x >= u8g_sdl_width)
-    return;
-  if (x < 0)
-    return;
-
-  for (i = 0; i < u8g_sdl_multiple; i++)
-    for (j = 0; j < u8g_sdl_multiple; j++) {
-      offset =
-          (((y * u8g_sdl_multiple) + i) * (u8g_sdl_width * u8g_sdl_multiple) +
-           ((x * u8g_sdl_multiple) + j)) *
-          u8g_sdl_screen->format->BytesPerPixel;
-
-      assert(offset < (Uint32)(u8g_sdl_width * u8g_sdl_multiple *
-                               u8g_sdl_height * u8g_sdl_multiple *
-                               u8g_sdl_screen->format->BytesPerPixel));
-
-      ptr = (uint32_t *)(((uint8_t *)(u8g_sdl_screen->pixels)) + offset);
-      *ptr = u8g_sdl_color[idx];
-    }
-}
-
-static void u8g_sdl_set_8pixel(int x, int y, uint8_t pixel) {
-  int cnt = 8;
-  int bg = 0;
-  if ((x / 8 + y / 8) & 1)
-    bg = 4;
-  while (cnt > 0) {
-    if ((pixel & 1) == 0) {
-      u8g_sdl_set_pixel(x, y, bg);
-    } else {
-      u8g_sdl_set_pixel(x, y, 3);
-    }
-    pixel >>= 1;
-    y++;
-    cnt--;
-  }
-}
-
-static void u8g_sdl_set_multiple_8pixel(int x, int y, int cnt, uint8_t *pixel) {
-  uint8_t b;
-  while (cnt > 0) {
-    b = *pixel;
-    u8g_sdl_set_8pixel(x, y, b);
-    x++;
-    pixel++;
-    cnt--;
-  }
-}
-
-static void u8g_sdl_init(int width, int height) {
-  u8g_sdl_height = height;
-  u8g_sdl_width = width;
-
-  if (SDL_Init(SDL_INIT_VIDEO) != 0) {
-    printf("Unable to initialize SDL:  %s\n", SDL_GetError());
-    exit(1);
-  }
-
-  u8g_sdl_window = SDL_CreateWindow(
-      "U8g2", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED,
-      u8g_sdl_width * u8g_sdl_multiple, u8g_sdl_height * u8g_sdl_multiple, 0);
-
-  if (u8g_sdl_window == NULL) {
-    printf("Couldn't create window: %s\n", SDL_GetError());
-    exit(1);
-  }
-
-  u8g_sdl_screen = SDL_GetWindowSurface(u8g_sdl_window);
-
-  if (u8g_sdl_screen == NULL) {
-    printf("Couldn't create screen: %s\n", SDL_GetError());
-    exit(1);
-  }
-
-  printf("%d bits-per-pixel mode\n", u8g_sdl_screen->format->BitsPerPixel);
-  printf("%d bytes-per-pixel mode\n", u8g_sdl_screen->format->BytesPerPixel);
-
-  u8g_sdl_color[0] = SDL_MapRGB(u8g_sdl_screen->format, 0, 0, 0);
-  u8g_sdl_color[1] =
-      SDL_MapRGB(u8g_sdl_screen->format, W(100, 50), W(255, 50), 0);
-  u8g_sdl_color[2] =
-      SDL_MapRGB(u8g_sdl_screen->format, W(100, 80), W(255, 80), 0);
-  u8g_sdl_color[3] = SDL_MapRGB(u8g_sdl_screen->format, 100, 255, 0);
-  u8g_sdl_color[4] = SDL_MapRGB(u8g_sdl_screen->format, 30, 30, 30);
-
-  /*
-  u8g_sdl_set_pixel(0,0);
-  u8g_sdl_set_pixel(1,1);
-  u8g_sdl_set_pixel(2,2);
-  */
-
-  /* update all */
-  SDL_UpdateWindowSurface(u8g_sdl_window);
-
-  atexit(SDL_Quit);
-  return;
-}
-
-static uint8_t u8x8_d_sdl_gpio(u8x8_t *u8x8, uint8_t msg,
-                               U8X8_UNUSED uint8_t arg_int,
-                               U8X8_UNUSED void *arg_ptr) {
-  static int debounce_cnt = 0;
-  static int curr_msg = 0;
-  static int db_cnt = 10;
-  int event;
-
-  if (curr_msg > 0) {
-    if (msg == curr_msg) {
-      u8x8_SetGPIOResult(u8x8, 0);
-      if (debounce_cnt == 0)
-        curr_msg = 0;
-      else
-        debounce_cnt--;
-      return 1;
-    }
-
-  } else {
-    event = u8g_sdl_get_key();
-
-    switch (event) {
-    case 273:
-      curr_msg = U8X8_MSG_GPIO_MENU_UP;
-      debounce_cnt = db_cnt;
-      break;
-    case 274:
-      curr_msg = U8X8_MSG_GPIO_MENU_DOWN;
-      debounce_cnt = db_cnt;
-      break;
-    case 275:
-      curr_msg = U8X8_MSG_GPIO_MENU_NEXT;
-      debounce_cnt = db_cnt;
-      break;
-    case 276:
-      curr_msg = U8X8_MSG_GPIO_MENU_PREV;
-      debounce_cnt = db_cnt;
-      break;
-    case 's':
-      curr_msg = U8X8_MSG_GPIO_MENU_SELECT;
-      debounce_cnt = db_cnt;
-      break;
-    case 'q':
-      curr_msg = U8X8_MSG_GPIO_MENU_HOME;
-      debounce_cnt = db_cnt;
-      break;
-    }
-  }
-  u8x8_SetGPIOResult(u8x8, 1);
-  return 1;
-}
-
-/*========================================*/
-/* 128x64 */
+static uint16_t pixel_width;
+static uint16_t pixel_height;
+static uint16_t render_width;
+static uint16_t render_height;
+static SDL_Window *window;
+static SDL_Renderer *renderer;
+static SDL_Texture *texture;
 
 static const u8x8_display_info_t u8x8_sdl_128x64_info = {
     /* chip_enable_level = */ 0,
@@ -289,104 +39,26 @@ static const u8x8_display_info_t u8x8_sdl_128x64_info = {
     /* pixel_width = */ 128,
     /* pixel_height = */ 64};
 
-uint8_t u8x8_d_sdl_128x64(u8x8_t *u8g2, uint8_t msg, uint8_t arg_int,
-                          void *arg_ptr) {
-  uint8_t x, y, c;
-  uint8_t *ptr;
-  switch (msg) {
-  case U8X8_MSG_DISPLAY_SETUP_MEMORY:
-    u8x8_d_helper_display_setup_memory(u8g2, &u8x8_sdl_128x64_info);
-    u8g_sdl_init(128, 64);
-    break;
-  case U8X8_MSG_DISPLAY_INIT:
-    u8x8_d_helper_display_init(u8g2);
-    break;
-  case U8X8_MSG_DISPLAY_SET_POWER_SAVE:
-    break;
-  case U8X8_MSG_DISPLAY_SET_FLIP_MODE:
-    break;
-  case U8X8_MSG_DISPLAY_SET_CONTRAST:
-    break;
-  case U8X8_MSG_DISPLAY_DRAW_TILE:
-    x = ((u8x8_tile_t *)arg_ptr)->x_pos;
-    x *= 8;
-    x += u8g2->x_offset;
-
-    y = ((u8x8_tile_t *)arg_ptr)->y_pos;
-    y *= 8;
-
-    do {
-      c = ((u8x8_tile_t *)arg_ptr)->cnt;
-      ptr = ((u8x8_tile_t *)arg_ptr)->tile_ptr;
-      u8g_sdl_set_multiple_8pixel(x, y, c * 8, ptr);
-      arg_int--;
-      x += c * 8;
-    } while (arg_int > 0);
-
-    /* update all */
-    SDL_UpdateWindowSurface(u8g_sdl_window);
-    break;
-  default:
-    return 0;
-  }
-  return 1;
-}
-
-void u8x8_Setup_SDL_128x64(u8x8_t *u8x8) {
-  /* setup defaults */
-  u8x8_SetupDefaults(u8x8);
-
-  /* setup specific callbacks */
-  u8x8->display_cb = u8x8_d_sdl_128x64;
-
-  u8x8->gpio_and_delay_cb = u8x8_d_sdl_gpio;
-
-  /* setup display info */
-  u8x8_SetupMemory(u8x8);
-}
-
-void u8g2_SetupBuffer_SDL_128x64(u8g2_t *u8g2, const u8g2_cb_t *u8g2_cb) {
-
-  static uint8_t buf[128 * 8];
-
-  u8x8_Setup_SDL_128x64(u8g2_GetU8x8(u8g2));
-  u8g2_SetupBuffer(u8g2, buf, 8, u8g2_ll_hvline_vertical_top_lsb, u8g2_cb);
-}
-
-void _display_init(display_t *display) {
-  u8g2_t *u8g2 = display_get_u8g2(display);
-
-  u8g2_SetupBuffer_SDL_128x64(u8g2, &u8g2_cb_r0);
-  u8g2_InitDisplay(u8g2);
-  u8g2_SetPowerSave(u8g2, 0);
-}
-
-// ----
-
-const uint8_t RES_MULT = 2;
-
-static SDL_Window *window;
-static SDL_Renderer *renderer;
-static SDL_Texture *texture;
-
 static inline void _display_cb_display_init(u8x8_t *u8x8) {
-  uint16_t width = u8x8->display_info->pixel_width;
-  uint16_t height = u8x8->display_info->pixel_height;
-  // create SDL window
+  pixel_width = u8x8->display_info->pixel_width;
+  pixel_height = u8x8->display_info->pixel_height;
+
+  render_width = pixel_width * RES_MULT;
+  render_height = pixel_height * RES_MULT;
+
   SDL_Init(SDL_INIT_VIDEO);
   window = SDL_CreateWindow("Screen", SDL_WINDOWPOS_UNDEFINED,
-                            SDL_WINDOWPOS_UNDEFINED, width, height,
-                            SDL_WINDOW_SHOWN);
+                            SDL_WINDOWPOS_UNDEFINED, render_width,
+                            render_height, SDL_WINDOW_SHOWN);
   renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED);
-  texture = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_RGB888,
-                              SDL_TEXTUREACCESS_STREAMING, width, height);
+  texture =
+      SDL_CreateTexture(renderer, SDL_PIXELFORMAT_RGB888,
+                        SDL_TEXTUREACCESS_STREAMING, pixel_width, pixel_height);
 }
 
 static inline void _display_cb_draw_tile(u8x8_t *u8x8, uint8_t arg_int,
                                          u8x8_tile_t *params,
                                          SDL_Texture *tex) {
-  uint16_t width = u8x8->display_info->pixel_width;
-  uint16_t height = u8x8->display_info->pixel_height;
   uint8_t x0 = params->x_pos * 8 + u8x8->x_offset;
   uint8_t y0 = params->y_pos * 8;
   uint8_t cnt = params->cnt;
@@ -420,6 +92,14 @@ static inline void _display_cb_draw_tile(u8x8_t *u8x8, uint8_t arg_int,
   SDL_UnlockTexture(tex);
 }
 
+static inline void _display_cb_refresh() {
+  SDL_RenderClear(renderer);
+  SDL_RenderCopy(
+      renderer, texture, NULL,
+      &(SDL_Rect){.x = 0, .y = 0, .w = render_width, .h = render_height});
+  SDL_RenderPresent(renderer);
+}
+
 static uint8_t _display_cb(u8x8_t *u8x8, uint8_t msg, uint8_t arg_int,
                            void *arg_ptr) {
 
@@ -435,9 +115,7 @@ static uint8_t _display_cb(u8x8_t *u8x8, uint8_t msg, uint8_t arg_int,
     _display_cb_draw_tile(u8x8, arg_int, (u8x8_tile_t *)arg_ptr, texture);
     break;
   case U8X8_MSG_DISPLAY_REFRESH:
-    SDL_RenderClear(renderer);
-    SDL_RenderCopy(renderer, texture, NULL, NULL);
-    SDL_RenderPresent(renderer);
+    _display_cb_refresh();
     break;
   case U8X8_MSG_DISPLAY_SET_POWER_SAVE:
   case U8X8_MSG_DISPLAY_SET_FLIP_MODE:
@@ -473,7 +151,6 @@ static uint8_t _gpio_and_delay_cb(u8x8_t *u8x8, uint8_t msg, uint8_t arg_int,
 }
 
 static void u8g2_SetupSDL_128x64_f(u8g2_t *u8g2) {
-  // TODO: support rotations? seems excessive.
   u8g2_SetupDisplay(u8g2,
                     /* display_cb */ _display_cb,
                     /* cad_cb */ u8x8_dummy_cb,

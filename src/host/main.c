@@ -52,6 +52,8 @@ int main() {
     u8g2_ClearBuffer(u8g2);
     u8g2_SetDrawColor(u8g2, 0);
     u8g2_DrawBox(u8g2, 0, 0, 128, 64);
+    u8g2_SetDrawColor(u8g2, 1);
+    u8g2_DrawBox(u8g2, 10, 10, 20, 20);
 
     u8g2_SetDrawColor(u8g2, 1);
     u8g2_DrawPixel(u8g2, x, y); // pixel that scans L to R, T to B

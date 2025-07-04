@@ -3,7 +3,7 @@
 #include <stdint.h>
 
 //// SYSTEM CONFIGURATION ////
-#define TARGET_FPS 10000
+#define TARGET_FPS 240
 static const uint32_t TARGET_FRAME_INTERVAL_US = 1000000 / TARGET_FPS;
 
 //// DISPLAY CONFIGURATION ////
