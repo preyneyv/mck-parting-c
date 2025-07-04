@@ -6,8 +6,8 @@
 #include "config.h"
 #include "display.h"
 
-static uint8_t _u8g2_hw_spi(u8x8_t *u8x8, uint8_t msg, uint8_t arg_int,
-                            void *arg_ptr) {
+static uint8_t _byte_cb(u8x8_t *u8x8, uint8_t msg, uint8_t arg_int,
+                        void *arg_ptr) {
   uint8_t *data;
   switch (msg) {
   case U8X8_MSG_BYTE_SEND:
@@ -36,8 +36,8 @@ static uint8_t _u8g2_hw_spi(u8x8_t *u8x8, uint8_t msg, uint8_t arg_int,
   return 1;
 }
 
-static uint8_t _u8g2_hw_sys(u8x8_t *u8x8, uint8_t msg, uint8_t arg_int,
-                            void *arg_ptr) {
+static uint8_t _gpio_and_delay_cb(u8x8_t *u8x8, uint8_t msg, uint8_t arg_int,
+                                  void *arg_ptr) {
   switch (msg) {
   case U8X8_MSG_GPIO_AND_DELAY_INIT:
     spi_init(DISP_SPI_PORT, DISP_SPI_SPEED);
@@ -85,7 +85,8 @@ static uint8_t _u8g2_hw_sys(u8x8_t *u8x8, uint8_t msg, uint8_t arg_int,
 
 void display_init(display_t *display) {
   u8g2_t *u8g2 = display_get_u8g2(display);
-  u8g2_Setup_ssd1306_128x64_noname_f(u8g2, U8G2_R0, _u8g2_hw_spi, _u8g2_hw_sys);
+  u8g2_Setup_ssd1306_128x64_noname_f(u8g2, U8G2_R0, _byte_cb,
+                                     _gpio_and_delay_cb);
   u8g2_InitDisplay(&u8g2);
   u8g2_SetPowerSave(&u8g2, 0);
 }
