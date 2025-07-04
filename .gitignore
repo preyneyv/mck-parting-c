@@ -1,4 +1,6 @@
 build
+build_host
+
 !.vscode/*
 .DS_Store
 *.o

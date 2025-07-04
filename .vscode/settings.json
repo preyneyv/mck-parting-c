@@ -42,11 +42,7 @@
     ".env": "plaintext",
     "*.pyde": "python",
     "*.css": "tailwindcss",
-    "stdlib.h": "c",
-    "pwm.h": "c",
-    "irq.h": "c",
-    "clocks.h": "c",
-    "sample.h": "c",
-    "sync.h": "c"
+    "*.h": "c",
+    "*.c": "c"
   }
 }

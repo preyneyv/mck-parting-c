@@ -2,9 +2,8 @@
   "version": "2.0.0",
   "tasks": [
     {
-      "label": "Compile Project",
+      "label": "rp2: compile",
       "type": "process",
-      "isBuildCommand": true,
       "command": "${userHome}/.pico-sdk/ninja/v1.12.1/ninja",
       "args": ["-C", "${workspaceFolder}/build"],
       "group": "build",
@@ -14,7 +13,7 @@
       }
     },
     {
-      "label": "Boot into Bootsel",
+      "label": "rp2: bootsel",
       "type": "process",
       "command": "${env:HOME}/.pico-sdk/picotool/2.1.1/picotool/picotool",
       "args": ["reboot", "-f", "-u"],
@@ -24,7 +23,7 @@
       "problemMatcher": []
     },
     {
-      "label": "Run Project",
+      "label": "rp2: run",
       "type": "process",
       "command": "${env:HOME}/.pico-sdk/picotool/2.1.1/picotool/picotool",
       "args": ["load", "${command:raspberry-pi-pico.launchTargetPath}", "-fx"],
@@ -32,14 +31,14 @@
       "windows": {
         "command": "${env:USERPROFILE}/.pico-sdk/picotool/2.1.1/picotool/picotool.exe"
       },
-      "dependsOn": ["Boot into Bootsel"],
+      "dependsOn": ["rp2: bootsel"],
       "group": {
         "kind": "build",
         "isDefault": true
       }
     },
     {
-      "label": "Flash",
+      "label": "rp2: flash",
       "type": "process",
       "command": "${userHome}/.pico-sdk/openocd/0.12.0+dev/openocd.exe",
       "args": [
@@ -55,6 +54,44 @@
       "problemMatcher": [],
       "windows": {
         "command": "${env:USERPROFILE}/.pico-sdk/openocd/0.12.0+dev/openocd.exe"
+      }
+    },
+    {
+      "label": "host: compile",
+      "type": "process",
+      "group": "build",
+      "command": "${userHome}/.pico-sdk/ninja/v1.12.1/ninja",
+      "args": ["-C", "${workspaceFolder}/build_host"],
+      "problemMatcher": "$gcc",
+      "windows": {
+        "command": "${env:USERPROFILE}/.pico-sdk/ninja/v1.12.1/ninja.exe"
+      }
+    },
+    {
+      "label": "host: build active file",
+      "type": "process",
+      "command": "${userHome}/.pico-sdk/ninja/v1.12.1/ninja",
+      "args": [
+        "-C",
+        "${workspaceFolder}/build_host",
+        "${fileBasenameNoExtension}"
+      ],
+      "group": "build",
+      "problemMatcher": "$gcc",
+      "windows": {
+        "command": "${env:USERPROFILE}/.pico-sdk/ninja/v1.12.1/ninja.exe"
+      }
+    },
+    {
+      "label": "host: run active file",
+      "type": "process",
+      "command": "${workspaceFolder}/build_host/${fileBasenameNoExtension}",
+      "args": [],
+      "group": "test",
+      "problemMatcher": [],
+      "dependsOn": ["host: build active file"],
+      "windows": {
+        "command": "${workspaceFolder}/build_host/${fileBasenameNoExtension}.exe"
       }
     }
   ]
