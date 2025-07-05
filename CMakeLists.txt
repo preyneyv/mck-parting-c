@@ -32,7 +32,7 @@ add_subdirectory(lib/u8g2)
 
 # --- shared lib ---
 set(SHARED_SOURCES
-    src/shared/audio.c
+    src/shared/audio/buffer.c
     src/shared/display.c
 )
 add_library(shared STATIC ${SHARED_SOURCES})
@@ -40,18 +40,29 @@ target_include_directories(shared PRIVATE ${CMAKE_CURRENT_LIST_DIR}/src)
 target_link_libraries(shared PUBLIC u8g2 m pico_stdlib)
 
 if(PICO_PLATFORM STREQUAL "host")
-    # --- host build (emulated) ---
-    find_package(SDL2 REQUIRED CONFIG REQUIRED COMPONENTS SDL2)
+    # --- host build ---
     add_executable(mck-parting-c
         src/host/main.c
+        src/host/audio.c
         src/host/display.c
     )
+
+    # force-include the host compatibility header
+    target_compile_options(shared PRIVATE -include ${CMAKE_CURRENT_LIST_DIR}/src/host/compat.h)
+    target_compile_options(mck-parting-c PRIVATE -include ${CMAKE_CURRENT_LIST_DIR}/src/host/compat.h)
+    
+
+    find_package(Threads REQUIRED)
+    find_package(SDL2 REQUIRED CONFIG REQUIRED COMPONENTS SDL2)
     target_link_libraries(mck-parting-c PRIVATE
         shared
         SDL2::SDL2
+        Threads::Threads
     )
     target_include_directories(mck-parting-c PRIVATE ${CMAKE_CURRENT_LIST_DIR}/src)
     target_compile_options(mck-parting-c PRIVATE -ffast-math)
+
+
     # file(GLOB U8G2_SYS_SDL "lib/u8g2/sys/sdl/common/*.c")
 
     # --- host executable targets ---

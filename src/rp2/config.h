@@ -14,7 +14,7 @@
 #define DISP_PIN_MOSI 3
 #define DISP_PIN_RST 28
 #define DISP_PIN_DC 29
-#define DISP_SPI_SPEED 100 * 1000 * 1000
+#define DISP_SPI_SPEED 10 * 1000 * 1000
 
 //// AUDIO CONFIGURATION ////
 #define AUDIO_DAC_PIN 26

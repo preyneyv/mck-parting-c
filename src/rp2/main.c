@@ -38,7 +38,10 @@ void core0_main() {
   uint32_t i = 0;
 
   u8g2_t *u8g2 = display_get_u8g2(&display);
+  // while (1) {
+  // }
   while (1) {
+    printf("frame...\n");
     ti_start(&ti_tick);
     i = (i + 1) % DISP_PIX;
     uint8_t x = i % DISP_WIDTH;
@@ -82,7 +85,9 @@ void core0_main() {
 
 void core1_main() {
   // todo: audio, synth init
+  audio_init();
   while (1) {
+    synth_fill_buffers();
     __wfi();
   }
 }
@@ -90,11 +95,16 @@ void core1_main() {
 int main() {
   stdio_init_all();
   // set clock for audio PWM reasons
-  set_sys_clock_khz(SYS_CLOCK_KHZ, true);
+  // set_sys_clock_khz(SYS_CLOCK_KHZ, true);
 
-  // kick off audio core
-  multicore_reset_core1();
-  multicore_launch_core1(core1_main);
+  // while (1) {
+
+  //   printf("Starting MCK Parting C...\n");
+  // }
+
+  // // kick off audio core
+  // multicore_reset_core1();
+  // multicore_launch_core1(core1_main);
 
   // kick off main core
   core0_main();

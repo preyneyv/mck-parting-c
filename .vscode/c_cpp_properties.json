@@ -6,10 +6,10 @@
         "${workspaceFolder}/src",
         "${workspaceFolder}/lib/u8g2/csrc"
       ],
-      // "forcedInclude": [
-      //   "${userHome}/.pico-sdk/sdk/2.1.1/src/common/pico_base_headers/include/pico.h",
-      //   "${workspaceFolder}/build/generated/pico_base/pico/config_autogen.h"
-      // ],
+      "forcedInclude": [
+        "${userHome}/.pico-sdk/sdk/2.1.1/src/common/pico_base_headers/include/pico.h",
+        "${workspaceFolder}/build/generated/pico_base/pico/config_autogen.h"
+      ],
       "defines": [],
       "compileCommands": [
         "${workspaceFolder}/build/compile_commands.json",

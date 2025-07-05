@@ -13,6 +13,17 @@
       }
     },
     {
+      "label": "Compile Project",
+      "type": "process",
+      "command": "${userHome}/.pico-sdk/ninja/v1.12.1/ninja",
+      "args": ["-C", "${workspaceFolder}/build"],
+      "group": "build",
+      "problemMatcher": "$gcc",
+      "windows": {
+        "command": "${env:USERPROFILE}/.pico-sdk/ninja/v1.12.1/ninja.exe"
+      }
+    },
+    {
       "label": "rp2: bootsel",
       "type": "process",
       "command": "${env:HOME}/.pico-sdk/picotool/2.1.1/picotool/picotool",
@@ -73,7 +84,7 @@
         "kind": "build",
         "isDefault": true
       },
-      "problemMatcher": [],
+      "problemMatcher": "$gcc",
       "dependsOn": ["host: compile"],
       "windows": {
         "command": "${workspaceFolder}/build_host/mck-parting-c.exe"
