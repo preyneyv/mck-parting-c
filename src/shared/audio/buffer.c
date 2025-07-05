@@ -163,7 +163,7 @@ void audio_buffer_pool_commit_read(audio_buffer_pool_t *pool) {
 //     uint32_t sys_clk_hz = clock_get_hz(clk_sys);
 //     float f_isr = sys_clk_hz / (clk_div * wrap);
 //     SAMPLE_REPEAT_SHIFT = (uint8_t)round(log2(f_isr /
-//     AUDIO_DAC_SAMPLE_RATE));
+//     AUDIO_SAMPLE_RATE));
 
 //     gpio_set_function(AUDIO_DAC_PIN, GPIO_FUNC_PWM);
 
@@ -188,7 +188,7 @@ void audio_buffer_pool_commit_read(audio_buffer_pool_t *pool) {
 
 // float note_phase = 0.0f;
 // float vibr_phase = 0.0f;
-// float d_vibr_phase = vibr_hz / AUDIO_DAC_SAMPLE_RATE;
+// float d_vibr_phase = vibr_hz / AUDIO_SAMPLE_RATE;
 
 // static inline float add_cents(float freq, float cents)
 // {
@@ -214,7 +214,7 @@ void audio_buffer_pool_commit_read(audio_buffer_pool_t *pool) {
 //         inst_freq = add_cents(note_hz, vibr_lfo * vibr_depth);
 //     }
 
-//     note_phase = incr_wrap(note_phase, inst_freq / AUDIO_DAC_SAMPLE_RATE);
+//     note_phase = incr_wrap(note_phase, inst_freq / AUDIO_SAMPLE_RATE);
 //     vibr_phase = incr_wrap(vibr_phase, d_vibr_phase);
 
 //     // Return sample from lookup table
