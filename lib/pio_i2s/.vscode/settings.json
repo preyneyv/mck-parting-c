@@ -42,15 +42,10 @@
     ".env": "plaintext",
     "*.pyde": "python",
     "*.css": "tailwindcss",
-    "stdlib.h": "c",
-    "pwm.h": "c",
-    "irq.h": "c",
-    "clocks.h": "c",
-    "sample.h": "c",
-    "sync.h": "c",
-    "multicore.h": "c",
-    "audio_i2s.h": "c",
-    "audio.h": "c",
-    "stdio.h": "c"
+    "i2s.h": "c",
+    "stdio.h": "c",
+    "i2s.pio.h": "c",
+    "pio.h": "c",
+    "i2c.h": "c"
   }
 }

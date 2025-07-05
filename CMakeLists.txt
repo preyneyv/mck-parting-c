@@ -24,9 +24,10 @@ if (EXISTS ${picoVscode})
 endif()
 # ====================================================================================
 set(PICO_BOARD pico CACHE STRING "Board type")
-
+set(PICO_EXTRAS_FETCH_FROM_GIT ON)
 # Pull in Raspberry Pi Pico SDK (must be before project)
 include(pico_sdk_import.cmake)
+include(pico_extras_import.cmake)
 
 project(mck-parting-c C CXX ASM)
 
@@ -53,6 +54,8 @@ pico_enable_stdio_usb(mck-parting-c 1)
 target_link_libraries(mck-parting-c
         pico_stdlib
         pico_multicore
+        pico_audio
+        pico_audio_i2s
         hardware_spi
         hardware_pwm
         m
