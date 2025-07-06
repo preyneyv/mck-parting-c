@@ -4,89 +4,29 @@
 #include "audio.h"
 #include "config.h"
 #include "math.h"
+#include "time.h"
 #include <shared/utils/timing.h>
 
 static audio_buffer_pool_t pool;
 
-static void write_sample(char *ptr, double sample) {
-  int16_t *buf = (int16_t *)ptr;
-  double range = (double)INT16_MAX - (double)INT16_MIN;
-  double val = sample * range / 2.0;
-  *buf = val;
-  printf("  write_sample: %.2f -> %d\n", sample, (int16_t)val);
-}
-
-static const double PI = 3.14159265358979323846264338328;
-static double seconds_offset = 0.0;
-
-static void do_sample(struct SoundIoOutStream *outstream, int frame_count_min,
-                      int frame_count_max) {
-  double float_sample_rate = outstream->sample_rate;
-  double seconds_per_frame = 1.0 / float_sample_rate;
-  struct SoundIoChannelArea *areas;
-  int err;
-  int frames_left = frame_count_max;
-  for (;;) {
-    int frame_count = frames_left;
-    if ((err =
-             soundio_outstream_begin_write(outstream, &areas, &frame_count))) {
-      fprintf(stderr, "unrecoverable stream error when start: %s\n",
-              soundio_strerror(err));
-      exit(1);
-    }
-    if (!frame_count)
-      break;
-    const struct SoundIoChannelLayout *layout = &outstream->layout;
-    double pitch = 440.0;
-    double radians_per_second = pitch * 2.0 * PI;
-    for (int frame = 0; frame < frame_count; frame += 1) {
-      double sample = sin((seconds_offset + frame * seconds_per_frame) *
-                          radians_per_second);
-      printf("sample %d: %.2f\n", frame, sample);
-      for (int channel = 0; channel < layout->channel_count; channel += 1) {
-        write_sample(areas[channel].ptr, sample);
-        areas[channel].ptr += areas[channel].step;
-      }
-    }
-    seconds_offset =
-        fmod(seconds_offset + seconds_per_frame * frame_count, 1.0);
-    if ((err = soundio_outstream_end_write(outstream))) {
-      if (err == SoundIoErrorUnderflow)
-        return;
-      fprintf(stderr, "unrecoverable stream error when end: %s\n",
-              soundio_strerror(err));
-      exit(1);
-    }
-    frames_left -= frame_count;
-    if (frames_left <= 0)
-      break;
-  }
-}
-
-TimingInstrumenter ti_audio_playback;
-
-static inline void _write_frames_from_buffer(struct SoundIoChannelArea *areas,
+static inline void _write_frames_from_buffer(struct SoundIoChannelArea **areas,
                                              int frame_count,
                                              uint32_t *buffer) {
+
   for (int index = 0; index < frame_count; index++) {
     uint32_t frame = buffer[index];
     int16_t left = ((frame >> 16) & 0xFFFF);
-    int16_t right = (frame & 0xFFFF);
 
-    int16_t *buf = (int16_t *)(areas[0].ptr);
+    int16_t *buf = (int16_t *)((*areas)[0].ptr);
     *buf = left;
 
-    buf = (int16_t *)(areas[1].ptr);
-    *buf = right;
-    areas[0].ptr += areas[0].step;
-    areas[1].ptr += areas[1].step;
+    (*areas)[0].ptr += (*areas)[0].step;
   }
 }
 
 static void audio_playback_write_callback(struct SoundIoOutStream *outstream,
                                           int frame_count_min,
                                           int frame_count_max) {
-  ti_start(&ti_audio_playback);
   int err;
   static uint32_t *buffer = NULL;
   static uint32_t unconsumed_frames = 0;
@@ -124,27 +64,25 @@ static void audio_playback_write_callback(struct SoundIoOutStream *outstream,
     }
     if (!frame_count)
       break;
-    // printf("writing %d frames\n", frame_count);
 
     frames_left -= frame_count;
-
-    printf("\npre: frames_left: %d, frame_count: %d\n", frames_left,
-           frame_count);
 
     if (buffer != NULL) {
       // printf("using leftover\n");
       // write as many as we can from the previous buffer.
       int frames_to_write = MIN(frame_count, unconsumed_frames);
-      _write_frames_from_buffer(areas, frames_to_write, buffer);
+      _write_frames_from_buffer(&areas, frames_to_write, buffer);
       frame_count -= frames_to_write;
       unconsumed_frames -= frames_to_write;
       if (unconsumed_frames == 0) {
         // we have consumed all frames from the previous buffer.
         audio_buffer_pool_commit_read(&pool);
         buffer = NULL;
+      } else {
+        // store partial buffer for next iteration
+        buffer += frames_to_write;
       }
     }
-    printf("lft: frames_left: %d, frame_count: %d\n", frames_left, frame_count);
 
     while (frame_count > 0) {
       // acquire a new buffer from the pool
@@ -155,22 +93,23 @@ static void audio_playback_write_callback(struct SoundIoOutStream *outstream,
 
       // we have a new buffer, write as many frames as we can
       int frames_to_write = MIN(frame_count, pool.buffer_size);
-      _write_frames_from_buffer(areas, frames_to_write, buffer);
+      _write_frames_from_buffer(&areas, frames_to_write, buffer);
       frame_count -= frames_to_write;
       unconsumed_frames = pool.buffer_size - frames_to_write;
       if (unconsumed_frames == 0) {
         // we have consumed all frames from the new buffer.
         audio_buffer_pool_commit_read(&pool);
         buffer = NULL;
+      } else {
+        // store partial buffer for next iteration
+        buffer += frames_to_write;
       }
     }
-    printf("end: frames_left: %d, frame_count: %d\n", frames_left, frame_count);
 
     if ((err = soundio_outstream_end_write(outstream))) {
       panic("unrecoverable stream error when end: %s", soundio_strerror(err));
     }
   }
-  ti_stop(&ti_audio_playback);
 }
 
 static void
@@ -208,9 +147,9 @@ static void audio_playback_main() {
   struct SoundIoOutStream *outstream = soundio_outstream_create(device);
   outstream->format = SoundIoFormatS16NE;
   outstream->sample_rate = AUDIO_SAMPLE_RATE;
+  // outstream->layout = *soundio_channel_layout_get_default(1);
 
   outstream->name = PROJECT_NAME;
-  outstream->write_callback = do_sample;
   outstream->write_callback = audio_playback_write_callback;
   outstream->underflow_callback = audio_playback_underflow_callback;
   outstream->software_latency = 0.0;
@@ -234,8 +173,6 @@ static void audio_playback_main() {
 }
 
 void audio_init() {
-  // audio_playback_main();
-  // return;
   audio_buffer_pool_init(&pool, AUDIO_BUFFER_POOL_SIZE, AUDIO_BUFFER_SIZE);
 
   pthread_t audio_playback;
@@ -245,41 +182,25 @@ void audio_init() {
   double float_sample_rate = AUDIO_SAMPLE_RATE;
   double seconds_per_frame = 1.0 / float_sample_rate;
   double pitch = 440.0;
-  double rads_per_second = pitch * 2.0 * PI;
+  double rads_per_second = pitch * 2.0 * M_PI;
 
-  TimingInstrumenter ti_synth;
-
+  double seconds_offset = 0.0;
   int i = 0;
   while (true) {
-    uint32_t *buf = audio_buffer_pool_acquire_write(&pool, false);
-    if (buf) {
+    uint32_t *buf = audio_buffer_pool_acquire_write(&pool, true);
 
-      ti_start(&ti_synth);
-      for (int frame = 0; frame < pool.buffer_size; frame++) {
-        float sample = sinf((seconds_offset + frame * seconds_per_frame) *
-                            rads_per_second);
-        double value =
-            (uint16_t)(sample * ((double)INT16_MAX - (double)INT16_MIN) / 2.0);
-        uint16_t intval = (uint16_t)value;
-        buf[frame] = ((uint32_t)intval << 16) | (intval);
-        // printf("sample %d: %.2f %04x  %d  %08x\n", frame, sample,
-        //        (uint16_t)value, value, (uint32_t)buf[frame]);
-      }
-      ti_stop(&ti_synth);
-      audio_buffer_pool_commit_write(&pool);
-      seconds_offset =
-          fmod(seconds_offset + seconds_per_frame * pool.buffer_size, 1.0);
-      i++;
-      if (i == 100) {
-        printf("synth: %f ms  | playback: %f ms\n",
-               ti_get_average_ms(&ti_synth, true),
-               ti_get_average_ms(&ti_audio_playback, true));
-        i = 0;
-      }
-    } else {
-      // printf("xd\n");
-      sched_yield();
+    for (int frame = 0; frame < pool.buffer_size; frame++) {
+      float sample =
+          sinf((seconds_offset + frame * seconds_per_frame) * rads_per_second);
+      double value =
+          (uint16_t)(sample * ((double)INT16_MAX - (double)INT16_MIN) / 2.0);
+      uint16_t intval = (uint16_t)value;
+      buf[frame] = ((uint32_t)intval << 16) | (intval);
     }
+    audio_buffer_pool_commit_write(&pool);
+    seconds_offset =
+        fmod(seconds_offset + seconds_per_frame * pool.buffer_size, 1.0);
+    i++;
   }
 
   pthread_join(audio_playback, NULL);
