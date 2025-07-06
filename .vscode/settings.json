@@ -45,6 +45,15 @@
     "*.h": "c",
     "*.c": "c",
     "cstdint": "c",
-    "cstdlib": "c"
+    "cstdlib": "c",
+    "bitset": "c",
+    "chrono": "c",
+    "string_view": "c",
+    "algorithm": "c",
+    "random": "c",
+    "format": "c",
+    "istream": "c",
+    "limits": "c",
+    "numeric": "c"
   }
 }

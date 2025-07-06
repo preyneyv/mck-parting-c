@@ -8,12 +8,15 @@
 #include <stdlib.h>
 
 typedef struct {
+  // each sample is ((LEFT << 16) | RIGHT) stereo, S16 per channel
+  // to match MAX98357A's S16 stereo format.
   uint32_t *buffers;
 
-  uint8_t size;
-  uint32_t buffer_size;
+  uint8_t size;         // total number of buffers
+  uint32_t buffer_size; // number of samples per buffer
 
-  uint8_t count;
+  uint8_t count; // number of filled buffers
+
   uint8_t write_head;
   uint8_t read_head;
 } audio_buffer_pool_t;

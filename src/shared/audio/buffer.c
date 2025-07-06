@@ -47,6 +47,19 @@ void audio_buffer_pool_commit_write(audio_buffer_pool_t *pool) {
   pool->count++;
 }
 
+static const double PI = 3.14159265358979323846264338328;
+static double seconds_offset = 0.0;
+const double pitch = 440.0;
+const double radians_per_second = pitch * 2.0 * PI;
+const double seconds_per_frame = 1.0 / 24000.0;
+
+// static double next_sample() {
+//   double sample =
+//       sin((seconds_offset + seconds_per_frame) * radians_per_second);
+//   seconds_offset = fmod(seconds_offset + seconds_per_frame, 1.0);
+//   return sample;
+// }
+
 uint32_t *audio_buffer_pool_acquire_read(audio_buffer_pool_t *pool,
                                          bool blocking) {
   while (true) {
@@ -61,6 +74,14 @@ uint32_t *audio_buffer_pool_acquire_read(audio_buffer_pool_t *pool,
     }
 
     uint32_t *buf = pool->buffers + (pool->read_head * pool->buffer_size);
+    // for (int i = 0; i < pool->buffer_size; i++) {
+    //   double sample = next_sample();
+    //   int16_t value = (int16_t)(sample * INT16_MAX);
+    //   buf[i] = (value << 16) | (value); // stereo S16 format
+    //   // printf("sample %d: %.2f %04x  %d\n", i, sample, (uint16_t)value,
+    //   value);
+    // }
+
     return buf;
   }
 }

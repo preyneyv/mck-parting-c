@@ -5,7 +5,7 @@
 #include <shared/config.h>
 
 //// SYSTEM CONFIGURATION ////
-#define SYS_CLOCK_KHZ 176000
+#define SYS_CLOCK_KHZ 132000
 
 //// DISPLAY CONFIGURATION ////
 #define DISP_SPI_PORT spi0
@@ -17,8 +17,4 @@
 #define DISP_SPI_SPEED 10 * 1000 * 1000
 
 //// AUDIO CONFIGURATION ////
-#define AUDIO_DAC_PIN 26
-#define AUDIO_DAC_SAMPLE_RATE 22000
-#if SYS_CLOCK_KHZ % AUDIO_DAC_SAMPLE_RATE != 0
-#error "AUDIO_DAC_SAMPLE_RATE is not a divisor of SYS_CLOCK_KHZ"
-#endif
+// TODO i2s

@@ -5,6 +5,7 @@
 #include <SDL.h>
 #include <u8g2.h>
 
+#include "config.h"
 #include "display.h"
 
 const uint8_t RES_MULT = 3;
@@ -47,7 +48,7 @@ static inline void _display_cb_display_init(u8x8_t *u8x8) {
   render_height = pixel_height * RES_MULT;
 
   SDL_Init(SDL_INIT_VIDEO);
-  window = SDL_CreateWindow("Screen", SDL_WINDOWPOS_UNDEFINED,
+  window = SDL_CreateWindow(PROJECT_NAME, SDL_WINDOWPOS_UNDEFINED,
                             SDL_WINDOWPOS_UNDEFINED, render_width,
                             render_height, SDL_WINDOW_SHOWN);
   renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED);
