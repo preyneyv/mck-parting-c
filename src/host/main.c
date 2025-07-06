@@ -36,7 +36,7 @@ static void inline handle_sdl_events() {
 
 int main() {
   display_init(&display);
-  // audio_thread_main();
+
   pthread_t audio_thread;
   pthread_create(&audio_thread, NULL, audio_thread_main, NULL);
 

@@ -12,15 +12,18 @@ static audio_buffer_pool_t pool;
 static inline void _write_frames_from_buffer(struct SoundIoChannelArea **areas,
                                              int frame_count,
                                              uint32_t *buffer) {
-
   for (int index = 0; index < frame_count; index++) {
     uint32_t frame = buffer[index];
     int16_t left = ((frame >> 16) & 0xFFFF);
+    int16_t right = (frame & 0xFFFF);
 
     int16_t *buf = (int16_t *)((*areas)[0].ptr);
     *buf = left;
-
     (*areas)[0].ptr += (*areas)[0].step;
+
+    buf = (int16_t *)((*areas)[1].ptr);
+    *buf = right;
+    (*areas)[1].ptr += (*areas)[1].step;
   }
 }
 
@@ -117,6 +120,7 @@ audio_playback_underflow_callback(struct SoundIoOutStream *outstream) {
   fprintf(stderr, "Audio underflow occurred\n");
 }
 
+// this will be handled by DMA + PIO on device.
 static void audio_playback_main() {
   int err;
   struct SoundIo *soundio = soundio_create();
@@ -164,14 +168,16 @@ static void audio_playback_main() {
     return;
   }
 
-  while (true)
+  while (true) {
     soundio_wait_events(soundio);
+  }
 
   soundio_outstream_destroy(outstream);
   soundio_device_unref(device);
   soundio_destroy(soundio);
 }
 
+// this will be called on core1 on device.
 void audio_init() {
   audio_buffer_pool_init(&pool, AUDIO_BUFFER_POOL_SIZE, AUDIO_BUFFER_SIZE);
 
