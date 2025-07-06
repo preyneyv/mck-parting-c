@@ -33,6 +33,7 @@ add_subdirectory(lib/u8g2)
 # --- shared lib ---
 set(SHARED_SOURCES
     src/shared/audio/buffer.c
+    src/shared/audio/synth.c
     src/shared/display.c
 )
 add_library(shared STATIC ${SHARED_SOURCES})

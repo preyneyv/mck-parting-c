@@ -54,6 +54,9 @@
     "format": "c",
     "istream": "c",
     "limits": "c",
-    "numeric": "c"
+    "numeric": "c",
+    "cmath": "c",
+    "ratio": "c",
+    "cinttypes": "c"
   }
 }

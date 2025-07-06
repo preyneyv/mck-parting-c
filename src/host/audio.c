@@ -1,11 +1,16 @@
+#include <stdio.h>
+
 #include <pthread.h>
 #include <soundio/soundio.h>
+
+#include <shared/audio/buffer.h>
+#include <shared/audio/synth.h>
+#include <shared/utils/timing.h>
 
 #include "audio.h"
 #include "config.h"
 #include "math.h"
 #include "time.h"
-#include <shared/utils/timing.h>
 
 static audio_buffer_pool_t pool;
 
@@ -48,7 +53,7 @@ static void audio_playback_write_callback(struct SoundIoOutStream *outstream,
 
   if (frames_left < frame_count_min) {
     // not enough frames to write, lets just wait for more frames
-    printf("not enough frames to write, waiting for more\n");
+    printf("audio underflow\n");
     return;
   }
   if (frames_left > frame_count_max) {
@@ -184,29 +189,51 @@ void audio_init() {
   pthread_t audio_playback;
   pthread_create(&audio_playback, NULL, (void *)audio_playback_main, NULL);
 
-  // start synth thread
-  double float_sample_rate = AUDIO_SAMPLE_RATE;
-  double seconds_per_frame = 1.0 / float_sample_rate;
-  double pitch = 440.0;
-  double rads_per_second = pitch * 2.0 * M_PI;
+  // // start synth thread
+  // double float_sample_rate = AUDIO_SAMPLE_RATE;
+  // double seconds_per_frame = 1.0 / float_sample_rate;
+  // double pitch = 440.0;
+  // double rads_per_second = pitch * 2.0 * M_PI;
 
-  double seconds_offset = 0.0;
+  // double seconds_offset = 0.0;
+  // int i = 0;
+  // while (true) {
+  //   uint32_t *buf = audio_buffer_pool_acquire_write(&pool, true);
+
+  //   for (int frame = 0; frame < pool.buffer_size; frame++) {
+  //     float sample =
+  //         sinf((seconds_offset + frame * seconds_per_frame) *
+  //         rads_per_second);
+  //     double value =
+  //         (uint16_t)(sample * ((double)INT16_MAX - (double)INT16_MIN) / 2.0);
+  //     uint16_t intval = (uint16_t)value;
+  //     buf[frame] = ((uint32_t)intval << 16) | (intval);
+  //   }
+  //   audio_buffer_pool_commit_write(&pool);
+  //   seconds_offset =
+  //       fmod(seconds_offset + seconds_per_frame * pool.buffer_size, 1.0);
+  //   i++;
+  // }
+
+  TimingInstrumenter ti_synth;
+
+  audio_synth_t synth;
+  audio_synth_init(&synth, AUDIO_SAMPLE_RATE);
+  audio_synth_voice_set_freq(&synth.voices[0], 440.0f);
+
   int i = 0;
   while (true) {
-    uint32_t *buf = audio_buffer_pool_acquire_write(&pool, true);
-
-    for (int frame = 0; frame < pool.buffer_size; frame++) {
-      float sample =
-          sinf((seconds_offset + frame * seconds_per_frame) * rads_per_second);
-      double value =
-          (uint16_t)(sample * ((double)INT16_MAX - (double)INT16_MIN) / 2.0);
-      uint16_t intval = (uint16_t)value;
-      buf[frame] = ((uint32_t)intval << 16) | (intval);
-    }
+    audio_buffer_t buffer = audio_buffer_pool_acquire_write(&pool, true);
+    ti_start(&ti_synth);
+    audio_synth_fill_buffer(&synth, buffer, pool.buffer_size);
+    ti_stop(&ti_synth);
     audio_buffer_pool_commit_write(&pool);
-    seconds_offset =
-        fmod(seconds_offset + seconds_per_frame * pool.buffer_size, 1.0);
-    i++;
+
+    i += 1;
+    if (i > 100) {
+      i -= 100;
+      printf("synth: %f ms\n", ti_get_average_ms(&ti_synth, true));
+    }
   }
 
   pthread_join(audio_playback, NULL);

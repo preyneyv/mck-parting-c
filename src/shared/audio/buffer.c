@@ -1,3 +1,8 @@
+#include <stdio.h>
+#include <stdlib.h>
+
+#include <pico/stdlib.h>
+
 #include "buffer.h"
 
 void audio_buffer_pool_init(audio_buffer_pool_t *pool, uint8_t size,
