@@ -18,11 +18,22 @@
 
 #include <shared/utils/timing.h>
 
-#include "audio.h"
+// #include "audio.h"
 #include "config.h"
 #include "display.h"
 
 display_t display;
+
+void core1_main() {
+  // audio_init(&synth);
+  // audio_synth_voice_t *voice = &synth.voices[0];
+  // audio_synth_operator_t *op = &voice->ops[0];
+  // audio_synth_operator_set_freq(op, 440.0f);
+  // while (1) {
+  //   audio_synth_fill_buffer(&synth, AUDIO_BUFFER_DEFAULT, AUDIO_BUFFER_SIZE);
+  //   sleep_ms(100);
+  // }
+}
 
 void core0_main() {
   display_init(&display);
@@ -38,10 +49,8 @@ void core0_main() {
   uint32_t i = 0;
 
   u8g2_t *u8g2 = display_get_u8g2(&display);
-  // while (1) {
-  // }
   while (1) {
-    printf("frame...\n");
+    // handle_sdl_events();
     ti_start(&ti_tick);
     i = (i + 1) % DISP_PIX;
     uint8_t x = i % DISP_WIDTH;
@@ -51,6 +60,8 @@ void core0_main() {
     u8g2_ClearBuffer(u8g2);
     u8g2_SetDrawColor(u8g2, 0);
     u8g2_DrawBox(u8g2, 0, 0, 128, 64);
+    u8g2_SetDrawColor(u8g2, 1);
+    u8g2_DrawBox(u8g2, 10, 10, 20, 20);
 
     u8g2_SetDrawColor(u8g2, 1);
     u8g2_DrawPixel(u8g2, x, y); // pixel that scans L to R, T to B
@@ -83,29 +94,16 @@ void core0_main() {
   }
 }
 
-void core1_main() {
-  // todo: audio, synth init
-  audio_init();
-  while (1) {
-    synth_fill_buffers();
-    __wfi();
-  }
-}
-
 int main() {
   stdio_init_all();
   // set clock for audio PWM reasons
   // set_sys_clock_khz(SYS_CLOCK_KHZ, true);
 
-  // while (1) {
-
-  //   printf("Starting MCK Parting C...\n");
-  // }
-
-  // // kick off audio core
-  // multicore_reset_core1();
-  // multicore_launch_core1(core1_main);
+  // kick off audio core
+  multicore_reset_core1();
+  multicore_launch_core1(core1_main);
 
   // kick off main core
   core0_main();
+  return 0;
 }

@@ -15,7 +15,7 @@
 display_t display;
 audio_synth_t synth;
 
-void *audio_thread_main() { audio_init(&synth); }
+void *audio_thread_main() { audio_init(); }
 
 static void inline handle_sdl_events() {
   static SDL_Event event;
@@ -29,10 +29,10 @@ static void inline handle_sdl_events() {
 }
 
 int main() {
-  display_init(&display);
-
   pthread_t audio_thread;
   pthread_create(&audio_thread, NULL, audio_thread_main, NULL);
+
+  display_init(&display);
 
   TimingInstrumenter ti_tick;
   TimingInstrumenter ti_show;

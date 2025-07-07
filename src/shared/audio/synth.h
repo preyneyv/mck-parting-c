@@ -61,6 +61,7 @@ typedef struct audio_synth_voice_t {
 
 typedef struct audio_synth_t {
   float sample_rate;
+  q1x15 master_level;
   audio_synth_voice_t voices[AUDIO_SYNTH_VOICE_COUNT];
 } audio_synth_t;
 

@@ -115,8 +115,7 @@ void audio_synth_voice_fill_buffer(audio_synth_voice_t *voice, q1x15 *buffer,
   }
 }
 
-static inline void draft_merge_clip(q1x15 *out, q1x15 *in,
-                                    uint32_t buffer_size) {
+static inline void _merge_drafts(q1x15 *out, q1x15 *in, uint32_t buffer_size) {
   // add draft to the buffer (hard clip at 1.0/-1.0)
   for (uint32_t i = 0; i < buffer_size; i++) {
     out[i] = q1x15_add(out[i], in[i]);
@@ -138,16 +137,19 @@ void audio_synth_fill_buffer(audio_synth_t *synth, audio_buffer_t buffer,
     }
   }
 
+  // fill buffer with voices
   audio_synth_voice_fill_buffer(&synth->voices[0], draft[0], buffer_size);
   for (uint8_t voice_idx = 1; voice_idx < AUDIO_SYNTH_VOICE_COUNT;
        voice_idx++) {
     audio_synth_voice_fill_buffer(&synth->voices[voice_idx], draft[1],
                                   buffer_size);
-    draft_merge_clip(draft[0], draft[1], buffer_size);
+    _merge_drafts(draft[0], draft[1], buffer_size);
   }
 
-  // copy the final draft to the output buffer
+  // apply master level and write to output
+  q1x15 master_level = synth->master_level;
   for (uint32_t i = 0; i < buffer_size; i++) {
-    buffer[i] = audio_buffer_frame_from_mono((int16_t)draft[0][i]);
+    q1x15 sample = q1x15_mul(master_level, draft[0][i]);
+    buffer[i] = audio_buffer_frame_from_mono((int16_t)sample);
   }
 }

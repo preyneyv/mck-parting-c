@@ -87,6 +87,6 @@ void display_init(display_t *display) {
   u8g2_t *u8g2 = display_get_u8g2(display);
   u8g2_Setup_ssd1306_128x64_noname_f(u8g2, U8G2_R0, _byte_cb,
                                      _gpio_and_delay_cb);
-  u8g2_InitDisplay(&u8g2);
-  u8g2_SetPowerSave(&u8g2, 0);
+  u8g2_InitDisplay(u8g2);
+  u8g2_SetPowerSave(u8g2, 0);
 }

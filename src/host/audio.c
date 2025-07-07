@@ -219,18 +219,17 @@ void audio_init() {
 
   audio_synth_t synth;
   audio_synth_init(&synth, AUDIO_SAMPLE_RATE);
+  synth.master_level = q1x15_f(0.5f);
 
   synth.voices[0].ops[0].config = (audio_synth_operator_config_t){
       .freq_mult = 12.0f,
       .mode = AUDIO_SYNTH_OP_MODE_ADDITIVE,
-      .level = q1x15_f(.0005f),
-      // .level = Q1X15_ONE,
-      // .level = Q1X15_ZERO,
+      .level = q1x15_f(.05f),
   };
   synth.voices[0].ops[1].config = (audio_synth_operator_config_t){
       .freq_mult = 1.0f,
       .mode = AUDIO_SYNTH_OP_MODE_FREQ_MOD,
-      .level = q1x15_f(.15f),
+      .level = q1x15_f(1.f),
   };
   audio_synth_voice_set_freq(&synth.voices[0], 220.0f); // A4
 
