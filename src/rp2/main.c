@@ -90,9 +90,13 @@ void core0_main() {
 }
 
 int main() {
+  set_sys_clock_hz(SYS_CLOCK_HZ, true);
   stdio_init_all();
+
+  while (!stdio_usb_connected()) {
+    sleep_ms(10);
+  }
   // set clock for audio PWM reasons
-  // set_sys_clock_khz(SYS_CLOCK_KHZ, true);
 
   // kick off audio core
   multicore_reset_core1();

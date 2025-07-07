@@ -108,13 +108,16 @@ else()
     )
     target_link_libraries(mck-parting-c PRIVATE
         shared
-        pico_stdlib
-        pico_multicore
-        hardware_spi
+        hardware_dma
+        hardware_pio
         hardware_pwm
+        hardware_spi
         hardware_sync
+        pico_multicore
+        pico_stdlib
     )
     target_include_directories(mck-parting-c PRIVATE ${CMAKE_CURRENT_LIST_DIR}/src)
+    pico_generate_pio_header(mck-parting-c ${CMAKE_CURRENT_LIST_DIR}/src/rp2/audio.pio)
     target_compile_options(mck-parting-c PRIVATE -ffast-math)
 
 

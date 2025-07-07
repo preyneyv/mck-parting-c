@@ -1,176 +1,112 @@
-// #include "audio.h"
-
-// #include <math.h>
-// #include <stdio.h>
-
-// #include <hardware/clocks.h>
-// #include <hardware/irq.h>
-// #include <hardware/pwm.h>
-// #include <hardware/sync.h>
-// #include <pico/stdlib.h>
-
-// #define BUFFER_SIZE 256
-// #define HALF_BUFFER_SIZE (BUFFER_SIZE / 2)
-
-// uint8_t audio_buffer[BUFFER_SIZE];
-// volatile int buffer_position = 0;
-// volatile bool need_fill_first_half = false;
-// volatile bool need_fill_second_half = false;
-
-// int AUDIO_PIN_SLICE = -1;
-// int SAMPLE_REPEAT_SHIFT = 3;
-
-// // Sine lookup table
-// #define SIN_LUT_SIZE 1024
-// static float sin_lut[SIN_LUT_SIZE];
-
-// // Exponential lookup table for 2^x over x in [-0.5, 0.5]
-// #define EXP_LUT_SIZE 128
-// static float exp_lut[EXP_LUT_SIZE];
-// #define INV_1200F (1.0f / 1200.0f)
-
-// // Fast sine lookup (phase in [0,1))
-// static inline float f_sin(float phase) {
-//   int idx = (int)(phase * SIN_LUT_SIZE) & (SIN_LUT_SIZE - 1);
-//   return sin_lut[idx];
-// }
-
-// static inline float f_exp(float x) {
-//   // clamp to LUT range
-//   if (x < -0.5f)
-//     x = -0.5f;
-//   else if (x > 0.5f)
-//     x = 0.5f;
-//   // map to index
-//   int idx = (int)((x + 0.5f) * (EXP_LUT_SIZE - 1) + 0.5f);
-//   return exp_lut[idx];
-// }
-
-// static void _audio_pwm_wrap_irq_handler() {
-//   int buffer_index = buffer_position >> SAMPLE_REPEAT_SHIFT;
-//   pwm_clear_irq(AUDIO_PIN_SLICE);
-//   pwm_set_gpio_level(AUDIO_DAC_PIN, audio_buffer[buffer_index]);
-
-//   buffer_position++;
-//   buffer_index = buffer_position >> SAMPLE_REPEAT_SHIFT;
-
-//   // Check if we need to fill buffer halves
-//   if (buffer_index == HALF_BUFFER_SIZE) {
-//     need_fill_second_half = true;
-//   } else if (buffer_index >= BUFFER_SIZE) {
-//     buffer_position = 0;
-//     need_fill_first_half = true;
-//   }
-// }
-
-// void audio_init() {
-//   // Initialize sine lookup table
-//   for (int i = 0; i < SIN_LUT_SIZE; i++) {
-//     sin_lut[i] = sinf((float)i / SIN_LUT_SIZE * 2.0f * M_PI);
-//   }
-
-//   // Initialize exponential lookup table
-//   for (int i = 0; i < EXP_LUT_SIZE; i++) {
-//     float x = (float)i / (EXP_LUT_SIZE - 1) - 0.5f; // [-0.5 .. +0.5]
-//     exp_lut[i] = exp2f(x);
-//   }
-
-//   AUDIO_PIN_SLICE = pwm_gpio_to_slice_num(AUDIO_DAC_PIN);
-
-//   float clk_div = 8.0f;
-//   uint16_t wrap = 250;
-
-//   uint32_t sys_clk_hz = clock_get_hz(clk_sys);
-//   float f_isr = sys_clk_hz / (clk_div * wrap);
-//   SAMPLE_REPEAT_SHIFT = (uint8_t)round(log2(f_isr / AUDIO_SAMPLE_RATE));
-
-//   gpio_set_function(AUDIO_DAC_PIN, GPIO_FUNC_PWM);
-
-//   pwm_clear_irq(AUDIO_PIN_SLICE);
-//   pwm_set_irq_enabled(AUDIO_PIN_SLICE, true);
-
-//   irq_set_exclusive_handler(PWM_IRQ_WRAP, _audio_pwm_wrap_irq_handler);
-//   irq_set_enabled(PWM_IRQ_WRAP, true);
-
-//   pwm_config config = pwm_get_default_config();
-//   pwm_config_set_clkdiv(&config, clk_div);
-//   pwm_config_set_wrap(&config, wrap);
-//   pwm_init(AUDIO_PIN_SLICE, &config, true);
-
-//   pwm_set_gpio_level(AUDIO_DAC_PIN, 0);
-// }
-
-// // Synthesis parameters
-// const float note_hz = 440.0f;
-// const float vibr_hz = 0.2f;
-// const float vibr_depth = 500.0f;
-
-// float note_phase = 0.0f;
-// float vibr_phase = 0.0f;
-// float d_vibr_phase = vibr_hz / AUDIO_SAMPLE_RATE;
-
-// static inline float add_cents(float freq, float cents) {
-//   float x = cents * INV_1200F;
-//   return freq * f_exp(x);
-// }
-
-// inline float incr_wrap(float value, float inc) {
-//   value += inc;
-//   if (value >= 1.0f)
-//     value -= 1.0f;
-//   return value;
-// }
-
-// static inline float _get_sample() {
-//   float inst_freq = note_hz;
-//   if (vibr_hz > 0.0f) {
-//     // Use lookup table for vibrato LFO
-//     float vibr_lfo = f_sin(vibr_phase);
-//     inst_freq = add_cents(note_hz, vibr_lfo * vibr_depth);
-//   }
-
-//   note_phase = incr_wrap(note_phase, inst_freq / AUDIO_SAMPLE_RATE);
-//   vibr_phase = incr_wrap(vibr_phase, d_vibr_phase);
-
-//   // Return sample from lookup table
-//   return f_sin(note_phase);
-// }
-
-// // Synthesis function - generates audio samples
-// static void _synth_fill_buffer_half(uint8_t *buffer_start) {
-//   for (int i = 0; i < HALF_BUFFER_SIZE; i++) {
-//     buffer_start[i] = (uint8_t)((_get_sample() + 1.0f) * 125.0f);
-//   }
-// }
-
-// void synth_fill_buffers() {
-//   // Check if we need to fill buffer halves
-//   if (need_fill_first_half) {
-//     _synth_fill_buffer_half(&audio_buffer[0]);
-//     need_fill_first_half = false;
-//   }
-
-//   if (need_fill_second_half) {
-//     _synth_fill_buffer_half(&audio_buffer[HALF_BUFFER_SIZE]);
-//     need_fill_second_half = false;
-//   }
-// }
-
 #include <stdio.h>
 
-#include "audio.h"
-#include "config.h"
+#include <hardware/dma.h>
+#include <hardware/pio.h>
 
 #include <shared/audio/buffer.h>
 #include <shared/audio/synth.h>
 #include <shared/utils/timing.h>
 
+#include "audio.h"
+#include "audio.pio.h"
+#include "config.h"
+
+// Math for PIO frequency calculations
+static const uint32_t BCLK_HZ =
+    AUDIO_SAMPLE_RATE * AUDIO_BIT_DEPTH * 2; // 2 channels
+static const uint32_t LRCK_HZ = AUDIO_SAMPLE_RATE;
+static const uint32_t SM_BCLK = 2 * BCLK_HZ; // 2 clocks per bit
+
+static const uint32_t SM_CLKDIV_INT = SYS_CLOCK_HZ / SM_BCLK;
+static const uint32_t SM_CLKDIV_FRAC = (SYS_CLOCK_HZ % SM_BCLK) * 256 / SM_BCLK;
+
+// Shared state
+static const uint32_t SILENT_BUFFER[AUDIO_BUFFER_SIZE] = {0};
 static audio_buffer_pool_t pool;
+int dma_channel;
+
+// initialize pio state machine for i2s
+static void audio_playback_write_pio_init(PIO pio, uint8_t sm) {
+  int offset = pio_add_program(pio, &audio_playback_write_program);
+  if (offset < 0) {
+    panic("Failed to add audio playback write program to PIO");
+  }
+
+  pio_gpio_init(pio, AUDIO_I2S_DOUT);
+  pio_gpio_init(pio, AUDIO_I2S_BCLK);
+  pio_gpio_init(pio, AUDIO_I2S_LRCK);
+
+  pio_sm_config c = audio_playback_write_program_get_default_config(offset);
+  sm_config_set_out_pins(&c, AUDIO_I2S_DOUT, 1);
+  sm_config_set_sideset_pins(&c, AUDIO_I2S_BCLK);
+  sm_config_set_out_shift(&c, false, false, AUDIO_BIT_DEPTH);
+  sm_config_set_fifo_join(&c, PIO_FIFO_JOIN_TX);
+  pio_sm_init(pio, sm, offset, &c);
+
+  uint32_t pins = 0b111 << AUDIO_I2S_DOUT; // DOUT, BCLK, LRCK
+  pio_sm_set_pins_with_mask(pio, sm, 0, pins);
+  pio_sm_set_pindirs_with_mask(pio, sm, pins, pins);
+
+  pio_sm_set_clkdiv_int_frac8(pio, sm, SM_CLKDIV_INT, SM_CLKDIV_FRAC);
+  pio_sm_set_enabled(pio, sm, true);
+
+  printf("pio sm %d clkdiv: %f\n", sm, SM_CLKDIV_INT + SM_CLKDIV_FRAC / 256.0);
+}
+
+static void __isr audio_playback_write_dma_irq_handler(void) {
+  // clear the interrupt
+  dma_hw->ints0 = 1u << dma_channel;
+
+  static bool using_pool_buffer = false;
+
+  if (using_pool_buffer) {
+    // return borrowed buffer to pool
+    audio_buffer_pool_commit_read(&pool);
+  }
+  // get next buffer if available, otherwise use silent buffer
+  audio_buffer_t next_buffer = audio_buffer_pool_acquire_read(&pool, false);
+  if (next_buffer == NULL) {
+    // no buffer available, use silent buffer
+    dma_channel_set_read_addr(dma_channel, SILENT_BUFFER, true);
+    using_pool_buffer = false;
+  } else {
+    dma_channel_set_read_addr(dma_channel, next_buffer, true);
+    using_pool_buffer = true;
+  }
+}
+
+// initialize dma for copying into pio tx fifo
+static void audio_playback_write_dma_init(PIO pio, uint8_t sm) {
+  dma_channel = dma_claim_unused_channel(true);
+  dma_channel_config c = dma_channel_get_default_config(dma_channel);
+  channel_config_set_transfer_data_size(&c, DMA_SIZE_32);
+  channel_config_set_dreq(&c, pio_get_dreq(pio, sm, true));
+  channel_config_set_read_increment(&c, true);
+  channel_config_set_write_increment(&c, false);
+
+  // read from silent buffer first (will be swapped after first write)
+  dma_channel_configure(dma_channel, &c, &pio->txf[sm], SILENT_BUFFER,
+                        AUDIO_BUFFER_SIZE, false);
+
+  dma_channel_set_irq0_enabled(dma_channel, true);
+  irq_set_exclusive_handler(DMA_IRQ_0, audio_playback_write_dma_irq_handler);
+  irq_set_enabled(DMA_IRQ_0, true);
+
+  dma_channel_start(dma_channel);
+}
+
+// setup DMA and PIO for audio playback
+static void audio_playback_begin() {
+  uint8_t sm = pio_claim_unused_sm(AUDIO_I2S_PIO, true);
+
+  audio_playback_write_pio_init(AUDIO_I2S_PIO, sm);
+  audio_playback_write_dma_init(AUDIO_I2S_PIO, sm);
+}
 
 void audio_init() {
   audio_buffer_pool_init(&pool, AUDIO_BUFFER_POOL_SIZE, AUDIO_BUFFER_SIZE);
 
-  // todo: start pio dma playback
+  audio_playback_begin();
 
   TimingInstrumenter ti_synth;
 
