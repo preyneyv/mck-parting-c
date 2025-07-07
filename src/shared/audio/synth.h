@@ -2,6 +2,10 @@
 // Supports additive and frequency modulation synthesis.
 // Uses fixed-point arithmetic for audio processing to be fast on MCUs.
 
+// todo: synth -> [instrument] -> voice -> operator
+//                   |- add this layer for polyphony.
+//                   |- voices/ops on an instrument have the same parameters.
+
 #pragma once
 
 #include <stdint.h>
@@ -9,6 +13,7 @@
 #include <string.h>
 
 #include <shared/utils/q1x15.h>
+#include <shared/utils/q1x31.h>
 
 #include "buffer.h"
 
@@ -21,6 +26,34 @@ typedef struct audio_synth_t audio_synth_t;
 typedef struct audio_synth_voice_t audio_synth_voice_t;
 
 typedef enum {
+  AUDIO_SYNTH_MESSAGE_NOTE_ON,  // play a note on a voice
+  AUDIO_SYNTH_MESSAGE_NOTE_OFF, // release a voice
+  AUDIO_SYNTH_MESSAGE_PANIC,    // stop all voices
+} audio_synth_message_type_t;
+
+typedef struct audio_synth_message_note_on_t {
+  uint8_t voice;        // voice index (0-3)
+  uint16_t note_number; // MIDI note number (0-127)
+  uint8_t velocity;     // velocity (0-127)
+} audio_synth_message_note_on_t;
+
+typedef struct audio_synth_message_note_off_t {
+  uint8_t voice; // voice index (0-3)
+} audio_synth_message_note_off_t;
+
+typedef struct audio_synth_message_panic_t {
+  // no data for panic
+} audio_synth_message_panic_t;
+typedef struct audio_synth_message_t {
+  audio_synth_message_type_t type;
+  union {
+    audio_synth_message_note_on_t note_on;
+    audio_synth_message_note_off_t note_off;
+    audio_synth_message_panic_t panic;
+  } data;
+} audio_synth_message_t;
+
+typedef enum {
   // add operator to previous output
   AUDIO_SYNTH_OP_MODE_ADDITIVE,
   // use previous output as freq mod input
@@ -31,34 +64,15 @@ typedef enum {
   AUDIO_SYNTH_OP_WAVEFORM_SINE,
 } audio_synth_operator_waveform_t;
 
-typedef struct audio_synth_env_config_stage_t {
-  uint32_t duration; // duration in timebase
-  q1x15 level;       // target level
-  // env curvature?
-} audio_synth_env_config_stage_t;
-
 typedef struct audio_synth_env_config_t {
-  audio_synth_env_config_stage_t a;
-  audio_synth_env_config_stage_t d;
-  audio_synth_env_config_stage_t s;
-  audio_synth_env_config_stage_t r;
+  uint32_t a; // attack duration in timebase
+  uint32_t d; // decay duration in timebase
+  q1x31 s;    // sustain level (0 = pluck)
+  uint32_t r; // release duration in timebase
 } audio_synth_env_config_t;
 
-typedef struct audio_synth_env_state_stage_t {
-  uint32_t duration; // sample count in this stage
-  q1x15 d_level;     // change per sample in this stage
-  q1x15 level;       // target level for this stage
-} audio_synth_env_state_stage_t;
-
-typedef struct audio_synth_env_state_t {
-  q1x15 level;        // current level
-  uint32_t evolution; // evolution in sample count
-  uint8_t stage;      // current stage (0 = A, 1 = D, 2 = S, 3 = R)
-
-} audio_synth_env_state_t;
-
 typedef struct audio_synth_operator_config_t {
-  float freq_mult;                  // frequency multiplier
+  int freq_mult;                    // frequency multiplier (0 = 0.5x, 3 = 3x)
   q1x15 level;                      // output level
   audio_synth_operator_mode_t mode; // operator mode
   audio_synth_env_config_t env;     // envelope config
@@ -66,15 +80,28 @@ typedef struct audio_synth_operator_config_t {
 } audio_synth_operator_config_t;
 
 static const audio_synth_operator_config_t audio_synth_operator_config_default =
-    {.freq_mult = 1.0f,
+    {.freq_mult = 1,
      .level = Q1X15_ZERO,
      .mode = AUDIO_SYNTH_OP_MODE_ADDITIVE,
      .env = {
-         .a = {.duration = 0, .level = Q1X15_ONE},
-         .d = {.duration = 0, .level = Q1X15_ONE},
-         .s = {.duration = 0, .level = Q1X15_ONE},
-         .r = {.duration = 0, .level = Q1X15_ZERO},
+         .a = 0,
+         .d = 0,
+         .s = Q1X31_ONE,
+         .r = 0,
      }};
+
+typedef struct audio_synth_env_state_stage_t {
+  uint32_t duration; // sample count in this stage
+  q1x31 d_level;     // change per sample in this stage
+  q1x31 level;       // target level for this stage
+} audio_synth_env_state_stage_t;
+
+typedef struct audio_synth_env_state_t {
+  q1x31 level;        // current level
+  uint32_t evolution; // evolution in sample count
+  uint8_t stage;      // current stage (0 = A, 1 = D, 2 = S, 3 = R)
+  audio_synth_env_state_stage_t stages[4]; // stages for A, D, 0, R
+} audio_synth_env_state_t;
 
 typedef struct audio_synth_operator_t {
   audio_synth_operator_config_t config;
@@ -83,6 +110,8 @@ typedef struct audio_synth_operator_t {
   uint32_t phase;              // wave phase
   uint32_t d_phase;            // wave increment (derived from freq and mult)
   audio_synth_env_state_t env; // envelope state
+  q1x15 level;                 // output level (after velocity)
+  bool active;                 // is this operator active?
 
   // todo: feedback
   // todo: waveform
@@ -99,23 +128,44 @@ typedef struct audio_synth_voice_t {
 typedef struct audio_synth_t {
   float sample_rate;
   uint32_t note_dphase_lut[128]; // mapping from MIDI note number to d_phase
-  uint32_t d_timebase;           // timebase increment per sample
+  uint32_t d_timebase;           // samples per timebase unit
 
   q1x15 master_level;
 
   audio_synth_voice_t voices[AUDIO_SYNTH_VOICE_COUNT];
 } audio_synth_t;
 
-void audio_synth_init(audio_synth_t *synth, float sample_rate);
+// update operator values based on active config
+// call this after updating operator.config
+void audio_synth_operator_set_config(audio_synth_operator_t *op,
+                                     audio_synth_operator_config_t config);
 
-void audio_synth_operator_fill_buffer(audio_synth_operator_t *op, q1x15 *buffer,
-                                      uint32_t buffer_size);
+// turn on a note for a voice
+void audio_synth_voice_note_on(audio_synth_voice_t *voice, uint16_t note_number,
+                               uint8_t velocity);
+// turn off a note for a voice
+void audio_synth_voice_note_off(audio_synth_voice_t *voice);
+// panic a voice (immediately stop operators)
+void audio_synth_voice_panic(audio_synth_voice_t *voice);
 
-void audio_synth_voice_set_freq(audio_synth_voice_t *voice,
-                                uint16_t note_number);
+// fill a buffer with samples from a voice (internal)
 void audio_synth_voice_fill_buffer(audio_synth_voice_t *voice, q1x15 *buffer,
                                    uint32_t buffer_size);
 
+// initialize the audio synthesizer
+// - sample_rate: sample rate in Hz
+// - timebase: timebase in Hz (1000 = 1000 ticks / second)
+void audio_synth_init(audio_synth_t *synth, float sample_rate,
+                      uint32_t timebase);
+
+// panic the synthesizer (stop all voices)
+void audio_synth_panic(audio_synth_t *synth);
+
+// handle a message for the synthesizer
+void audio_synth_handle_message(audio_synth_t *synth,
+                                audio_synth_message_t *msg);
+
+// fill a buffer with samples from the synthesizer
 void audio_synth_fill_buffer(audio_synth_t *synth, audio_buffer_t buffer,
                              uint32_t buffer_size);
 
