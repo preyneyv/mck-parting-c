@@ -21,7 +21,17 @@ static void _fill_sine_lut() {
   }
 }
 
-static void _fill_luts() {
+// mapping from MIDI note number to d_phase
+// static uint32_t NOTE_DPHASE_LUT[128];
+static void _fill_note_dphase_lut(uint32_t lut[128], float sample_rate,
+                                  float a4_freq) {
+  for (int i = 0; i < 128; i++) {
+    float frequency = powf(2.0f, (i - 69) / 12.0f) * a4_freq;
+    lut[i] = (uint32_t)((frequency / sample_rate) * (double)(1ULL << 32));
+  }
+}
+
+static void _fill_const_luts() {
   static bool luts_filled = false;
   if (luts_filled)
     return;
@@ -31,9 +41,10 @@ static void _fill_luts() {
 }
 
 void audio_synth_init(audio_synth_t *synth, float sample_rate) {
-  _fill_luts();
+  _fill_const_luts();
 
   synth->sample_rate = sample_rate;
+  _fill_note_dphase_lut(synth->note_dphase_lut, sample_rate, 440.0f);
 
   for (int voice_idx = 0; voice_idx < AUDIO_SYNTH_VOICE_COUNT; voice_idx++) {
     audio_synth_voice_t *voice = &synth->voices[voice_idx];
@@ -52,19 +63,15 @@ void audio_synth_init(audio_synth_t *synth, float sample_rate) {
   }
 }
 
-static inline uint32_t _d_phase_from_freq(float frequency, float sample_rate) {
-  return (uint32_t)((frequency / sample_rate) * (double)(1ULL << 32));
-}
-
 void audio_synth_operator_set_freq(audio_synth_operator_t *op,
-                                   float frequency) {
-  op->d_phase = _d_phase_from_freq(frequency * op->config.freq_mult,
-                                   op->voice->synth->sample_rate);
+                                   uint16_t note_number) {
+  op->d_phase = op->voice->synth->note_dphase_lut[note_number];
 }
 
-void audio_synth_voice_set_freq(audio_synth_voice_t *voice, float frequency) {
+void audio_synth_voice_set_freq(audio_synth_voice_t *voice,
+                                uint16_t note_number) {
   for (int op_idx = 0; op_idx < AUDIO_SYNTH_OPERATOR_COUNT; op_idx++) {
-    audio_synth_operator_set_freq(&voice->ops[op_idx], frequency);
+    audio_synth_operator_set_freq(&voice->ops[op_idx], note_number);
   }
 }
 

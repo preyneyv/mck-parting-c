@@ -189,49 +189,23 @@ void audio_init() {
   pthread_t audio_playback;
   pthread_create(&audio_playback, NULL, (void *)audio_playback_main, NULL);
 
-  // // start synth thread
-  // double float_sample_rate = AUDIO_SAMPLE_RATE;
-  // double seconds_per_frame = 1.0 / float_sample_rate;
-  // double pitch = 440.0;
-  // double rads_per_second = pitch * 2.0 * M_PI;
-
-  // double seconds_offset = 0.0;
-  // int i = 0;
-  // while (true) {
-  //   uint32_t *buf = audio_buffer_pool_acquire_write(&pool, true);
-
-  //   for (int frame = 0; frame < pool.buffer_size; frame++) {
-  //     float sample =
-  //         sinf((seconds_offset + frame * seconds_per_frame) *
-  //         rads_per_second);
-  //     double value =
-  //         (uint16_t)(sample * ((double)INT16_MAX - (double)INT16_MIN) / 2.0);
-  //     uint16_t intval = (uint16_t)value;
-  //     buf[frame] = ((uint32_t)intval << 16) | (intval);
-  //   }
-  //   audio_buffer_pool_commit_write(&pool);
-  //   seconds_offset =
-  //       fmod(seconds_offset + seconds_per_frame * pool.buffer_size, 1.0);
-  //   i++;
-  // }
-
   TimingInstrumenter ti_synth;
 
   audio_synth_t synth;
   audio_synth_init(&synth, AUDIO_SAMPLE_RATE);
   synth.master_level = q1x15_f(0.5f);
 
-  synth.voices[0].ops[0].config = (audio_synth_operator_config_t){
-      .freq_mult = 12.0f,
-      .mode = AUDIO_SYNTH_OP_MODE_ADDITIVE,
-      .level = q1x15_f(.05f),
-  };
+  // synth.voices[0].ops[0].config = (audio_synth_operator_config_t){
+  //     .freq_mult = 12.0f,
+  //     .mode = AUDIO_SYNTH_OP_MODE_ADDITIVE,
+  //     .level = q1x15_f(.05f),
+  // };
   synth.voices[0].ops[1].config = (audio_synth_operator_config_t){
       .freq_mult = 1.0f,
       .mode = AUDIO_SYNTH_OP_MODE_FREQ_MOD,
       .level = q1x15_f(1.f),
   };
-  audio_synth_voice_set_freq(&synth.voices[0], 220.0f); // A3
+  audio_synth_voice_set_freq(&synth.voices[0], note("F3"));
 
   int i = 0;
   while (true) {
