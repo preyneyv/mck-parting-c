@@ -18,23 +18,18 @@
 
 #include <shared/utils/timing.h>
 
-// #include "audio.h"
+#include "audio.h"
 #include "config.h"
 #include "display.h"
 
 display_t display;
 
 void core1_main() {
-  // audio_init(&synth);
-  // audio_synth_voice_t *voice = &synth.voices[0];
-  // audio_synth_operator_t *op = &voice->ops[0];
-  // audio_synth_operator_set_freq(op, 440.0f);
-  // while (1) {
-  //   audio_synth_fill_buffer(&synth, AUDIO_BUFFER_DEFAULT, AUDIO_BUFFER_SIZE);
-  //   sleep_ms(100);
-  // }
+  audio_init();
+  // todo: event handling, timeline controller
 }
 
+// todo: buttons
 void core0_main() {
   display_init(&display);
 

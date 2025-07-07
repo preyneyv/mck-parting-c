@@ -15,8 +15,14 @@
 display_t display;
 audio_synth_t synth;
 
-void *audio_thread_main() { audio_init(); }
+void *audio_thread_main() {
+  audio_init();
+  // todo: event handling, timeline controller
 
+  return NULL;
+}
+
+// todo: buttons
 static void inline handle_sdl_events() {
   static SDL_Event event;
   while (SDL_PollEvent(&event)) {

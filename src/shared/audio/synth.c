@@ -87,13 +87,13 @@ audio_synth_operator_sample_freq_mod(audio_synth_operator_t *op,
 
 void audio_synth_operator_fill_buffer(audio_synth_operator_t *op, q1x15 *buffer,
                                       uint32_t buffer_size) {
-  if (op->config.level == Q1X15_ZERO) {
-    if (op->config.mode == AUDIO_SYNTH_OP_MODE_FREQ_MOD) {
-      // freq mod operator overwrites buffer, so we clear it if we skip work
-      memset(buffer, 0, buffer_size * sizeof(q1x15));
-    }
-    return;
-  }
+  // if (op->config.level == Q1X15_ZERO) {
+  //   if (op->config.mode == AUDIO_SYNTH_OP_MODE_FREQ_MOD) {
+  //     // freq mod operator overwrites buffer, so we clear it if we skip work
+  //     memset(buffer, 0, buffer_size * sizeof(q1x15));
+  //   }
+  //   return;
+  // }
 
   switch (op->config.mode) {
   case AUDIO_SYNTH_OP_MODE_ADDITIVE:

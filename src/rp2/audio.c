@@ -155,3 +155,53 @@
 //     need_fill_second_half = false;
 //   }
 // }
+
+#include <stdio.h>
+
+#include "audio.h"
+#include "config.h"
+
+#include <shared/audio/buffer.h>
+#include <shared/audio/synth.h>
+#include <shared/utils/timing.h>
+
+static audio_buffer_pool_t pool;
+
+void audio_init() {
+  audio_buffer_pool_init(&pool, AUDIO_BUFFER_POOL_SIZE, AUDIO_BUFFER_SIZE);
+
+  // todo: start pio dma playback
+
+  TimingInstrumenter ti_synth;
+
+  audio_synth_t synth;
+  audio_synth_init(&synth, AUDIO_SAMPLE_RATE);
+  synth.master_level = q1x15_f(0.1f);
+
+  synth.voices[0].ops[0].config = (audio_synth_operator_config_t){
+      .freq_mult = 12.0f,
+      .mode = AUDIO_SYNTH_OP_MODE_ADDITIVE,
+      .level = q1x15_f(.05f),
+  };
+  synth.voices[0].ops[1].config = (audio_synth_operator_config_t){
+      .freq_mult = 1.0f,
+      .mode = AUDIO_SYNTH_OP_MODE_FREQ_MOD,
+      .level = q1x15_f(1.f),
+  };
+  audio_synth_voice_set_freq(&synth.voices[0], 220.0f); // A3
+
+  int i = 0;
+  while (true) {
+    audio_buffer_t buffer = audio_buffer_pool_acquire_write(&pool, true);
+    ti_start(&ti_synth);
+    audio_synth_fill_buffer(&synth, buffer, pool.buffer_size);
+    ti_stop(&ti_synth);
+    audio_buffer_pool_commit_write(&pool);
+
+    i += 1;
+    if (i > 100) {
+      i -= 100;
+      printf("synth: %f ms\n", ti_get_average_ms(&ti_synth, true));
+    }
+  }
+}

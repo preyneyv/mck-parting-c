@@ -231,7 +231,7 @@ void audio_init() {
       .mode = AUDIO_SYNTH_OP_MODE_FREQ_MOD,
       .level = q1x15_f(1.f),
   };
-  audio_synth_voice_set_freq(&synth.voices[0], 220.0f); // A4
+  audio_synth_voice_set_freq(&synth.voices[0], 220.0f); // A3
 
   int i = 0;
   while (true) {
