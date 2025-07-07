@@ -14,5 +14,10 @@ static const uint32_t TARGET_FRAME_INTERVAL_US = 1000000 / TARGET_FPS;
 static const uint32_t DISP_PIX = DISP_WIDTH * DISP_HEIGHT;
 
 //// AUDIO CONFIGURATION ////
+// changing this will require modifications on datatypes and bit shifts for
+// audio buffers.
 #define AUDIO_BIT_DEPTH 16
+// changing the sample rate will change the sound because of FM freq. while
+// fixable, it costs more float ops in the audio hot loop and is largely
+// unnecessary.
 #define AUDIO_SAMPLE_RATE 48000

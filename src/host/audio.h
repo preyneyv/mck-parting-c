@@ -1,6 +1,6 @@
 #pragma once
 
-#include "config.h"
 #include <shared/audio/buffer.h>
+#include <shared/audio/synth.h>
 
-void audio_init();
+#include "config.h"

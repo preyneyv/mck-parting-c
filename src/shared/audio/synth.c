@@ -1,62 +1,118 @@
 #include <math.h>
 #include <stdbool.h>
 #include <stdio.h>
+#include <string.h>
 
 #include <shared/utils/q1x15.h>
 
 #include "buffer.h"
 #include "synth.h"
 
-void audio_synth_init(audio_synth_t *synth, float sample_rate) {
-  synth->sample_rate = sample_rate;
+static inline uint32_t lut_key(uint32_t phase) {
+  return (phase >> (32 - AUDIO_SYNTH_LUT_RES));
+}
 
-  for (int i = 0; i < AUDIO_SYNTH_MAX_VOICES; i++) {
-    audio_synth_voice_t *voice = &synth->voices[i];
-    voice->synth = synth;
-
-    voice->is_fm = false;
-    voice->op1.freq_mult = 1.0f;
-    voice->op1.phase = 0;
-    voice->op1.d_phase = 0;
-    voice->op1.level = q1x15_f(1.0f);
-
-    voice->op2.freq_mult = 1.0f;
-    voice->op2.phase = 0;
-    voice->op2.d_phase = 0;
-    voice->op2.level = q1x15_f(1.0f);
+// todo: pre-bake into a header file?
+static q1x15 LUT_SINE[AUDIO_SYNTH_LUT_SIZE];
+static void _fill_sine_lut() {
+  for (int i = 0; i < AUDIO_SYNTH_LUT_SIZE; i++) {
+    float phase = (float)i / AUDIO_SYNTH_LUT_SIZE;
+    LUT_SINE[i] = q1x15_d(sin(2.0f * M_PI * phase));
   }
 }
 
-static inline uint32_t _freq_to_phase_inc(float frequency, float sample_rate) {
+static void _fill_luts() {
+  static bool luts_filled = false;
+  if (luts_filled)
+    return;
+
+  _fill_sine_lut();
+  luts_filled = true;
+}
+
+void audio_synth_init(audio_synth_t *synth, float sample_rate) {
+  _fill_luts();
+
+  synth->sample_rate = sample_rate;
+
+  for (int voice_idx = 0; voice_idx < AUDIO_SYNTH_VOICE_COUNT; voice_idx++) {
+    audio_synth_voice_t *voice = &synth->voices[voice_idx];
+    voice->synth = synth;
+
+    // voice->ops
+    for (int op_idx = 0; op_idx < AUDIO_SYNTH_OPERATOR_COUNT; op_idx++) {
+      audio_synth_operator_t *op = &voice->ops[op_idx];
+      op->config = audio_synth_operator_config_default;
+      op->voice = voice;
+
+      // Initialize operator state
+      op->phase = 0;
+      op->d_phase = 0;
+    }
+  }
+}
+
+static inline uint32_t _d_phase_from_freq(float frequency, float sample_rate) {
   return (uint32_t)((frequency / sample_rate) * (double)(1ULL << 32));
 }
 
+void audio_synth_operator_set_freq(audio_synth_operator_t *op,
+                                   float frequency) {
+  op->d_phase = _d_phase_from_freq(frequency * op->config.freq_mult,
+                                   op->voice->synth->sample_rate);
+}
+
 void audio_synth_voice_set_freq(audio_synth_voice_t *voice, float frequency) {
-  // Set the frequency of the voice
-  voice->op1.d_phase = _freq_to_phase_inc(frequency * voice->op1.freq_mult,
-                                          voice->synth->sample_rate);
-  voice->op2.d_phase = _freq_to_phase_inc(frequency * voice->op2.freq_mult,
-                                          voice->synth->sample_rate);
+  for (int op_idx = 0; op_idx < AUDIO_SYNTH_OPERATOR_COUNT; op_idx++) {
+    audio_synth_operator_set_freq(&voice->ops[op_idx], frequency);
+  }
+}
+
+static inline q1x15
+audio_synth_operator_sample_additive(audio_synth_operator_t *op,
+                                     q1x15 previous) {
+  q1x15 value = LUT_SINE[lut_key(op->phase)];
+  op->phase += op->d_phase;
+  return q1x15_add(previous, q1x15_mul(op->config.level, value));
+}
+
+static inline q1x15
+audio_synth_operator_sample_freq_mod(audio_synth_operator_t *op,
+                                     q1x15 previous) {
+  q1x15 value = LUT_SINE[lut_key(op->phase)];
+  int mod = (int32_t)previous << 16;
+  op->phase += op->d_phase + mod;
+  return q1x15_mul(op->config.level, value);
 }
 
 void audio_synth_operator_fill_buffer(audio_synth_operator_t *op, q1x15 *buffer,
                                       uint32_t buffer_size) {
-  for (uint32_t i = 0; i < buffer_size; i++) {
+  if (op->config.level == Q1X15_ZERO) {
+    if (op->config.mode == AUDIO_SYNTH_OP_MODE_FREQ_MOD) {
+      // freq mod operator overwrites buffer, so we clear it if we skip work
+      memset(buffer, 0, buffer_size * sizeof(q1x15));
+    }
+    return;
+  }
 
-    // todo: use lookup table
-    float phase_evolution =
-        ((float)(op->phase >> 24) / UINT8_MAX); // top 8 bits
-    q1x15 value = q1x15_f(sinf(2.0f * M_PI * phase_evolution));
-    buffer[i] = q1x15_mul(op->level, value);
-
-    op->phase += op->d_phase;
+  switch (op->config.mode) {
+  case AUDIO_SYNTH_OP_MODE_ADDITIVE:
+    for (uint32_t i = 0; i < buffer_size; i++)
+      buffer[i] = audio_synth_operator_sample_additive(op, buffer[i]);
+    break;
+  case AUDIO_SYNTH_OP_MODE_FREQ_MOD:
+    for (uint32_t i = 0; i < buffer_size; i++)
+      buffer[i] = audio_synth_operator_sample_freq_mod(op, buffer[i]);
+    break;
   }
 }
 
 void audio_synth_voice_fill_buffer(audio_synth_voice_t *voice, q1x15 *buffer,
                                    uint32_t buffer_size) {
-  // todo: FM with op1 -> op2
-  audio_synth_operator_fill_buffer(&voice->op2, buffer, buffer_size);
+  memset(buffer, 0, buffer_size * sizeof(q1x15));
+  for (int op_idx = 0; op_idx < AUDIO_SYNTH_OPERATOR_COUNT; op_idx++) {
+    audio_synth_operator_fill_buffer(&voice->ops[op_idx], buffer, buffer_size);
+  }
 }
 
 static inline void draft_merge_clip(q1x15 *out, q1x15 *in,
@@ -83,12 +139,12 @@ void audio_synth_fill_buffer(audio_synth_t *synth, audio_buffer_t buffer,
   }
 
   audio_synth_voice_fill_buffer(&synth->voices[0], draft[0], buffer_size);
-  // for (uint8_t voice_idx = 1; voice_idx < AUDIO_SYNTH_MAX_VOICES;
-  // voice_idx++) {
-  //   audio_synth_voice_fill_buffer(&synth->voices[voice_idx], draft[1],
-  //                                 buffer_size);
-  //   draft_merge_clip(draft[0], draft[1], buffer_size);
-  // }
+  for (uint8_t voice_idx = 1; voice_idx < AUDIO_SYNTH_VOICE_COUNT;
+       voice_idx++) {
+    audio_synth_voice_fill_buffer(&synth->voices[voice_idx], draft[1],
+                                  buffer_size);
+    draft_merge_clip(draft[0], draft[1], buffer_size);
+  }
 
   // copy the final draft to the output buffer
   for (uint32_t i = 0; i < buffer_size; i++) {

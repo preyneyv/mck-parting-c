@@ -5,17 +5,17 @@
 #include <SDL.h>
 #include <u8g2.h>
 
-// #include <shared/audio.h>
+#include <shared/audio/synth.h>
 #include <shared/config.h>
 #include <shared/utils/timing.h>
 
 #include "audio.h"
 #include "display.h"
-#include <soundio/soundio.h>
 
 display_t display;
+audio_synth_t synth;
 
-void *audio_thread_main() { audio_init(); }
+void *audio_thread_main() { audio_init(&synth); }
 
 static void inline handle_sdl_events() {
   static SDL_Event event;
@@ -24,12 +24,6 @@ static void inline handle_sdl_events() {
     case SDL_QUIT:
       exit(0);
       break;
-    case SDL_KEYDOWN:
-      switch (event.key.keysym.sym) {
-      case SDLK_q:
-        exit(0);
-        break;
-      };
     }
   }
 }
