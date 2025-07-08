@@ -76,7 +76,13 @@ static void make_env_stage_from_cfg(audio_synth_env_state_stage_t *stage,
          sample_duration, prev_level, next_level, next_level - prev_level);
   stage->duration = sample_duration;
   stage->level = next_level;
-  stage->d_level = (next_level - prev_level) / (int32_t)sample_duration;
+
+  if (sample_duration == 0) {
+    // if duration is zero, we just set the level to the next level
+    stage->d_level = Q1X31_ZERO;
+  } else {
+    stage->d_level = (next_level - prev_level) / (int32_t)sample_duration;
+  }
 }
 
 // update operator values based on active config
@@ -106,11 +112,9 @@ static void audio_synth_operator_note_on(audio_synth_operator_t *op,
                                          uint16_t note_number, q1x15 velocity) {
   // this *might* be called without a previous note_off
 
-  // set frequency
+  op->phase = 0;
   op->d_phase =
       op->voice->synth->note_dphase_lut[note_number] * op->config.freq_mult;
-
-  // adjust for velocity
   op->level = q1x15_mul(op->config.level, velocity);
 
   // reset envelope

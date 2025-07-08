@@ -42,7 +42,10 @@
       "windows": {
         "command": "${env:USERPROFILE}/.pico-sdk/picotool/2.1.1/picotool/picotool.exe"
       },
-      "group": "build"
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      }
     },
     {
       "label": "rp2: flash",
@@ -79,10 +82,7 @@
       "type": "process",
       "command": "${workspaceFolder}/build_host/mck-parting-c",
       "args": [],
-      "group": {
-        "kind": "build",
-        "isDefault": true
-      },
+      "group": "build",
       "problemMatcher": "$gcc",
       "dependsOn": ["host: compile"],
       "windows": {

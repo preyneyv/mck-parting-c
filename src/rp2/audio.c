@@ -111,29 +111,86 @@ void audio_init() {
   TimingInstrumenter ti_synth;
 
   audio_synth_t synth;
-  audio_synth_init(&synth, AUDIO_SAMPLE_RATE);
+  audio_synth_init(&synth, AUDIO_SAMPLE_RATE, 1000);
   synth.master_level = q1x15_f(1.f);
 
-  synth.voices[0].ops[0].config = (audio_synth_operator_config_t){
-      .freq_mult = 12.0f,
-      .mode = AUDIO_SYNTH_OP_MODE_ADDITIVE,
-      .level = q1x15_f(.0f),
+  audio_synth_operator_config_t config = audio_synth_operator_config_default;
+  config.env = (audio_synth_env_config_t){
+      .a = 0,
+      .d = 300,
+      .s = q1x31_f(0.f),
+      .r = 100,
   };
-  synth.voices[0].ops[1].config = (audio_synth_operator_config_t){
-      .freq_mult = 1.0f,
-      .mode = AUDIO_SYNTH_OP_MODE_ADDITIVE,
-      .level = q1x15_f(1.f),
-  };
-  audio_synth_voice_set_freq(&synth.voices[0], 200.0f); // A3
+  config.level = Q1X15_ONE;
+  audio_synth_operator_set_config(&synth.voices[0].ops[0], config);
 
   int i = 0;
   while (true) {
-    audio_buffer_t buffer = audio_buffer_pool_acquire_write(&pool, true);
-    if (i < 5000) {
-      synth.master_level = q1x15_f(1.f);
-    } else {
-      synth.master_level = Q1X15_ZERO;
+    if (i == 0) {
+      audio_synth_handle_message(&synth,
+                                 &(audio_synth_message_t){
+                                     .type = AUDIO_SYNTH_MESSAGE_NOTE_ON,
+                                     .data.note_on =
+                                         {
+                                             .voice = 0,
+                                             .note_number = note("C4"),
+                                             .velocity = 127,
+                                         },
+                                 });
+    } else if (i == 100) {
+      audio_synth_handle_message(&synth,
+                                 &(audio_synth_message_t){
+                                     .type = AUDIO_SYNTH_MESSAGE_NOTE_OFF,
+                                     .data.note_off =
+                                         {
+                                             .voice = 0,
+                                         },
+                                 });
+    } else if (i == 200) {
+      audio_synth_handle_message(&synth,
+                                 &(audio_synth_message_t){
+                                     .type = AUDIO_SYNTH_MESSAGE_NOTE_ON,
+                                     .data.note_on =
+                                         {
+                                             .voice = 0,
+                                             .note_number = note("D4"),
+                                             .velocity = 127,
+                                         },
+                                 });
+    } else if (i == 300) {
+      audio_synth_handle_message(&synth,
+                                 &(audio_synth_message_t){
+                                     .type = AUDIO_SYNTH_MESSAGE_NOTE_OFF,
+                                     .data.note_off =
+                                         {
+                                             .voice = 0,
+                                         },
+                                 });
+    } else if (i == 400) {
+      audio_synth_handle_message(&synth,
+                                 &(audio_synth_message_t){
+                                     .type = AUDIO_SYNTH_MESSAGE_NOTE_ON,
+                                     .data.note_on =
+                                         {
+                                             .voice = 0,
+                                             .note_number = note("G4"),
+                                             .velocity = 127,
+                                         },
+                                 });
+    } else if (i == 800) {
+      audio_synth_handle_message(&synth,
+                                 &(audio_synth_message_t){
+                                     .type = AUDIO_SYNTH_MESSAGE_NOTE_OFF,
+                                     .data.note_off =
+                                         {
+                                             .voice = 0,
+                                         },
+                                 });
+    } else if (i == 1600) {
+      i = -1;
     }
+
+    audio_buffer_t buffer = audio_buffer_pool_acquire_write(&pool, true);
     ti_start(&ti_synth);
     audio_synth_fill_buffer(&synth, buffer, pool.buffer_size);
     ti_stop(&ti_synth);
@@ -142,9 +199,6 @@ void audio_init() {
     i += 1;
     if (i % 100 == 0) {
       printf("synth: %f ms\n", ti_get_average_ms(&ti_synth, true));
-    }
-    if (i > 10000) {
-      i -= 10000;
     }
   }
 }
