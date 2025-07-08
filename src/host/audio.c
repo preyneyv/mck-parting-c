@@ -197,17 +197,28 @@ void audio_init() {
 
   audio_synth_operator_config_t config = audio_synth_operator_config_default;
   config.env = (audio_synth_env_config_t){
-      .a = 250,
-      .d = 100,
-      .s = q1x31_f(0.5f), // sustain level
-      .r = 100,
+      .a = 0,
+      .d = 700,
+      .s = q1x31_f(0.f), // sustain level
+      .r = 500,
+  };
+  config.freq_mult = 11;
+  config.level = q1x15_f(0.3f);
+  audio_synth_operator_set_config(&synth.voices[0].ops[0], config);
+
+  config = audio_synth_operator_config_default;
+  config.env = (audio_synth_env_config_t){
+      .a = 0,
+      .d = 1000,
+      .s = q1x31_f(0.f), // sustain level
+      .r = 600,
   };
   config.level = Q1X15_ONE;
-  audio_synth_operator_set_config(&synth.voices[0].ops[0], config);
+  config.mode = AUDIO_SYNTH_OP_MODE_FREQ_MOD;
+  audio_synth_operator_set_config(&synth.voices[0].ops[1], config);
 
   int i = 0;
   while (true) {
-    // printf("i%d\n", i);
     if (i == 0) {
       audio_synth_handle_message(&synth,
                                  &(audio_synth_message_t){
@@ -228,6 +239,7 @@ void audio_init() {
                                              .voice = 0,
                                          },
                                  });
+    } else if (i == 20) {
       audio_synth_handle_message(&synth,
                                  &(audio_synth_message_t){
                                      .type = AUDIO_SYNTH_MESSAGE_NOTE_ON,
@@ -238,7 +250,7 @@ void audio_init() {
                                              .velocity = 127,
                                          },
                                  });
-    } else if (i == 20) {
+    } else if (i == 30) {
       audio_synth_handle_message(&synth,
                                  &(audio_synth_message_t){
                                      .type = AUDIO_SYNTH_MESSAGE_NOTE_OFF,
@@ -247,6 +259,7 @@ void audio_init() {
                                              .voice = 0,
                                          },
                                  });
+    } else if (i == 40) {
       audio_synth_handle_message(&synth,
                                  &(audio_synth_message_t){
                                      .type = AUDIO_SYNTH_MESSAGE_NOTE_ON,
@@ -257,7 +270,7 @@ void audio_init() {
                                              .velocity = 127,
                                          },
                                  });
-    } else if (i == 40) {
+    } else if (i == 80) {
       audio_synth_handle_message(&synth,
                                  &(audio_synth_message_t){
                                      .type = AUDIO_SYNTH_MESSAGE_NOTE_OFF,
@@ -266,7 +279,7 @@ void audio_init() {
                                              .voice = 0,
                                          },
                                  });
-    } else if (i == 80) {
+    } else if (i == 160) {
       i = -1;
     }
 

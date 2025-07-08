@@ -71,9 +71,6 @@ static void make_env_stage_from_cfg(audio_synth_env_state_stage_t *stage,
                                     uint32_t d_timebase, uint16_t duration,
                                     q1x31 prev_level, q1x31 next_level) {
   uint16_t sample_duration = duration * d_timebase;
-  printf("make_env_stage_from_cfg: duration=%d, prev_level=%d, next_level=%d, "
-         "%d\n",
-         sample_duration, prev_level, next_level, next_level - prev_level);
   stage->duration = sample_duration;
   stage->level = next_level;
 
@@ -100,12 +97,6 @@ void audio_synth_operator_set_config(audio_synth_operator_t *op,
                           config.env.s);
   make_env_stage_from_cfg(&op->env.stages[3], d_timebase, config.env.r,
                           config.env.s, Q1X31_ZERO);
-  printf("d_timebase: %d\n", d_timebase);
-  printf("op %p config: freq_mult=%d, level=%d, mode=%d, env=(%d, %d, %d, "
-         "%d)\n",
-         (void *)op, config.freq_mult, config.level, config.mode,
-         op->env.stages[0].d_level, op->env.stages[1].d_level,
-         op->env.stages[2].level, op->env.stages[3].d_level);
 }
 
 static void audio_synth_operator_note_on(audio_synth_operator_t *op,
@@ -113,8 +104,11 @@ static void audio_synth_operator_note_on(audio_synth_operator_t *op,
   // this *might* be called without a previous note_off
 
   op->phase = 0;
-  op->d_phase =
-      op->voice->synth->note_dphase_lut[note_number] * op->config.freq_mult;
+  uint32_t lut_phase = op->voice->synth->note_dphase_lut[note_number];
+  if (op->config.freq_mult == 0)
+    op->d_phase = lut_phase / 2;
+  else
+    op->d_phase = lut_phase * op->config.freq_mult;
   op->level = q1x15_mul(op->config.level, velocity);
 
   // reset envelope
@@ -137,7 +131,21 @@ void audio_synth_voice_note_on(audio_synth_voice_t *voice, uint16_t note_number,
 }
 
 static void audio_synth_operator_note_off(audio_synth_operator_t *op) {
+  if (op->env.stage >= 3) {
+    // already release, do nothing;
+    return;
+  }
   op->active = false;
+  audio_synth_env_state_t *env = &op->env;
+
+  // recompute release envelope from current env level
+  // (for early releases)
+  make_env_stage_from_cfg(&env->stages[3], op->voice->synth->d_timebase,
+                          op->config.env.r, env->level, Q1X31_ZERO);
+
+  // move to release
+  env->stage = 3;
+  env->evolution = 0;
 }
 
 void audio_synth_voice_note_off(audio_synth_voice_t *voice) {
@@ -161,18 +169,13 @@ void audio_synth_voice_panic(audio_synth_voice_t *voice) {
 
 static q1x15 audio_synth_operator_update_env(audio_synth_operator_t *op) {
   audio_synth_env_state_t *env = &op->env;
-  audio_synth_env_state_stage_t *stage = &env->stages[env->stage];
   if (env->stage == 4)
     return Q1X15_ZERO; // already post release
+
+  audio_synth_env_state_stage_t *stage = &env->stages[env->stage];
   if (env->stage == 2) {
-    if (op->active) {
-      // hold sustain level
-      env->level = stage->level;
-    } else {
-      // move to release
-      env->stage = 3;
-      env->evolution = 0;
-    }
+    // hold sustain level (until note_off transition)
+    env->level = stage->level;
   } else {
     env->evolution += 1;
 
@@ -202,7 +205,7 @@ audio_synth_operator_sample_freq_mod(audio_synth_operator_t *op,
                                      q1x15 previous) {
   q1x15 mult = audio_synth_operator_update_env(op);
   q1x15 value = LUT_SINE[lut_key(op->phase)];
-  int mod = (int32_t)previous << 16;
+  int mod = (int32_t)previous << 15;
   op->phase += op->d_phase + mod;
   return q1x15_mul(value, mult);
 }
@@ -216,7 +219,8 @@ static void audio_synth_operator_fill_buffer(audio_synth_operator_t *op,
   // if (op->level == Q1X15_ZERO) {
   //   if (op->config.mode == AUDIO_SYNTH_OP_MODE_FREQ_MOD) {
   //     // freq mod operator overwrites buffer, so we clear it if we skip
-  //     work memset(buffer, 0, buffer_size * sizeof(q1x15));
+  //     // work
+  //     memset(buffer, 0, buffer_size * sizeof(q1x15));
   //   }
   //   return;
   // }
