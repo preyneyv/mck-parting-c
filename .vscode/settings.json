@@ -57,6 +57,8 @@
     "numeric": "c",
     "cmath": "c",
     "ratio": "c",
-    "cinttypes": "c"
+    "cinttypes": "c",
+    "typeinfo": "c",
+    "text_encoding": "c"
   }
 }

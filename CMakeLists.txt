@@ -27,6 +27,10 @@ include(pico_sdk_import.cmake)
 project(mck-parting-c C CXX ASM)
 pico_sdk_init()
 
+# super important for u8g2 otherwise we get a 11 MB binary :skull:
+add_compile_options(-ffast-math -ffunction-sections -fdata-sections)
+add_link_options(-Wl,--gc-sections)
+
 # --- shared dependencies ---
 add_subdirectory(lib/u8g2)
 
@@ -53,7 +57,7 @@ if(PICO_PLATFORM STREQUAL "host")
     target_compile_options(mck-parting-c PRIVATE -include ${CMAKE_CURRENT_LIST_DIR}/src/host/compat.h)
     
     target_include_directories(mck-parting-c PRIVATE ${CMAKE_CURRENT_LIST_DIR}/src)
-    target_compile_options(mck-parting-c PRIVATE -ffast-math)
+    # target_compile_options(mck-parting-c PRIVATE -ffast-math)
 
     find_package(Threads REQUIRED)
     find_package(SDL2 REQUIRED CONFIG REQUIRED COMPONENTS SDL2)
@@ -117,8 +121,7 @@ else()
         pico_stdlib
     )
     target_include_directories(mck-parting-c PRIVATE ${CMAKE_CURRENT_LIST_DIR}/src)
-    pico_generate_pio_header(mck-parting-c ${CMAKE_CURRENT_LIST_DIR}/src/rp2/audio.pio)
-    target_compile_options(mck-parting-c PRIVATE -ffast-math)
+    pico_generate_pio_header(mck-parting-c ${CMAKE_CURRENT_LIST_DIR}/src/rp2/audio.pio)    
 
 
     pico_enable_stdio_uart(mck-parting-c 0)

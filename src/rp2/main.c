@@ -51,7 +51,6 @@ void core0_main() {
     uint8_t x = i % DISP_WIDTH;
     uint8_t y = i / DISP_WIDTH;
 
-    u8g2_FirstPage(u8g2);
     u8g2_ClearBuffer(u8g2);
     u8g2_SetDrawColor(u8g2, 0);
     u8g2_DrawBox(u8g2, 0, 0, 128, 64);
@@ -60,6 +59,8 @@ void core0_main() {
 
     u8g2_SetDrawColor(u8g2, 1);
     u8g2_DrawPixel(u8g2, x, y); // pixel that scans L to R, T to B
+    u8g2_SetFont(u8g2, u8g2_font_6x10_tf);
+    u8g2_DrawStr(u8g2, 0, 10, "Hello, world!");
     ti_stop(&ti_tick);
 
     ti_start(&ti_show);
