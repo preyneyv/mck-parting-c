@@ -42,6 +42,7 @@
       "windows": {
         "command": "${env:USERPROFILE}/.pico-sdk/picotool/2.1.1/picotool/picotool.exe"
       },
+      "dependsOn": ["rp2: bootsel"],
       "group": {
         "kind": "build",
         "isDefault": true

@@ -24,13 +24,15 @@
 
 display_t display;
 
-void core1_main() {
+void core1_main()
+{
   audio_init();
   // todo: event handling, timeline controller
 }
 
 // todo: buttons
-void core0_main() {
+void core0_main()
+{
   display_init(&display);
 
   TimingInstrumenter ti_tick;
@@ -44,7 +46,8 @@ void core0_main() {
   uint32_t i = 0;
 
   u8g2_t *u8g2 = display_get_u8g2(&display);
-  while (1) {
+  while (1)
+  {
     // handle_sdl_events();
     ti_start(&ti_tick);
     i = (i + 1) % DISP_PIX;
@@ -69,7 +72,8 @@ void core0_main() {
 
     last_log_frames++;
     uint64_t now = time_us_64();
-    if (now - last_log_us > 1000000) {
+    if (now - last_log_us > 1000000)
+    {
       fps = last_log_frames;
       float ti_tick_avg = ti_get_average_ms(&ti_tick, true);
       float ti_show_avg = ti_get_average_ms(&ti_show, true);
@@ -81,23 +85,28 @@ void core0_main() {
     }
 
     uint64_t spent_us = now - last_frame_us;
-    if (spent_us < TARGET_FRAME_INTERVAL_US) {
+    if (spent_us < TARGET_FRAME_INTERVAL_US)
+    {
       sleep_us(TARGET_FRAME_INTERVAL_US - spent_us);
       last_frame_us = time_us_64();
-    } else {
+    }
+    else
+    {
       last_frame_us = now;
     }
   }
 }
 
-int main() {
+int main()
+{
+  // set clock for audio PWM reasons
   set_sys_clock_hz(SYS_CLOCK_HZ, true);
   stdio_init_all();
 
-  while (!stdio_usb_connected()) {
+  while (!stdio_usb_connected())
+  {
     sleep_ms(10);
   }
-  // set clock for audio PWM reasons
 
   // kick off audio core
   multicore_reset_core1();
