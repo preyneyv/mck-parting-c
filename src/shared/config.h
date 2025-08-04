@@ -2,7 +2,7 @@
 
 #include <stdint.h>
 
-#define PROJECT_NAME "Prythm DX"
+#define PROJECT_NAME "Prism"
 
 //// SYSTEM CONFIGURATION ////
 #define TARGET_FPS 120

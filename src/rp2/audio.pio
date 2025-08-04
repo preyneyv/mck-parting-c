@@ -1,18 +1,18 @@
 .program audio_playback_write
 ; PIO program for audio output over I2S. Handles DOUT, BCLK, LRCK.
-; side_set: [LRCK, BCLK]
+; side_set: [BCLK, LRCK]
 .side_set 2
 
 public entry_point:
 clock_l:
   set x, 14         side 0b00 ; 16 bit depth, -2 for timing
-  pull noblock      side 0b01
+  pull noblock      side 0b10
 write_l:
   out pins, 1       side 0b00
-  jmp x-- write_l   side 0b01
+  jmp x-- write_l   side 0b10
 clock_r:
-  set x, 14         side 0b10 ; 16 bit depth, -2 for timing
+  set x, 14         side 0b01 ; 16 bit depth, -2 for timing
   pull noblock      side 0b11
 write_r:
-  out pins, 1       side 0b10
+  out pins, 1       side 0b01
   jmp x-- write_r   side 0b11

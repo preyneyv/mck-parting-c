@@ -29,7 +29,11 @@ pico_sdk_init()
 
 # super important for u8g2 otherwise we get a 11 MB binary :skull:
 add_compile_options(-ffast-math -ffunction-sections -fdata-sections)
-add_link_options(-Wl,--gc-sections)
+if(APPLE)
+    add_link_options(-Wl,-dead_strip)
+else()
+    add_link_options(-Wl,--gc-sections)
+endif()
 
 # --- shared dependencies ---
 add_subdirectory(lib/u8g2)

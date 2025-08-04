@@ -3,8 +3,9 @@
 
 #include <u8g2.h>
 
+#include <shared/display.h>
+
 #include "config.h"
-#include "display.h"
 
 static uint8_t _byte_cb(u8x8_t *u8x8, uint8_t msg, uint8_t arg_int,
                         void *arg_ptr) {
@@ -85,8 +86,51 @@ static uint8_t _gpio_and_delay_cb(u8x8_t *u8x8, uint8_t msg, uint8_t arg_int,
 
 void display_init(display_t *display) {
   u8g2_t *u8g2 = display_get_u8g2(display);
-  u8g2_Setup_ssd1306_128x64_noname_f(u8g2, U8G2_R0, _byte_cb,
-                                     _gpio_and_delay_cb);
+  // u8g2_Setup_ssd1306_128x64_noname_f(u8g2, U8G2_R0, _byte_cb,
+  //                                    _gpio_and_delay_cb);
+  u8g2_Setup_sh1107_64x128_f(u8g2, U8G2_R1, _byte_cb, _gpio_and_delay_cb);
   u8g2_InitDisplay(u8g2);
+
+  gpio_init(DISP_REG_EN);
+  gpio_set_dir(DISP_REG_EN, GPIO_OUT);
+  gpio_put(DISP_REG_EN, 0); // keep display off until needed.
+}
+
+void display_on(display_t *display) {
+  if (display->enabled) {
+    return; // already enabled
+  }
+
+  // enable regulator
+  gpio_put(DISP_REG_EN, 1);
+  sleep_ms(100); // wait for regulator to stabilize
+
+  u8g2_t *u8g2 = display_get_u8g2(display);
   u8g2_SetPowerSave(u8g2, 0);
+  u8g2_SetContrast(u8g2, 255);
+
+  display->enabled = true;
+}
+
+void display_off(display_t *display) {
+  if (!display->enabled) {
+    return; // already off
+  }
+
+  u8g2_t *u8g2 = display_get_u8g2(display);
+  u8g2_SetPowerSave(u8g2, 1);
+
+  sleep_ms(100); // wait for disp off flush
+  // disable regulator
+  gpio_put(DISP_REG_EN, 0);
+
+  display->enabled = false;
+}
+
+void display_set_enabled(display_t *display, bool enabled) {
+  if (enabled) {
+    display_on(display);
+  } else {
+    display_off(display);
+  }
 }
