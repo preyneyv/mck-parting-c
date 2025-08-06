@@ -19,13 +19,18 @@
 #include <shared/display.h>
 #include <shared/utils/timing.h>
 
+#include <shared/led.h>
+#include <shared/peripheral.h>
+
 #include "audio.h"
 #include "config.h"
 
 display_t display;
+peripheral_t peripheral;
+leds_t leds;
 
 void core1_main() {
-  audio_init();
+  // audio_init();
   // todo: event handling, timeline controller
 }
 
@@ -33,6 +38,13 @@ void core1_main() {
 void core0_main() {
   display_init(&display);
   display_set_enabled(&display, true);
+
+  peripheral_init(&peripheral);
+  peripheral_set_enabled(&peripheral, true);
+  leds_init(&leds);
+  leds.colors[0].hex = 0x00ff00; // green
+  leds.colors[1].hex = 0x0000ff; // blue
+  leds_show(&leds);
 
   TimingInstrumenter ti_tick;
   TimingInstrumenter ti_show;
@@ -96,9 +108,11 @@ int main() {
   set_sys_clock_hz(SYS_CLOCK_HZ, true);
   stdio_init_all();
 
-  // while (!stdio_usb_connected()) {
-  //   sleep_ms(10);
-  // }
+  while (!stdio_usb_connected()) {
+    sleep_ms(10);
+  }
+
+  printf("clock set to %d Hz\n", clock_get_hz(clk_sys));
 
   // kick off audio core
   multicore_reset_core1();

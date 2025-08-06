@@ -1,0 +1,39 @@
+.program led_write
+; PIO program for WS2812-compatible DOUT.
+; Adapted from https://learn.adafruit.com/intro-to-rp2040-pio-with-circuitpython/using-pio-to-drive-a-neopixel
+; Byte order: GRB (why???)
+; side_set: [DOUT]
+
+.define public T1 3
+.define public T2 3
+.define public T3 4
+
+.side_set 1
+loop:
+  out x, 1           side 0   [T3 - 1]
+  jmp !x do_zero     side 1   [T1 - 1]
+do_one:
+  jmp loop           side 1   [T2 - 1]
+do_zero:
+  nop                side 0   [T2 - 1]
+
+% c-sdk {
+#include "hardware/clocks.h"
+
+static inline void led_write_program_init(PIO pio, uint sm, uint offset, uint pin, float freq) {
+  pio_gpio_init(pio, pin);
+  pio_sm_set_consecutive_pindirs(pio, sm, pin, 1, true);
+
+  pio_sm_config c = led_write_program_get_default_config(offset);
+  sm_config_set_sideset_pins(&c, pin);
+  sm_config_set_out_shift(&c, false, true, 24);
+  sm_config_set_fifo_join(&c, PIO_FIFO_JOIN_TX);
+
+  int cycles_per_bit = led_write_T1 + led_write_T2 + led_write_T3;
+  float div = clock_get_hz(clk_sys) / (freq * cycles_per_bit);
+  sm_config_set_clkdiv(&c, div);
+
+  pio_sm_init(pio, sm, offset, &c);
+  pio_sm_set_enabled(pio, sm, true);
+}
+%}

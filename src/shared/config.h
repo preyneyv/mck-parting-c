@@ -2,7 +2,7 @@
 
 #include <stdint.h>
 
-#define PROJECT_NAME "Prism"
+#define PROJECT_NAME "prism"
 
 //// SYSTEM CONFIGURATION ////
 #define TARGET_FPS 120

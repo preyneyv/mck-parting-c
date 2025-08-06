@@ -3,7 +3,6 @@
 ; side_set: [BCLK, LRCK]
 .side_set 2
 
-public entry_point:
 clock_l:
   set x, 14         side 0b00 ; 16 bit depth, -2 for timing
   pull noblock      side 0b10

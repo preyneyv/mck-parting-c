@@ -42,7 +42,6 @@ add_subdirectory(lib/u8g2)
 set(SHARED_SOURCES
     src/shared/audio/buffer.c
     src/shared/audio/synth.c
-    src/shared/display.c
 )
 add_library(shared STATIC ${SHARED_SOURCES})
 target_include_directories(shared PRIVATE ${CMAKE_CURRENT_LIST_DIR}/src)
@@ -113,6 +112,8 @@ else()
         src/rp2/main.c
         src/rp2/display.c
         src/rp2/audio.c
+        src/rp2/peripheral.c
+        src/rp2/led.c
     )
     target_link_libraries(mck-parting-c PRIVATE
         shared
@@ -126,6 +127,7 @@ else()
     )
     target_include_directories(mck-parting-c PRIVATE ${CMAKE_CURRENT_LIST_DIR}/src)
     pico_generate_pio_header(mck-parting-c ${CMAKE_CURRENT_LIST_DIR}/src/rp2/audio.pio)    
+    pico_generate_pio_header(mck-parting-c ${CMAKE_CURRENT_LIST_DIR}/src/rp2/led.pio)    
 
 
     pico_enable_stdio_uart(mck-parting-c 0)

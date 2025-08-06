@@ -1,3 +1,5 @@
+// HAL for audio subsystem
+
 #pragma once
 
 #include "audio/buffer.h"

@@ -20,10 +20,12 @@ static const uint32_t SM_BCLK = BCLK_HZ; // 2 clocks per bit
 static const uint32_t SM_CLKDIV_INT = SYS_CLOCK_HZ / SM_BCLK;
 static const uint32_t SM_CLKDIV_FRAC = (SYS_CLOCK_HZ % SM_BCLK) * 256 / SM_BCLK;
 
+// todo: stop clocking bclk / lrck when not playing audio for power saving
+
 // Shared state
 static const uint32_t SILENT_BUFFER[AUDIO_BUFFER_SIZE] = {0};
 static audio_buffer_pool_t pool;
-int dma_channel;
+static int dma_channel;
 
 // initialize pio state machine for i2s
 static void audio_playback_write_pio_init(PIO pio, uint8_t sm) {
@@ -32,9 +34,9 @@ static void audio_playback_write_pio_init(PIO pio, uint8_t sm) {
     panic("Failed to add audio playback write program to PIO");
   }
 
-  pio_gpio_init(pio, AUDIO_I2S_DOUT);
-  pio_gpio_init(pio, AUDIO_I2S_BCLK);
   pio_gpio_init(pio, AUDIO_I2S_LRCK);
+  pio_gpio_init(pio, AUDIO_I2S_BCLK);
+  pio_gpio_init(pio, AUDIO_I2S_DOUT);
 
   pio_sm_config c = audio_playback_write_program_get_default_config(offset);
   sm_config_set_out_pins(&c, AUDIO_I2S_DOUT, 1);
@@ -43,7 +45,8 @@ static void audio_playback_write_pio_init(PIO pio, uint8_t sm) {
   sm_config_set_fifo_join(&c, PIO_FIFO_JOIN_TX);
   pio_sm_init(pio, sm, offset, &c);
 
-  uint32_t pins = 0b111 << AUDIO_I2S_DOUT; // DOUT, BCLK, LRCK
+  uint32_t pins = 1 << AUDIO_I2S_DOUT | 1 << AUDIO_I2S_BCLK |
+                  1 << AUDIO_I2S_LRCK; // DOUT, BCLK, LRCK
   pio_sm_set_pins_with_mask(pio, sm, 0, pins);
   pio_sm_set_pindirs_with_mask(pio, sm, pins, pins);
 

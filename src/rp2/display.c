@@ -42,18 +42,18 @@ static uint8_t _gpio_and_delay_cb(u8x8_t *u8x8, uint8_t msg, uint8_t arg_int,
   switch (msg) {
   case U8X8_MSG_GPIO_AND_DELAY_INIT:
     spi_init(DISP_SPI_PORT, DISP_SPI_SPEED);
-    gpio_set_function(DISP_PIN_CS, GPIO_FUNC_SIO);
-    gpio_set_function(DISP_PIN_SCK, GPIO_FUNC_SPI);
-    gpio_set_function(DISP_PIN_MOSI, GPIO_FUNC_SPI);
-    gpio_init(DISP_PIN_RST);
-    gpio_init(DISP_PIN_DC);
-    gpio_init(DISP_PIN_CS);
-    gpio_set_dir(DISP_PIN_RST, GPIO_OUT);
-    gpio_set_dir(DISP_PIN_DC, GPIO_OUT);
-    gpio_set_dir(DISP_PIN_CS, GPIO_OUT);
-    gpio_put(DISP_PIN_RST, 1);
-    gpio_put(DISP_PIN_CS, 1);
-    gpio_put(DISP_PIN_DC, 0);
+    gpio_set_function(DISP_CS, GPIO_FUNC_SIO);
+    gpio_set_function(DISP_SCK, GPIO_FUNC_SPI);
+    gpio_set_function(DISP_MOSI, GPIO_FUNC_SPI);
+    gpio_init(DISP_RST);
+    gpio_init(DISP_DC);
+    gpio_init(DISP_CS);
+    gpio_set_dir(DISP_RST, GPIO_OUT);
+    gpio_set_dir(DISP_DC, GPIO_OUT);
+    gpio_set_dir(DISP_CS, GPIO_OUT);
+    gpio_put(DISP_RST, 1);
+    gpio_put(DISP_CS, 1);
+    gpio_put(DISP_DC, 0);
     break;
   case U8X8_MSG_DELAY_NANO: // delay arg_int * 1 nano second
     sleep_us((999 + arg_int) / 1000);
@@ -68,13 +68,13 @@ static uint8_t _gpio_and_delay_cb(u8x8_t *u8x8, uint8_t msg, uint8_t arg_int,
     sleep_ms(arg_int);
     break;
   case U8X8_MSG_GPIO_CS: // CS (chip select) pin: Output level in arg_int
-    gpio_put(DISP_PIN_CS, arg_int);
+    gpio_put(DISP_CS, arg_int);
     break;
   case U8X8_MSG_GPIO_DC: // DC (data/cmd, A0, register select) pin: Output level
-    gpio_put(DISP_PIN_DC, arg_int);
+    gpio_put(DISP_DC, arg_int);
     break;
   case U8X8_MSG_GPIO_RESET: // Reset pin: Output level in arg_int
-    gpio_put(DISP_PIN_RST,
+    gpio_put(DISP_RST,
              arg_int); // printf("U8X8_MSG_GPIO_RESET %d\n", arg_int);
     break;
   default:
@@ -85,9 +85,9 @@ static uint8_t _gpio_and_delay_cb(u8x8_t *u8x8, uint8_t msg, uint8_t arg_int,
 }
 
 void display_init(display_t *display) {
+  display->enabled = false;
+
   u8g2_t *u8g2 = display_get_u8g2(display);
-  // u8g2_Setup_ssd1306_128x64_noname_f(u8g2, U8G2_R0, _byte_cb,
-  //                                    _gpio_and_delay_cb);
   u8g2_Setup_sh1107_64x128_f(u8g2, U8G2_R1, _byte_cb, _gpio_and_delay_cb);
   u8g2_InitDisplay(u8g2);
 
@@ -96,11 +96,7 @@ void display_init(display_t *display) {
   gpio_put(DISP_REG_EN, 0); // keep display off until needed.
 }
 
-void display_on(display_t *display) {
-  if (display->enabled) {
-    return; // already enabled
-  }
-
+static void display_on(display_t *display) {
   // enable regulator
   gpio_put(DISP_REG_EN, 1);
   sleep_ms(100); // wait for regulator to stabilize
@@ -108,26 +104,23 @@ void display_on(display_t *display) {
   u8g2_t *u8g2 = display_get_u8g2(display);
   u8g2_SetPowerSave(u8g2, 0);
   u8g2_SetContrast(u8g2, 255);
-
-  display->enabled = true;
 }
 
-void display_off(display_t *display) {
-  if (!display->enabled) {
-    return; // already off
-  }
-
+static void display_off(display_t *display) {
   u8g2_t *u8g2 = display_get_u8g2(display);
   u8g2_SetPowerSave(u8g2, 1);
 
   sleep_ms(100); // wait for disp off flush
   // disable regulator
   gpio_put(DISP_REG_EN, 0);
-
-  display->enabled = false;
 }
 
 void display_set_enabled(display_t *display, bool enabled) {
+  if (display->enabled == enabled) {
+    return;
+  }
+  display->enabled = enabled;
+
   if (enabled) {
     display_on(display);
   } else {

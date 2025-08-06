@@ -1,3 +1,5 @@
+// HAL for display OLED and 9V regulator
+
 #pragma once
 
 #include <u8g2.h>
