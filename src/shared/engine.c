@@ -130,6 +130,8 @@ void engine_run_forever() {
 
   TimingInstrumenter ti_tick;
   TimingInstrumenter ti_show;
+  ti_init(&ti_tick);
+  ti_init(&ti_show);
 
   uint64_t last_frame_us = 0;
   uint64_t last_log_us = 0;
@@ -183,8 +185,8 @@ void engine_run_forever() {
 
     handle_menu_reset();
 
+    ti_start(&ti_tick);
     while (ticks--) {
-      ti_start(&ti_tick);
 
       peripheral_update_counter++;
       if (peripheral_update_counter >= UPDATE_PERIPHERAL_EVERY) {
@@ -192,11 +194,7 @@ void engine_run_forever() {
         peripheral_update_counter = 0;
       }
       tick++;
-
-      ti_stop(&ti_tick);
     }
-
-    ti_start(&ti_tick);
 
     // draw screen buffer
     u8g2_ClearBuffer(u8g2);
