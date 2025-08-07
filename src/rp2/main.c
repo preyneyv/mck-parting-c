@@ -12,6 +12,7 @@
 #include <hardware/pwm.h>
 #include <hardware/spi.h>
 #include <hardware/sync.h>
+#include <hardware/watchdog.h>
 #include <pico/multicore.h>
 #include <pico/stdlib.h>
 
@@ -22,14 +23,11 @@
 #include "config.h"
 
 void core1_main() {
-  // todo: event handling, timeline controller
-  audio_loop(&engine.audio);
+  audio_playback_init();
+  audio_playback_run_forever(&engine.synth);
 }
 
-void core0_main() {
-  // setup buttons
-  engine_run_forever();
-}
+void core0_main() { engine_run_forever(); }
 
 void engine_buttons_init() {
   gpio_init(BUTTON_PIN_L);
@@ -62,21 +60,17 @@ bool engine_button_read(button_id_t button_id) {
 }
 
 int main() {
-  // set clock for audio PWM reasons
+  // set clock for audio and LED timing reasons
   set_sys_clock_hz(SYS_CLOCK_HZ, true);
   stdio_init_all();
 
-  while (!stdio_usb_connected()) {
-    sleep_ms(10);
-  }
-
   engine_init();
 
-  // kick off audio core
+  // start audio core
   multicore_reset_core1();
   multicore_launch_core1(core1_main);
 
-  // kick off main core
+  // start main core
   core0_main();
   return 0;
 }

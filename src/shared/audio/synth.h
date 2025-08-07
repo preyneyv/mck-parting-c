@@ -12,6 +12,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include <pico/sync.h>
 #include <pico/util/queue.h>
 
 #include <shared/utils/q1x15.h>
@@ -19,11 +20,11 @@
 
 #include "buffer.h"
 
-#define AUDIO_SYNTH_VOICE_COUNT 4
-#define AUDIO_SYNTH_OPERATOR_COUNT 2
+#define AUDIO_SYNTH_VOICE_COUNT 8
+#define AUDIO_SYNTH_OPERATOR_COUNT 4
 #define AUDIO_SYNTH_LUT_RES 10
 #define AUDIO_SYNTH_LUT_SIZE (1 << AUDIO_SYNTH_LUT_RES)
-#define AUDIO_SYNTH_MESSAGE_QUEUE_SIZE 16
+#define AUDIO_SYNTH_MESSAGE_QUEUE_SIZE 32
 
 typedef struct audio_synth_t audio_synth_t;
 typedef struct audio_synth_voice_t audio_synth_voice_t;
@@ -138,10 +139,10 @@ typedef struct audio_synth_t {
   audio_synth_voice_t voices[AUDIO_SYNTH_VOICE_COUNT];
 
   queue_t msg_queue; // message queue for thread-safe operation
+  mutex_t mutex;     // mutex for any thread-safe operations
 } audio_synth_t;
 
-// update operator values based on active config
-// call this after updating operator.config
+// thread-safe update operator values based on active config
 void audio_synth_operator_set_config(audio_synth_operator_t *op,
                                      audio_synth_operator_config_t config);
 

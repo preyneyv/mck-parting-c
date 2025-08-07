@@ -59,6 +59,12 @@
     "ratio": "c",
     "cinttypes": "c",
     "typeinfo": "c",
-    "text_encoding": "c"
+    "text_encoding": "c",
+    "array": "c",
+    "deque": "c",
+    "tuple": "c",
+    "utility": "c",
+    "vector": "c",
+    "compare": "c"
   }
 }

@@ -4,16 +4,24 @@
 
 #include <shared/utils/q1x15.h>
 
-#include "audio.h"
+#include "audio/synth.h"
 #include "display.h"
 #include "leds.h"
 #include "peripheral.h"
 
 typedef struct {
-  void (*init)(void);
+  // called when scene is entered. called after exit of previous scene.
+  void (*enter)(void);
+  // called every tick
   void (*update)(void);
+  // called every frame
   void (*draw)(void);
-  void (*destroy)(void);
+  // called when scene is paused (sleep or menu)
+  void (*pause)(void);
+  // called when scene is resumed.
+  void (*resume)(void);
+  // called when scene is exited. called before enter of next scene.
+  void (*exit)(void);
 } scene_t;
 
 typedef enum {
@@ -25,12 +33,12 @@ typedef enum {
 typedef struct {
   button_id_t id;
   absolute_time_t pressed_at;
-  bool pressed;      // true if button is currently pressed
-  bool transitioned; // true if button was just transitioned this frame
+  bool pressed; // true if button is currently pressed
+  bool evt;     // true if button was just transitioned this frame
 } button_t;
 
 typedef struct {
-  audio_t audio;
+  audio_synth_t synth;
   display_t display;
   leds_t leds;
   peripheral_t peripheral;

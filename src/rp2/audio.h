@@ -1,5 +1,6 @@
 #pragma once
 
-#include <shared/audio.h>
+#include <shared/audio/synth.h>
 
-void audio_loop(audio_t *audio);
+void audio_playback_init();
+void audio_playback_run_forever(audio_synth_t *synth);

@@ -69,12 +69,14 @@ void audio_synth_init(audio_synth_t *synth, float sample_rate,
 
   queue_init(&synth->msg_queue, sizeof(audio_synth_message_t),
              AUDIO_SYNTH_MESSAGE_QUEUE_SIZE);
+  mutex_init(&synth->mutex);
 }
 
 static void make_env_stage_from_cfg(audio_synth_env_state_stage_t *stage,
                                     uint32_t d_timebase, uint16_t duration,
                                     q1x31 prev_level, q1x31 next_level) {
-  uint16_t sample_duration = duration * d_timebase;
+
+  uint32_t sample_duration = duration * d_timebase;
   stage->duration = sample_duration;
   stage->level = next_level;
 
@@ -89,6 +91,8 @@ static void make_env_stage_from_cfg(audio_synth_env_state_stage_t *stage,
 // update operator values based on active config
 void audio_synth_operator_set_config(audio_synth_operator_t *op,
                                      audio_synth_operator_config_t config) {
+  mutex_t *mutex = &op->voice->synth->mutex;
+  mutex_enter_blocking(mutex);
   op->config = config;
 
   // update envelope timing
@@ -101,20 +105,20 @@ void audio_synth_operator_set_config(audio_synth_operator_t *op,
                           config.env.s);
   make_env_stage_from_cfg(&op->env.stages[3], d_timebase, config.env.r,
                           config.env.s, Q1X31_ZERO);
+
+  mutex_exit(mutex);
 }
 
 static void audio_synth_operator_note_on(audio_synth_operator_t *op,
                                          uint16_t note_number, q1x15 velocity) {
   // this *might* be called without a previous note_off
 
-  op->phase = 0;
+  // op->phase = 0;
   uint32_t lut_phase = op->voice->synth->note_dphase_lut[note_number];
   if (op->config.freq_mult == 0)
     op->d_phase = lut_phase / 2;
   else
     op->d_phase = lut_phase * op->config.freq_mult;
-  printf("op %d note on: %d, d_phase: %u\n", op - op->voice->ops, note_number,
-         op->d_phase);
   op->level = q1x15_mul(op->config.level, velocity);
 
   // reset envelope
@@ -127,7 +131,6 @@ static void audio_synth_operator_note_on(audio_synth_operator_t *op,
 
 void audio_synth_voice_note_on(audio_synth_voice_t *voice, uint16_t note_number,
                                uint8_t velocity) {
-  // set frequency
   q1x15 velocity_ratio = q1x15_mag(velocity, 127);
 
   for (int op_idx = 0; op_idx < AUDIO_SYNTH_OPERATOR_COUNT; op_idx++) {
@@ -258,42 +261,62 @@ static inline void _merge_drafts(q1x15 *out, q1x15 *in, uint32_t buffer_size) {
   }
 }
 
+static inline q1x15 soft_limit_q17x15(int32_t x) {
+  // take a q17.15 sample and apply soft clipping to bring it back to q1x15
+  if (x <= Q1X15_ONE && x >= Q1X15_NEG_ONE)
+    return x;
+
+  int64_t abs_x = (x < 0) ? -(int64_t)x : (int64_t)x;
+  int64_t scaled = ((int64_t)x * Q1X15_ONE) / abs_x;
+  return q1x15_clamp_s32((int32_t)scaled);
+}
+
 void audio_synth_fill_buffer(audio_synth_t *synth, audio_buffer_t buffer,
                              uint32_t buffer_size) {
+  // lock the config
+  mutex_enter_blocking(&synth->mutex);
   // handle queued messages
   audio_synth_message_t msg;
   while (queue_try_remove(&synth->msg_queue, &msg)) {
     audio_synth_handle_message(synth, &msg);
   }
 
-  static q1x15 *draft[2] = {NULL};
+  static q1x15 *draft_voice = NULL;
   static uint32_t draft_size = 0;
   if (draft_size < buffer_size) {
-    for (int i = 0; i < 2; i++) {
-      if (draft[i] == NULL) {
-        draft[i] = malloc(buffer_size * sizeof(q1x15));
-      } else {
-        draft[i] = realloc(draft[i], buffer_size * sizeof(q1x15));
-      }
-      draft_size = buffer_size;
+    if (draft_voice == NULL) {
+      draft_voice = malloc(buffer_size * sizeof(q1x15));
+    } else {
+      draft_voice = realloc(draft_voice, buffer_size * sizeof(q1x15));
     }
+    draft_size = buffer_size;
   }
 
-  // fill buffer with voices
-  audio_synth_voice_fill_buffer(&synth->voices[0], draft[0], buffer_size);
-  for (uint8_t voice_idx = 1; voice_idx < AUDIO_SYNTH_VOICE_COUNT;
+  // misuse 32bit buffer as a 16bit mono buffer with room for overflow (so we
+  // can clip later)
+  memset(buffer, 0, buffer_size * sizeof(int32_t));
+  for (uint8_t voice_idx = 0; voice_idx < AUDIO_SYNTH_VOICE_COUNT;
        voice_idx++) {
-    audio_synth_voice_fill_buffer(&synth->voices[voice_idx], draft[1],
+    audio_synth_voice_fill_buffer(&synth->voices[voice_idx], draft_voice,
                                   buffer_size);
-    _merge_drafts(draft[0], draft[1], buffer_size);
+    for (uint32_t i = 0; i < buffer_size; i++) {
+      q1x15 sample = draft_voice[i];
+      buffer[i] += (int32_t)sample;
+    }
   }
 
   // apply master level and write to output
   q1x15 master_level = synth->master_level;
   for (uint32_t i = 0; i < buffer_size; i++) {
-    q1x15 sample = q1x15_mul(master_level, draft[0][i]);
+    int32_t sample = buffer[i];
+    // apply soft clipping
+    sample = soft_limit_q17x15(sample);
+    // apply master level
+    sample = q1x15_mul(master_level, sample);
     buffer[i] = audio_buffer_frame_from_mono((int16_t)sample);
   }
+
+  mutex_exit(&synth->mutex);
 }
 
 void audio_synth_panic(audio_synth_t *synth) {

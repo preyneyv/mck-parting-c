@@ -2,6 +2,8 @@
 
 #include <hardware/adc.h>
 #include <hardware/gpio.h>
+#include <hardware/watchdog.h>
+#include <pico/stdio.h>
 
 #include <shared/peripheral.h>
 
@@ -72,7 +74,6 @@ void peripheral_read_inputs(peripheral_t *p) {
     panic("cannot read peripheral inputs when not enabled");
   }
 
-  p->plugged_in = gpio_get(PERIPH_VSYS_PGOOD_N) != 0;
   p->charging = gpio_get(PERIPH_BAT_CHG_N) != 0;
 
   adc_select_input(PERIPH_VSYS_ADC);
@@ -80,7 +81,7 @@ void peripheral_read_inputs(peripheral_t *p) {
   float raw_voltage = (raw_level * ADC_TO_VOLTAGE);
   uint16_t bat_voltage =
       (raw_voltage * 1.51f) * 1000; // voltage divider 5.1k / 10k
-  printf("battery voltage: %d mV\n", bat_voltage);
 
+  p->plugged_in = bat_voltage >= 4200; // 3.5V threshold for USB power
   p->battery_level = battery_percentage_curve(bat_voltage);
 }

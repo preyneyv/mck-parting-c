@@ -1,5 +1,7 @@
 #include <stdio.h>
 
+#include <hardware/watchdog.h>
+
 #include <shared/utils/timing.h>
 
 #include "engine.h"
@@ -11,7 +13,7 @@ engine_t engine;
 
 void engine_init() {
   // initialize all subsystems
-  audio_init(&engine.audio);
+  audio_synth_init(&engine.synth, AUDIO_SAMPLE_RATE, 1000);
   display_init(&engine.display);
   peripheral_init(&engine.peripheral);
   leds_init(&engine.leds);
@@ -20,12 +22,13 @@ void engine_init() {
   engine.buttons.right.id = BUTTON_RIGHT;
   engine.buttons.menu.id = BUTTON_MENU;
   engine_buttons_init(&engine.buttons);
+  watchdog_enable(200, 1);
 }
 
 static void draw_fps(u8g2_t *u8g2, uint32_t fps) {
   static int fps_state = 0;
   u8g2_SetDrawColor(u8g2, 0);
-  u8g2_DrawBox(u8g2, 0, 0, 16, 4);
+  u8g2_DrawBox(u8g2, 0, 0, 17, 5);
   u8g2_SetDrawColor(u8g2, 1);
   fps_state = (fps_state + 1) % 10;
   if (fps_state < 4) {
@@ -44,21 +47,77 @@ static void read_button(button_t *button, absolute_time_t now) {
   if (pressed) {
     if (button->pressed) {
       // held down
-      button->transitioned = false;
+      button->evt = false;
     } else {
       button->pressed = true;
       button->pressed_at = now;
-      button->transitioned = true;
+      button->evt = true;
     }
   } else {
     if (button->pressed) {
       // released
       button->pressed = false;
       button->pressed_at = nil_time;
-      button->transitioned = true;
+      button->evt = true;
     } else {
       // held up
-      button->transitioned = false;
+      button->evt = false;
+    }
+  }
+}
+
+static void update() {
+  if (engine.buttons.left.evt) {
+    if (engine.buttons.left.pressed) {
+      audio_synth_enqueue(&engine.synth,
+                          &(audio_synth_message_t){
+                              .type = AUDIO_SYNTH_MESSAGE_NOTE_ON,
+                              .data.note_on =
+                                  {
+                                      .voice = 0,
+                                      .note_number = note("C4"),
+                                      .velocity = 100,
+                                  },
+                          });
+    } else {
+      audio_synth_enqueue(&engine.synth,
+                          &(audio_synth_message_t){
+                              .type = AUDIO_SYNTH_MESSAGE_NOTE_OFF,
+                              .data.note_off = {.voice = 0},
+                          });
+    }
+  }
+  if (engine.buttons.right.evt) {
+    if (engine.buttons.right.pressed) {
+      audio_synth_enqueue(&engine.synth,
+                          &(audio_synth_message_t){
+                              .type = AUDIO_SYNTH_MESSAGE_NOTE_ON,
+                              .data.note_on =
+                                  {
+                                      .voice = 1,
+                                      .note_number = note("G4"),
+                                      .velocity = 100,
+                                  },
+                          });
+    } else {
+      audio_synth_enqueue(&engine.synth,
+                          &(audio_synth_message_t){
+                              .type = AUDIO_SYNTH_MESSAGE_NOTE_OFF,
+                              .data.note_off = {.voice = 1},
+                          });
+    }
+  }
+}
+
+static void handle_menu_reset() {
+  // if the menu button is held down for a while, reset using watchdog
+  watchdog_update();
+  if (engine.buttons.menu.pressed) {
+    if (time_reached(delayed_by_ms(engine.buttons.menu.pressed_at, 5000))) {
+      // reset the system
+      watchdog_enable(0, 0);
+      while (1)
+        ;
     }
   }
 }
@@ -76,6 +135,33 @@ void engine_run_forever() {
   uint32_t fps = 0;
 
   u8g2_t *u8g2 = display_get_u8g2(&engine.display);
+
+  engine.synth.master_level = q1x15_f(.5f);
+
+  audio_synth_operator_config_t config = audio_synth_operator_config_default;
+  config.env = (audio_synth_env_config_t){
+      .a = 0,
+      .d = 700,
+      .s = q1x31_f(.2f), // sustain level
+      .r = 200,
+  };
+  config.freq_mult = 11;
+  config.level = q1x15_f(0.3f);
+  audio_synth_operator_set_config(&engine.synth.voices[0].ops[0], config);
+  audio_synth_operator_set_config(&engine.synth.voices[1].ops[0], config);
+
+  config = audio_synth_operator_config_default;
+  config.env = (audio_synth_env_config_t){
+      .a = 0,
+      .d = 1200,
+      .s = q1x31_f(0.f), // sustain level
+      .r = 300,
+  };
+  config.level = q1x15_f(.5f);
+  config.mode = AUDIO_SYNTH_OP_MODE_FREQ_MOD;
+  audio_synth_operator_set_config(&engine.synth.voices[0].ops[1], config);
+  audio_synth_operator_set_config(&engine.synth.voices[1].ops[1], config);
+
   while (1) {
     absolute_time_t now = time_us_64();
     engine.now = now;
@@ -88,34 +174,25 @@ void engine_run_forever() {
     read_button(&engine.buttons.right, now);
     read_button(&engine.buttons.menu, now);
 
+    handle_menu_reset();
+
     // draw screen buffer
     u8g2_ClearBuffer(u8g2);
-
     u8g2_SetDrawColor(u8g2, 1);
-    if (engine.buttons.left.pressed) {
-      engine.leds.colors[0].r = 0xff;
-      u8g2_DrawStr(u8g2, 0, 20, "Left");
+    u8g2_SetFont(u8g2, u8g2_font_5x7_tf);
+    u8g2_DrawStr(u8g2, 0, 20, "Hello, world!");
+    if (engine.peripheral.plugged_in) {
+      u8g2_DrawStr(u8g2, 0, 30, "USB");
     } else {
-      engine.leds.colors[0].r = 0x00;
+      u8g2_DrawStr(u8g2, 0, 30, "BAT");
     }
-    if (engine.buttons.left.transitioned) {
-      u8g2_DrawStr(u8g2, 60, 20, "T");
-    }
-    if (engine.buttons.right.pressed) {
-      engine.leds.colors[1].r = 0xff;
-      u8g2_DrawStr(u8g2, 0, 30, "Right");
-    } else {
-      engine.leds.colors[1].r = 0x00;
-    }
-    if (engine.buttons.right.transitioned) {
-      u8g2_DrawStr(u8g2, 60, 30, "T");
-    }
-    if (engine.buttons.menu.pressed) {
-      u8g2_DrawStr(u8g2, 0, 40, "Menu");
-    }
-    if (engine.buttons.menu.transitioned) {
-      u8g2_DrawStr(u8g2, 60, 40, "T");
-    }
+    char battery_str[8];
+    snprintf(battery_str, sizeof(battery_str), "%d",
+             engine.peripheral.battery_level);
+    u8g2_DrawStr(u8g2, 0, 40, battery_str);
+
+    // todo: remove
+    update();
 
     ti_stop(&ti_tick);
 
