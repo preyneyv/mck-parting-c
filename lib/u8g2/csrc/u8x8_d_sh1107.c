@@ -255,7 +255,7 @@ static const uint8_t u8x8_d_sh1107_64x128_noname_init_seq[] = {
   
   U8X8_CA(0x0a8, 0x7f),		/* 0x03f) multiplex ratio */
   U8X8_CA(0x0d3, 0x060),		/* display offset */
-  U8X8_CA(0x0d5, 0x0F0),		/* clock divide ratio (0x00=1) and oscillator frequency (0x8) */
+  U8X8_CA(0x0d5, 0x0f0),		/* clock divide ratio (0x00=1) and oscillator frequency (0x8) */
   U8X8_CA(0x0d9, 0x022), 		/* [2] pre-charge period 0x022/f1*/
   U8X8_CA(0x0db, 0x035), 		/* vcomh deselect level */  
   

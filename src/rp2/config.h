@@ -8,13 +8,13 @@
 #define SYS_CLOCK_HZ 132000000
 
 //// BUTTON CONFIGURATION ////
-#define BUTTON_L 10
-#define BUTTON_R 11
-#define BUTTON_M 12
+#define BUTTON_PIN_L 10
+#define BUTTON_PIN_R 11
+#define BUTTON_PIN_M 12
 
 //// DISPLAY CONFIGURATION ////
 #define DISP_SPI_PORT spi0
-#define DISP_SPI_SPEED 100 * 1000 * 1000
+#define DISP_SPI_SPEED (100 * 1000 * 1000)
 #define DISP_RST 0
 #define DISP_CS 1
 #define DISP_SCK 2
@@ -39,6 +39,7 @@
 #define PERIPH_BAT_CHG_EN_N 23
 #define PERIPH_BAT_CHG_N 25
 #define PERIPH_VSYS_PGOOD_N 24
+#define PERIPH_VSYS 26
 #define PERIPH_VSYS_ADC 0
 
 //// LED CONFIGURATION ////

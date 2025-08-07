@@ -21,3 +21,4 @@ static const uint32_t DISP_PIX = DISP_WIDTH * DISP_HEIGHT;
 // fixable, it costs more float ops in the audio hot loop and is largely
 // unnecessary.
 #define AUDIO_SAMPLE_RATE 48000
+#define AUDIO_SYNTH_TIMEBASE 1000 // 1 second

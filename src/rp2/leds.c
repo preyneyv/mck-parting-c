@@ -1,11 +1,10 @@
 
 #include <hardware/pio.h>
 
-#include <shared/led.h>
+#include <shared/leds.h>
 
 #include "config.h"
-#include "led.pio.h"
-#include <stdio.h>
+#include "leds.pio.h"
 
 static const uint8_t CYCLES_PER_BIT =
     led_write_T1 + led_write_T2 + led_write_T3; // measured from led.pio
@@ -16,7 +15,6 @@ static const uint32_t SM_CLKDIV_FRAC = (SYS_CLOCK_HZ % SM_BCLK) * 256 / SM_BCLK;
 static uint8_t led_sm;
 
 void leds_init(leds_t *leds) {
-  // todo: setup hardware
   PIO pio = LED_PIO;
   led_sm = pio_claim_unused_sm(pio, true);
 
@@ -36,8 +34,6 @@ void leds_init(leds_t *leds) {
 
   pio_sm_init(pio, led_sm, offset, &c);
   pio_sm_set_enabled(pio, led_sm, true);
-
-  printf("LEDs intitialized\n");
 }
 
 static uint32_t color_to_led_bytes(color_t color) {

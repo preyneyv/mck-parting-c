@@ -12,6 +12,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include <pico/util/queue.h>
+
 #include <shared/utils/q1x15.h>
 #include <shared/utils/q1x31.h>
 
@@ -21,6 +23,7 @@
 #define AUDIO_SYNTH_OPERATOR_COUNT 2
 #define AUDIO_SYNTH_LUT_RES 10
 #define AUDIO_SYNTH_LUT_SIZE (1 << AUDIO_SYNTH_LUT_RES)
+#define AUDIO_SYNTH_MESSAGE_QUEUE_SIZE 16
 
 typedef struct audio_synth_t audio_synth_t;
 typedef struct audio_synth_voice_t audio_synth_voice_t;
@@ -133,6 +136,8 @@ typedef struct audio_synth_t {
   q1x15 master_level;
 
   audio_synth_voice_t voices[AUDIO_SYNTH_VOICE_COUNT];
+
+  queue_t msg_queue; // message queue for thread-safe operation
 } audio_synth_t;
 
 // update operator values based on active config
@@ -164,6 +169,10 @@ void audio_synth_panic(audio_synth_t *synth);
 // handle a message for the synthesizer
 void audio_synth_handle_message(audio_synth_t *synth,
                                 audio_synth_message_t *msg);
+
+// thread-safe, core-safe enqueue a message for the synthesizer
+// messages may be dropped if the queue is full
+void audio_synth_enqueue(audio_synth_t *synth, audio_synth_message_t *msg);
 
 // fill a buffer with samples from the synthesizer
 void audio_synth_fill_buffer(audio_synth_t *synth, audio_buffer_t buffer,

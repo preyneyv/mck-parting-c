@@ -7,6 +7,7 @@
 #include <stdio.h>
 
 #include <hardware/clocks.h>
+#include <hardware/gpio.h>
 #include <hardware/irq.h>
 #include <hardware/pwm.h>
 #include <hardware/spi.h>
@@ -14,93 +15,50 @@
 #include <pico/multicore.h>
 #include <pico/stdlib.h>
 
-#include <u8g2.h>
-
-#include <shared/display.h>
+#include <shared/engine.h>
 #include <shared/utils/timing.h>
-
-#include <shared/led.h>
-#include <shared/peripheral.h>
 
 #include "audio.h"
 #include "config.h"
 
-display_t display;
-peripheral_t peripheral;
-leds_t leds;
-
 void core1_main() {
-  // audio_init();
   // todo: event handling, timeline controller
+  audio_loop(&engine.audio);
 }
 
-// todo: buttons
 void core0_main() {
-  display_init(&display);
-  display_set_enabled(&display, true);
+  // setup buttons
+  engine_run_forever();
+}
 
-  peripheral_init(&peripheral);
-  peripheral_set_enabled(&peripheral, true);
-  leds_init(&leds);
-  leds.colors[0].hex = 0x00ff00; // green
-  leds.colors[1].hex = 0x0000ff; // blue
-  leds_show(&leds);
+void engine_buttons_init() {
+  gpio_init(BUTTON_PIN_L);
+  gpio_set_dir(BUTTON_PIN_L, GPIO_IN);
+  gpio_pull_up(BUTTON_PIN_L);
 
-  TimingInstrumenter ti_tick;
-  TimingInstrumenter ti_show;
+  gpio_init(BUTTON_PIN_R);
+  gpio_set_dir(BUTTON_PIN_R, GPIO_IN);
+  gpio_pull_up(BUTTON_PIN_R);
 
-  uint64_t last_frame_us = 0;
-  uint64_t last_log_us = 0;
-  uint32_t last_log_frames = 0;
-  uint32_t fps = 0;
+  gpio_init(BUTTON_PIN_M);
+  gpio_set_dir(BUTTON_PIN_M, GPIO_IN);
+  gpio_pull_up(BUTTON_PIN_M);
+}
 
-  uint32_t i = 0;
-
-  u8g2_t *u8g2 = display_get_u8g2(&display);
-  while (1) {
-    // handle_sdl_events();
-    ti_start(&ti_tick);
-    i = (i + 1) % DISP_PIX;
-    uint8_t x = i % DISP_WIDTH;
-    uint8_t y = i / DISP_WIDTH;
-
-    u8g2_ClearBuffer(u8g2);
-    u8g2_SetDrawColor(u8g2, 0);
-    u8g2_DrawBox(u8g2, 0, 0, 128, 64);
-    u8g2_SetDrawColor(u8g2, 1);
-    u8g2_DrawBox(u8g2, 10, 10, 20, 20);
-
-    u8g2_SetDrawColor(u8g2, 1);
-    u8g2_DrawPixel(u8g2, x, y); // pixel that scans L to R, T to B
-    u8g2_SetFont(u8g2, u8g2_font_6x10_tf);
-    u8g2_DrawStr(u8g2, 0, 10, "Hello, world!");
-    ti_stop(&ti_tick);
-
-    ti_start(&ti_show);
-    u8g2_SendBuffer(u8g2);
-    ti_stop(&ti_show);
-
-    last_log_frames++;
-    uint64_t now = time_us_64();
-    if (now - last_log_us > 1000000) {
-      fps = last_log_frames;
-      float ti_tick_avg = ti_get_average_ms(&ti_tick, true);
-      float ti_show_avg = ti_get_average_ms(&ti_show, true);
-      float ti_frame_avg = ti_tick_avg + ti_show_avg;
-      printf("fps: %d | frame: %.2f ms | tick: %.2f ms | show: %.2f ms\n", fps,
-             ti_frame_avg, ti_tick_avg, ti_show_avg);
-      last_log_us = now;
-      last_log_frames = 0;
-    }
-
-    uint64_t spent_us = now - last_frame_us;
-    if (spent_us < TARGET_FRAME_INTERVAL_US) {
-      sleep_us(TARGET_FRAME_INTERVAL_US - spent_us);
-      last_frame_us = time_us_64();
-    } else {
-      last_frame_us = now;
-    }
+bool engine_button_read(button_id_t button_id) {
+  uint gpio;
+  switch (button_id) {
+  case BUTTON_LEFT:
+    gpio = BUTTON_PIN_L;
+    break;
+  case BUTTON_RIGHT:
+    gpio = BUTTON_PIN_R;
+    break;
+  case BUTTON_MENU:
+    gpio = BUTTON_PIN_M;
+    break;
   }
+  return 1 - gpio_get(gpio); // active low
 }
 
 int main() {
@@ -112,7 +70,7 @@ int main() {
     sleep_ms(10);
   }
 
-  printf("clock set to %d Hz\n", clock_get_hz(clk_sys));
+  engine_init();
 
   // kick off audio core
   multicore_reset_core1();

@@ -7,7 +7,7 @@
 
 // fixed point 1.31
 // res is 2^-31 = 2.3283e-10
-// range is [0, +1.0]
+// range is [-1.0, +1.0]
 // note that multiplying two q1x31 values is slow on RP2040, so use it sparingly
 typedef int32_t q1x31;
 

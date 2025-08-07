@@ -3,6 +3,7 @@
 #include <hardware/dma.h>
 #include <hardware/pio.h>
 
+#include <shared/audio.h>
 #include <shared/audio/buffer.h>
 #include <shared/audio/synth.h>
 #include <shared/utils/timing.h>
@@ -24,7 +25,7 @@ static const uint32_t SM_CLKDIV_FRAC = (SYS_CLOCK_HZ % SM_BCLK) * 256 / SM_BCLK;
 
 // Shared state
 static const uint32_t SILENT_BUFFER[AUDIO_BUFFER_SIZE] = {0};
-static audio_buffer_pool_t pool;
+static audio_buffer_pool_t *pool;
 static int dma_channel;
 
 // initialize pio state machine for i2s
@@ -52,8 +53,6 @@ static void audio_playback_write_pio_init(PIO pio, uint8_t sm) {
 
   pio_sm_set_clkdiv_int_frac8(pio, sm, SM_CLKDIV_INT, SM_CLKDIV_FRAC);
   pio_sm_set_enabled(pio, sm, true);
-
-  printf("pio sm %d clkdiv: %f\n", sm, SM_CLKDIV_INT + SM_CLKDIV_FRAC / 256.0);
 }
 
 static void __isr audio_playback_write_dma_irq_handler(void) {
@@ -64,10 +63,10 @@ static void __isr audio_playback_write_dma_irq_handler(void) {
 
   if (using_pool_buffer) {
     // return borrowed buffer to pool
-    audio_buffer_pool_commit_read(&pool);
+    audio_buffer_pool_commit_read(pool);
   }
   // get next buffer if available, otherwise use silent buffer
-  audio_buffer_t next_buffer = audio_buffer_pool_acquire_read(&pool, false);
+  audio_buffer_t next_buffer = audio_buffer_pool_acquire_read(pool, false);
   if (next_buffer == NULL) {
     // no buffer available, use silent buffer
     dma_channel_set_read_addr(dma_channel, SILENT_BUFFER, true);
@@ -109,92 +108,18 @@ static void audio_playback_begin() {
   audio_playback_write_dma_init(AUDIO_I2S_PIO, sm);
 }
 
-void audio_init() {
-  audio_buffer_pool_init(&pool, AUDIO_BUFFER_POOL_SIZE, AUDIO_BUFFER_SIZE);
-
+void audio_init(audio_t *audio) {
+  pool = &audio->pool;
+  audio_buffer_pool_init(&audio->pool, AUDIO_BUFFER_POOL_SIZE,
+                         AUDIO_BUFFER_SIZE);
+  audio_synth_init(&audio->synth, AUDIO_SAMPLE_RATE, 1000);
   audio_playback_begin();
+}
 
-  TimingInstrumenter ti_synth;
-
-  audio_synth_t synth;
-  audio_synth_init(&synth, AUDIO_SAMPLE_RATE, 1000);
-  synth.master_level = q1x15_f(1.f);
-
-  int i = 0;
+void audio_loop(audio_t *audio) {
   while (true) {
-    // if (i == 0) {
-    //   audio_synth_handle_message(&synth,
-    //                              &(audio_synth_message_t){
-    //                                  .type = AUDIO_SYNTH_MESSAGE_NOTE_ON,
-    //                                  .data.note_on =
-    //                                      {
-    //                                          .voice = 0,
-    //                                          .note_number = note("C4"),
-    //                                          .velocity = 127,
-    //                                      },
-    //                              });
-    // } else if (i == 100) {
-    //   audio_synth_handle_message(&synth,
-    //                              &(audio_synth_message_t){
-    //                                  .type = AUDIO_SYNTH_MESSAGE_NOTE_OFF,
-    //                                  .data.note_off =
-    //                                      {
-    //                                          .voice = 0,
-    //                                      },
-    //                              });
-    // } else if (i == 200) {
-    //   audio_synth_handle_message(&synth,
-    //                              &(audio_synth_message_t){
-    //                                  .type = AUDIO_SYNTH_MESSAGE_NOTE_ON,
-    //                                  .data.note_on =
-    //                                      {
-    //                                          .voice = 0,
-    //                                          .note_number = note("D4"),
-    //                                          .velocity = 127,
-    //                                      },
-    //                              });
-    // } else if (i == 300) {
-    //   audio_synth_handle_message(&synth,
-    //                              &(audio_synth_message_t){
-    //                                  .type = AUDIO_SYNTH_MESSAGE_NOTE_OFF,
-    //                                  .data.note_off =
-    //                                      {
-    //                                          .voice = 0,
-    //                                      },
-    //                              });
-    // } else if (i == 400) {
-    //   audio_synth_handle_message(&synth,
-    //                              &(audio_synth_message_t){
-    //                                  .type = AUDIO_SYNTH_MESSAGE_NOTE_ON,
-    //                                  .data.note_on =
-    //                                      {
-    //                                          .voice = 0,
-    //                                          .note_number = note("G4"),
-    //                                          .velocity = 127,
-    //                                      },
-    //                              });
-    // } else if (i == 800) {
-    //   audio_synth_handle_message(&synth,
-    //                              &(audio_synth_message_t){
-    //                                  .type = AUDIO_SYNTH_MESSAGE_NOTE_OFF,
-    //                                  .data.note_off =
-    //                                      {
-    //                                          .voice = 0,
-    //                                      },
-    //                              });
-    // } else if (i == 1600) {
-    //   i = -1;
-    // }
-
-    audio_buffer_t buffer = audio_buffer_pool_acquire_write(&pool, true);
-    ti_start(&ti_synth);
-    audio_synth_fill_buffer(&synth, buffer, pool.buffer_size);
-    ti_stop(&ti_synth);
-    audio_buffer_pool_commit_write(&pool);
-
-    i += 1;
-    if (i % 100 == 0) {
-      printf("synth: %f ms\n", ti_get_average_ms(&ti_synth, true));
-    }
+    audio_buffer_t buffer = audio_buffer_pool_acquire_write(pool, true);
+    audio_synth_fill_buffer(&audio->synth, buffer, audio->pool.buffer_size);
+    audio_buffer_pool_commit_write(pool);
   }
 }

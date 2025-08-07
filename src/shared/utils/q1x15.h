@@ -13,7 +13,7 @@ typedef int16_t q1x15;
 
 #define Q1X15_ONE ((q1x15)INT16_MAX)
 #define Q1X15_ZERO ((q1x15)0)
-#define Q1X15_NEG_ONE ((q1x15)-INT16_MAX) //
+#define Q1X15_NEG_ONE ((q1x15) - INT16_MAX)
 
 static inline q1x15 q1x15_clamp_s32(int32_t a) {
   if (a > Q1X15_ONE)
