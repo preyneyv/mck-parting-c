@@ -46,7 +46,13 @@ set(SHARED_SOURCES
 )
 add_library(shared STATIC ${SHARED_SOURCES})
 target_include_directories(shared PRIVATE ${CMAKE_CURRENT_LIST_DIR}/src)
-target_link_libraries(shared PUBLIC u8g2 m pico_stdlib)
+target_link_libraries(shared PUBLIC 
+    u8g2 
+    m 
+    pico_stdlib 
+    hardware_divider 
+    hardware_watchdog
+)
 
 if(PICO_PLATFORM STREQUAL "host")
     # --- host build ---
@@ -119,6 +125,7 @@ else()
     target_link_libraries(mck-parting-c PRIVATE
         shared
         hardware_adc
+        hardware_divider
         hardware_dma
         hardware_pio
         hardware_pwm

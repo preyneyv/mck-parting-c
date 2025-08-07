@@ -1,5 +1,6 @@
 #include <stdio.h>
 
+#include <hardware/divider.h>
 #include <hardware/watchdog.h>
 
 #include <shared/utils/timing.h>
@@ -123,6 +124,7 @@ static void handle_menu_reset() {
 }
 
 void engine_run_forever() {
+  const uint32_t UPDATE_PERIPHERAL_EVERY = 1000; // ticks
   display_set_enabled(&engine.display, true);
   peripheral_set_enabled(&engine.peripheral, true);
 
@@ -162,12 +164,17 @@ void engine_run_forever() {
   audio_synth_operator_set_config(&engine.synth.voices[0].ops[1], config);
   audio_synth_operator_set_config(&engine.synth.voices[1].ops[1], config);
 
+  uint32_t tick = 0;
+  uint32_t dt = 0;
+  uint32_t peripheral_update_counter = 0;
   while (1) {
     absolute_time_t now = time_us_64();
+    uint32_t dt = absolute_time_diff_us(engine.now, now) + dt;
+    divmod_result_t res = hw_divider_divmod_u32(dt, TICK_INTERVAL_US);
+    uint32_t ticks = to_quotient_u32(res);
+    dt = to_remainder_u32(res);
     engine.now = now;
     // todo: delta time, ticks
-
-    ti_start(&ti_tick);
 
     // update buttons
     read_button(&engine.buttons.left, now);
@@ -176,11 +183,25 @@ void engine_run_forever() {
 
     handle_menu_reset();
 
+    while (ticks--) {
+      ti_start(&ti_tick);
+
+      peripheral_update_counter++;
+      if (peripheral_update_counter >= UPDATE_PERIPHERAL_EVERY) {
+        peripheral_read_inputs(&engine.peripheral);
+        peripheral_update_counter = 0;
+      }
+      tick++;
+
+      ti_stop(&ti_tick);
+    }
+
+    ti_start(&ti_tick);
+
     // draw screen buffer
     u8g2_ClearBuffer(u8g2);
     u8g2_SetDrawColor(u8g2, 1);
     u8g2_SetFont(u8g2, u8g2_font_5x7_tf);
-    u8g2_DrawStr(u8g2, 0, 20, "Hello, world!");
     if (engine.peripheral.plugged_in) {
       u8g2_DrawStr(u8g2, 0, 30, "USB");
     } else {

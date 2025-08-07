@@ -7,6 +7,8 @@
 //// SYSTEM CONFIGURATION ////
 #define TARGET_FPS 120
 static const uint32_t TARGET_FRAME_INTERVAL_US = 1000000 / TARGET_FPS;
+#define TICK_RATE 1000 // 1000 ticks per second (tune if needed)
+static const uint32_t TICK_INTERVAL_US = 1000000 / TICK_RATE;
 
 //// DISPLAY CONFIGURATION ////
 #define DISP_WIDTH 128

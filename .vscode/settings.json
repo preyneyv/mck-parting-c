@@ -65,6 +65,7 @@
     "tuple": "c",
     "utility": "c",
     "vector": "c",
-    "compare": "c"
+    "compare": "c",
+    "__config": "c"
   }
 }

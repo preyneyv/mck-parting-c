@@ -69,7 +69,7 @@ static uint8_t battery_percentage_curve(uint16_t voltage_mV) {
 }
 
 void peripheral_read_inputs(peripheral_t *p) {
-  // TODO: double check this works
+  const uint32_t AVG_SAMPLES = 8;
   if (!p->enabled) {
     panic("cannot read peripheral inputs when not enabled");
   }
@@ -77,11 +77,14 @@ void peripheral_read_inputs(peripheral_t *p) {
   p->charging = gpio_get(PERIPH_BAT_CHG_N) != 0;
 
   adc_select_input(PERIPH_VSYS_ADC);
-  uint16_t raw_level = adc_read();
+  uint32_t raw_level = 0;
+  for (uint32_t i = 0; i < AVG_SAMPLES; i++)
+    raw_level += adc_read();
+  raw_level /= AVG_SAMPLES;
   float raw_voltage = (raw_level * ADC_TO_VOLTAGE);
   uint16_t bat_voltage =
       (raw_voltage * 1.51f) * 1000; // voltage divider 5.1k / 10k
 
-  p->plugged_in = bat_voltage >= 4200; // 3.5V threshold for USB power
+  p->plugged_in = bat_voltage >= 4250; // 3.5V threshold for USB power
   p->battery_level = battery_percentage_curve(bat_voltage);
 }
