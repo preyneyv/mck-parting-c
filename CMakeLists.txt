@@ -43,6 +43,9 @@ set(SHARED_SOURCES
     src/shared/audio/buffer.c
     src/shared/audio/synth.c
     src/shared/engine.c
+    src/shared/apps/_launcher/app.c
+    src/shared/apps/bongocat/app.c
+    src/shared/apps/dummy/app.c
 )
 add_library(shared STATIC ${SHARED_SOURCES})
 target_include_directories(shared PRIVATE ${CMAKE_CURRENT_LIST_DIR}/src)
@@ -125,8 +128,10 @@ else()
     target_link_libraries(mck-parting-c PRIVATE
         shared
         hardware_adc
+        hardware_clocks
         hardware_divider
         hardware_dma
+        hardware_irq
         hardware_pio
         hardware_pwm
         hardware_spi

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <shared/audio/playback.h>
 #include <shared/audio/synth.h>
 
 void audio_playback_init();

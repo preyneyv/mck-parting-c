@@ -99,9 +99,11 @@ void display_init(display_t *display) {
 static void display_on(display_t *display) {
   // enable regulator
   gpio_put(DISP_REG_EN, 1);
-  sleep_ms(100); // wait for regulator to stabilize
+  sleep_ms(50); // wait for regulator to stabilize
 
   u8g2_t *u8g2 = display_get_u8g2(display);
+  u8g2_ClearBuffer(u8g2);
+  u8g2_SendBuffer(u8g2);
   u8g2_SetPowerSave(u8g2, 0);
   u8g2_SetContrast(u8g2, 255);
 }
@@ -110,7 +112,7 @@ static void display_off(display_t *display) {
   u8g2_t *u8g2 = display_get_u8g2(display);
   u8g2_SetPowerSave(u8g2, 1);
 
-  sleep_ms(100); // wait for disp off flush
+  sleep_ms(50); // wait for disp off flush
   // disable regulator
   gpio_put(DISP_REG_EN, 0);
 }

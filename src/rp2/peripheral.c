@@ -74,7 +74,7 @@ void peripheral_read_inputs(peripheral_t *p) {
     panic("cannot read peripheral inputs when not enabled");
   }
 
-  p->charging = gpio_get(PERIPH_BAT_CHG_N) != 0;
+  p->charging = 1 - gpio_get(PERIPH_BAT_CHG_N);
 
   adc_select_input(PERIPH_VSYS_ADC);
   uint32_t raw_level = 0;

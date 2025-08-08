@@ -15,6 +15,7 @@ static const uint32_t SM_CLKDIV_FRAC = (SYS_CLOCK_HZ % SM_BCLK) * 256 / SM_BCLK;
 static uint8_t led_sm;
 
 void leds_init(leds_t *leds) {
+  return;
   PIO pio = LED_PIO;
   led_sm = pio_claim_unused_sm(pio, true);
 
@@ -38,13 +39,14 @@ void leds_init(leds_t *leds) {
 
 static uint32_t color_to_led_bytes(color_t color) {
   // apply color correction and convert to GRB0 order
-  // tailing zero because PIO expects 32-bit words
+  // trailing zero because PIO expects 32-bit words
   return (color.g * ((LED_CORRECTION >> 8) & 0xff) >> 8) << 24 |
          (color.r * ((LED_CORRECTION >> 16) & 0xff) >> 8) << 16 |
          (color.b * (LED_CORRECTION & 0xff) >> 8) << 8;
 }
 
 void leds_show(leds_t *leds) {
+  return;
   for (int i = 0; i < LED_COUNT; i++) {
     pio_sm_put_blocking(LED_PIO, led_sm, color_to_led_bytes(leds->colors[i]));
   }

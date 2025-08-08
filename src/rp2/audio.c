@@ -3,7 +3,6 @@
 #include <hardware/dma.h>
 #include <hardware/pio.h>
 
-#include <shared/audio.h>
 #include <shared/audio/buffer.h>
 #include <shared/audio/synth.h>
 #include <shared/utils/timing.h>
@@ -94,22 +93,24 @@ static void audio_playback_write_dma_init(PIO pio, uint8_t sm) {
   dma_channel_start(dma_channel);
 }
 
+void audio_playback_set_enabled(bool enabled) {
+  gpio_put(AUDIO_I2S_EN, enabled);
+}
+
 // setup DMA and PIO for audio playback
-static void audio_playback_begin() {
-  gpio_put(AUDIO_I2S_EN, true);
+static void audio_playback_begin() {}
+
+void audio_playback_init() {
+  gpio_init(AUDIO_I2S_EN);
+  gpio_set_dir(AUDIO_I2S_EN, GPIO_OUT);
+  audio_playback_set_enabled(true);
+
+  audio_buffer_pool_init(&pool, AUDIO_BUFFER_POOL_SIZE, AUDIO_BUFFER_SIZE);
 
   uint8_t sm = pio_claim_unused_sm(AUDIO_I2S_PIO, true);
 
   audio_playback_write_pio_init(AUDIO_I2S_PIO, sm);
   audio_playback_write_dma_init(AUDIO_I2S_PIO, sm);
-}
-
-void audio_playback_init() {
-  gpio_init(AUDIO_I2S_EN);
-  gpio_set_dir(AUDIO_I2S_EN, GPIO_OUT);
-
-  audio_buffer_pool_init(&pool, AUDIO_BUFFER_POOL_SIZE, AUDIO_BUFFER_SIZE);
-  audio_playback_begin();
 }
 
 void audio_playback_run_forever(audio_synth_t *synth) {
