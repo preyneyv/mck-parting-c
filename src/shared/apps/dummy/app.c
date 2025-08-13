@@ -4,7 +4,7 @@
 
 static void frame() {
   static uint8_t i = 0;
-  if (!engine.buttons.right.pressed && engine.buttons.right.evt) {
+  if (!engine.buttons.right.pressed && engine.buttons.right.edge) {
     // enter sleep
     engine_enter_sleep();
   }

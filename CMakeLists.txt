@@ -44,6 +44,7 @@ set(SHARED_SOURCES
     src/shared/audio/synth.c
     src/shared/engine.c
     src/shared/apps/_launcher/app.c
+    src/shared/apps/_full_test/app.c
     src/shared/apps/bongocat/app.c
     src/shared/apps/dummy/app.c
 )

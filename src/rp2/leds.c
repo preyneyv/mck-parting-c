@@ -15,7 +15,6 @@ static const uint32_t SM_CLKDIV_FRAC = (SYS_CLOCK_HZ % SM_BCLK) * 256 / SM_BCLK;
 static uint8_t led_sm;
 
 void leds_init(leds_t *leds) {
-  return;
   PIO pio = LED_PIO;
   led_sm = pio_claim_unused_sm(pio, true);
 
@@ -46,7 +45,6 @@ static uint32_t color_to_led_bytes(color_t color) {
 }
 
 void leds_show(leds_t *leds) {
-  return;
   for (int i = 0; i < LED_COUNT; i++) {
     pio_sm_put_blocking(LED_PIO, led_sm, color_to_led_bytes(leds->colors[i]));
   }

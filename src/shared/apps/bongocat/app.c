@@ -28,7 +28,7 @@ static void enter() {
 }
 
 static void tick() {
-  if (engine.buttons.left.evt) {
+  if (engine.buttons.left.edge) {
     if (engine.buttons.left.pressed) {
       audio_synth_enqueue(&engine.synth,
                           &(audio_synth_message_t){
@@ -48,7 +48,7 @@ static void tick() {
                           });
     }
   }
-  if (engine.buttons.right.evt) {
+  if (engine.buttons.right.edge) {
     if (engine.buttons.right.pressed) {
       audio_synth_enqueue(&engine.synth,
                           &(audio_synth_message_t){

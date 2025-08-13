@@ -27,8 +27,7 @@ void engine_init() {
   engine.buttons.menu.id = BUTTON_MENU;
   engine_buttons_init(&engine.buttons);
 
-  // engine_set_app(NULL);
-  engine_set_app(&app_dummy);
+  engine_set_app(NULL);
 }
 
 static void draw_fps(u8g2_t *u8g2, uint32_t fps) {
@@ -49,20 +48,20 @@ static void draw_fps(u8g2_t *u8g2, uint32_t fps) {
 }
 
 static void read_button(button_t *button, absolute_time_t now) {
-  button->evt = false;
+  button->edge = false;
   bool pressed = engine_button_read(button->id);
   if (pressed) {
     if (!button->pressed) {
       button->pressed = true;
       button->pressed_at = now;
-      button->evt = true;
+      button->edge = true;
     }
   } else {
     if (button->pressed) {
       // released
       button->pressed = false;
       button->pressed_at = nil_time;
-      button->evt = true;
+      button->edge = true;
     }
   }
 }
@@ -136,10 +135,11 @@ void engine_run_forever() {
     while (ticks--) {
       if (engine.app->tick != NULL) {
         engine.app->tick();
-        // reset button evt. if no tick(), they will instead be reset next frame
-        engine.buttons.left.evt = false;
-        engine.buttons.right.evt = false;
-        engine.buttons.menu.evt = false;
+        // reset button edge. if no tick(), they will instead be reset next
+        // frame
+        engine.buttons.left.edge = false;
+        engine.buttons.right.edge = false;
+        engine.buttons.menu.edge = false;
       }
 
       peripheral_update_counter++;

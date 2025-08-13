@@ -37,8 +37,8 @@ typedef struct {
   button_id_t id;
   absolute_time_t pressed_at;
   bool pressed; // true if button is currently pressed
-  bool evt; // true if button was just transitioned this frame. can be reset by
-            // app, or will automatically be reset next frame
+  bool edge;    // true if button was just transitioned this frame. will
+                // automatically be reset next tick or frame
 } button_t;
 
 typedef struct {

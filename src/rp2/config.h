@@ -45,7 +45,7 @@
 //// LED CONFIGURATION ////
 // https://github.com/FastLED/FastLED/blob/d700beadf48f334dc299dd7b874ef459d590cad7/src/color.h
 #define LED_BITRATE_HZ 800000
-#define LED_CORRECTION 0xff80e0 // correction for green cast in RGB LEDs
+#define LED_CORRECTION 0xffa0f0 // correction for green cast in RGB LEDs
 #define LED_DOUT 13
 #define LED_PIO pio0
 

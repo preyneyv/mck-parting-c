@@ -26,13 +26,12 @@ static void frame() {
     if (held > 0) {
       ignore_right_release = true;
     }
-
     printf("holding %f\n", held);
     if (held >= 1.f) {
       engine_set_app(apps[active]);
     }
   }
-  if (!engine.buttons.left.pressed && engine.buttons.left.evt) {
+  if (!engine.buttons.left.pressed && engine.buttons.left.edge) {
     // key released
     if (active > 0) {
       active--;
@@ -41,7 +40,7 @@ static void frame() {
     }
   }
   // printf("ignore_right_release: %d\n", ignore_right_release);
-  if (!engine.buttons.right.pressed && engine.buttons.right.evt &&
+  if (!engine.buttons.right.pressed && engine.buttons.right.edge &&
       !ignore_right_release) {
     // key released
     if (active < APP_COUNT - 1) {

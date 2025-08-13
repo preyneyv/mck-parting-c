@@ -26,8 +26,8 @@
 #include "config.h"
 
 void core1_main() {
-  // audio_playback_init();
-  // audio_playback_run_forever(&engine.synth);
+  audio_playback_init();
+  audio_playback_run_forever(&engine.synth);
 }
 
 void core0_main() { engine_run_forever(); }
