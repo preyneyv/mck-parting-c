@@ -42,6 +42,7 @@ add_subdirectory(lib/u8g2)
 set(SHARED_SOURCES
     src/shared/audio/buffer.c
     src/shared/audio/synth.c
+    src/shared/anim.c
     src/shared/engine.c
     src/shared/apps/_launcher/app.c
     src/shared/apps/_full_test/app.c

@@ -5,27 +5,28 @@
 
 #include <shared/utils/timing.h>
 
+#include "anim.h"
 #include "apps/apps.h"
 #include "engine.h"
 
 #define DEBUG_FPS
 
 // global engine instance
-engine_t engine;
+engine_t g_engine;
 
 void engine_init() {
   // initialize all subsystems
-  audio_synth_init(&engine.synth, AUDIO_SAMPLE_RATE, 1000);
-  engine.synth.master_level = q1x15_f(.5f); // todo: volume control
+  audio_synth_init(&g_engine.synth, AUDIO_SAMPLE_RATE, 1000);
+  g_engine.synth.master_level = q1x15_f(.5f); // todo: volume control
 
-  display_init(&engine.display);
-  peripheral_init(&engine.peripheral);
-  leds_init(&engine.leds);
+  display_init(&g_engine.display);
+  peripheral_init(&g_engine.peripheral);
+  leds_init(&g_engine.leds);
 
-  engine.buttons.left.id = BUTTON_LEFT;
-  engine.buttons.right.id = BUTTON_RIGHT;
-  engine.buttons.menu.id = BUTTON_MENU;
-  engine_buttons_init(&engine.buttons);
+  g_engine.buttons.left.id = BUTTON_LEFT;
+  g_engine.buttons.right.id = BUTTON_RIGHT;
+  g_engine.buttons.menu.id = BUTTON_MENU;
+  engine_buttons_init(&g_engine.buttons);
 
   engine_set_app(NULL);
 }
@@ -69,8 +70,8 @@ static void read_button(button_t *button, absolute_time_t now) {
 static void handle_menu_reset() {
   // if the menu button is held down for a while, reset using watchdog
   watchdog_update();
-  if (engine.buttons.menu.pressed) {
-    if (time_reached(delayed_by_ms(engine.buttons.menu.pressed_at, 5000))) {
+  if (g_engine.buttons.menu.pressed) {
+    if (time_reached(delayed_by_ms(g_engine.buttons.menu.pressed_at, 5000))) {
       // reset the system
       watchdog_enable(0, 0);
       while (1)
@@ -81,8 +82,8 @@ static void handle_menu_reset() {
 
 void engine_enter_sleep() {
   watchdog_disable();
-  display_set_enabled(&engine.display, false);
-  peripheral_set_enabled(&engine.peripheral, false);
+  display_set_enabled(&g_engine.display, false);
+  peripheral_set_enabled(&g_engine.peripheral, false);
   audio_playback_set_enabled(false);
 
   // while (true)
@@ -91,15 +92,15 @@ void engine_enter_sleep() {
   engine_sleep_until_interrupt();
 
   audio_playback_set_enabled(true);
-  display_set_enabled(&engine.display, true);
-  peripheral_set_enabled(&engine.peripheral, true);
+  display_set_enabled(&g_engine.display, true);
+  peripheral_set_enabled(&g_engine.peripheral, true);
   watchdog_enable(200, 1);
 }
 
 void engine_run_forever() {
   const uint32_t UPDATE_PERIPHERAL_EVERY = 1000; // ticks
-  display_set_enabled(&engine.display, true);
-  peripheral_set_enabled(&engine.peripheral, true);
+  display_set_enabled(&g_engine.display, true);
+  peripheral_set_enabled(&g_engine.peripheral, true);
 
   TimingInstrumenter ti_tick;
   TimingInstrumenter ti_show;
@@ -111,61 +112,63 @@ void engine_run_forever() {
   uint32_t last_log_frames = 0;
   uint32_t fps = 0;
 
-  u8g2_t *u8g2 = display_get_u8g2(&engine.display);
+  u8g2_t *u8g2 = display_get_u8g2(&g_engine.display);
 
   uint32_t dt = 0;
   uint32_t peripheral_update_counter = 0;
   watchdog_enable(200, 1);
   while (1) {
     absolute_time_t now = time_us_64();
-    uint32_t dt = absolute_time_diff_us(engine.now, now) + dt;
+    uint32_t dt = absolute_time_diff_us(g_engine.now, now) + dt;
     divmod_result_t res = hw_divider_divmod_u32(dt, TICK_INTERVAL_US);
     uint32_t ticks = to_quotient_u32(res);
     dt = to_remainder_u32(res);
-    engine.now = now;
+    g_engine.now = now;
 
     // update buttons
-    read_button(&engine.buttons.left, now);
-    read_button(&engine.buttons.right, now);
-    read_button(&engine.buttons.menu, now);
+    read_button(&g_engine.buttons.left, now);
+    read_button(&g_engine.buttons.right, now);
+    read_button(&g_engine.buttons.menu, now);
 
     handle_menu_reset();
 
     ti_start(&ti_tick);
     while (ticks--) {
-      if (engine.app->tick != NULL) {
-        engine.app->tick();
+      if (g_engine.app->tick != NULL) {
+        g_engine.app->tick();
         // reset button edge. if no tick(), they will instead be reset next
         // frame
-        engine.buttons.left.edge = false;
-        engine.buttons.right.edge = false;
-        engine.buttons.menu.edge = false;
+        g_engine.buttons.left.edge = false;
+        g_engine.buttons.right.edge = false;
+        g_engine.buttons.menu.edge = false;
       }
+
+      anim_tick();
 
       peripheral_update_counter++;
       if (peripheral_update_counter >= UPDATE_PERIPHERAL_EVERY) {
-        peripheral_read_inputs(&engine.peripheral);
+        peripheral_read_inputs(&g_engine.peripheral);
         peripheral_update_counter = 0;
       }
-      engine.tick++;
+      g_engine.tick++;
     }
 
     // draw screen buffer
     u8g2_ClearBuffer(u8g2);
 
-    if (engine.app->frame != NULL)
-      engine.app->frame();
+    if (g_engine.app->frame != NULL)
+      g_engine.app->frame();
 
     // u8g2_SetDrawColor(u8g2, 1);
     // u8g2_SetFont(u8g2, u8g2_font_5x7_tf);
-    // if (engine.peripheral.plugged_in) {
+    // if (g_engine.peripheral.plugged_in) {
     //   u8g2_DrawStr(u8g2, 0, 30, "USB");
     // } else {
     //   u8g2_DrawStr(u8g2, 0, 30, "BAT");
     // }
     // char battery_str[8];
     // snprintf(battery_str, sizeof(battery_str), "%d",
-    //          engine.peripheral.battery_level);
+    //          g_engine.peripheral.battery_level);
     // u8g2_DrawStr(u8g2, 0, 40, battery_str);
 
     // todo: remove
@@ -180,7 +183,7 @@ void engine_run_forever() {
     // write display
     u8g2_SendBuffer(u8g2);
     // write LEDs
-    leds_show(&engine.leds);
+    leds_show(&g_engine.leds);
     ti_stop(&ti_show);
 
     // log fps and frame limit
@@ -210,15 +213,15 @@ void engine_run_forever() {
 }
 
 void engine_set_app(engine_app_t *app) {
-  if (engine.app != NULL && engine.app->exit != NULL) {
-    engine.app->exit();
+  if (g_engine.app != NULL && g_engine.app->leave != NULL) {
+    g_engine.app->leave();
   }
   if (app == NULL) {
-    engine.app = &app_launcher;
+    g_engine.app = &app_launcher;
     return;
   }
-  engine.app = app;
-  if (engine.app != NULL && engine.app->enter != NULL) {
-    engine.app->enter();
+  g_engine.app = app;
+  if (g_engine.app != NULL && g_engine.app->enter != NULL) {
+    g_engine.app->enter();
   }
 }

@@ -102,8 +102,8 @@ static void enter() {
   };
   config.freq_mult = 11;
   config.level = q1x15_f(0.3f);
-  audio_synth_operator_set_config(&engine.synth.voices[0].ops[0], config);
-  audio_synth_operator_set_config(&engine.synth.voices[1].ops[0], config);
+  audio_synth_operator_set_config(&g_engine.synth.voices[0].ops[0], config);
+  audio_synth_operator_set_config(&g_engine.synth.voices[1].ops[0], config);
 
   config = audio_synth_operator_config_default;
   config.env = (audio_synth_env_config_t){
@@ -114,18 +114,18 @@ static void enter() {
   };
   config.level = q1x15_f(.5f);
   config.mode = AUDIO_SYNTH_OP_MODE_FREQ_MOD;
-  audio_synth_operator_set_config(&engine.synth.voices[0].ops[1], config);
-  audio_synth_operator_set_config(&engine.synth.voices[1].ops[1], config);
+  audio_synth_operator_set_config(&g_engine.synth.voices[0].ops[1], config);
+  audio_synth_operator_set_config(&g_engine.synth.voices[1].ops[1], config);
 }
 
 static void frame() {
   static uint8_t i = 0;
-  u8g2_t *u8g2 = &engine.display.u8g2;
+  u8g2_t *u8g2 = &g_engine.display.u8g2;
 
   u8g2_SetBitmapMode(u8g2, 1);
   u8g2_DrawXBM(u8g2, 0, 0, 128, 64, image_Sprite_0001_bits);
-  engine.leds.colors[0].hex = 0x00d9ff;
-  engine.leds.colors[1].hex = 0xff7700;
+  g_engine.leds.colors[0].hex = 0x00d9ff;
+  g_engine.leds.colors[1].hex = 0xff7700;
 
   return;
   u8g2_SetDrawColor(u8g2, 1);
@@ -134,34 +134,34 @@ static void frame() {
     u8g2_DrawBox(u8g2, 0, 0, u8g2->width, u8g2->height);
   } else {
     u8g2_SetFont(u8g2, u8g2_font_5x7_tf);
-    if (engine.peripheral.plugged_in) {
+    if (g_engine.peripheral.plugged_in) {
       u8g2_DrawStr(u8g2, 0, 30, "USB");
     } else {
       u8g2_DrawStr(u8g2, 0, 30, "BAT");
     }
     char battery_str[8];
     snprintf(battery_str, sizeof(battery_str), "%d",
-             engine.peripheral.battery_level);
+             g_engine.peripheral.battery_level);
     u8g2_DrawStr(u8g2, 0, 40, battery_str);
   }
   i++;
-  leds_set_all(&engine.leds, (color_t){.hex = 0xFFFFFFFF});
+  leds_set_all(&g_engine.leds, (color_t){.hex = 0xFFFFFFFF});
 
-  if (engine.buttons.left.pressed) {
-    engine.leds.colors[0].r = 0;
+  if (g_engine.buttons.left.pressed) {
+    g_engine.leds.colors[0].r = 0;
   }
-  if (engine.buttons.right.pressed) {
-    engine.leds.colors[1].r = 0;
+  if (g_engine.buttons.right.pressed) {
+    g_engine.leds.colors[1].r = 0;
   }
-  if (engine.buttons.menu.pressed) {
-    engine.leds.colors[0].b = 0;
-    engine.leds.colors[1].b = 0;
+  if (g_engine.buttons.menu.pressed) {
+    g_engine.leds.colors[0].b = 0;
+    g_engine.leds.colors[1].b = 0;
   }
 
-  if (engine.buttons.left.edge) {
+  if (g_engine.buttons.left.edge) {
     printf("l edge\n");
-    if (engine.buttons.left.pressed) {
-      audio_synth_enqueue(&engine.synth,
+    if (g_engine.buttons.left.pressed) {
+      audio_synth_enqueue(&g_engine.synth,
                           &(audio_synth_message_t){
                               .type = AUDIO_SYNTH_MESSAGE_NOTE_ON,
                               .data.note_on =
@@ -172,16 +172,16 @@ static void frame() {
                                   },
                           });
     } else {
-      audio_synth_enqueue(&engine.synth,
+      audio_synth_enqueue(&g_engine.synth,
                           &(audio_synth_message_t){
                               .type = AUDIO_SYNTH_MESSAGE_NOTE_OFF,
                               .data.note_off = {.voice = 0},
                           });
     }
   }
-  if (engine.buttons.right.edge) {
-    if (engine.buttons.right.pressed) {
-      audio_synth_enqueue(&engine.synth,
+  if (g_engine.buttons.right.edge) {
+    if (g_engine.buttons.right.pressed) {
+      audio_synth_enqueue(&g_engine.synth,
                           &(audio_synth_message_t){
                               .type = AUDIO_SYNTH_MESSAGE_NOTE_ON,
                               .data.note_on =
@@ -192,7 +192,7 @@ static void frame() {
                                   },
                           });
     } else {
-      audio_synth_enqueue(&engine.synth,
+      audio_synth_enqueue(&g_engine.synth,
                           &(audio_synth_message_t){
                               .type = AUDIO_SYNTH_MESSAGE_NOTE_OFF,
                               .data.note_off = {.voice = 1},
@@ -200,10 +200,10 @@ static void frame() {
     }
   }
 
-  if (engine.buttons.menu.pressed && engine.buttons.left.pressed &&
-      engine.buttons.right.pressed) {
-    display_set_enabled(&engine.display, false);
-    peripheral_set_enabled(&engine.peripheral, false);
+  if (g_engine.buttons.menu.pressed && g_engine.buttons.left.pressed &&
+      g_engine.buttons.right.pressed) {
+    display_set_enabled(&g_engine.display, false);
+    peripheral_set_enabled(&g_engine.peripheral, false);
     audio_playback_set_enabled(false);
     watchdog_disable();
     while (1) {

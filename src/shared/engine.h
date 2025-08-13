@@ -23,8 +23,8 @@ typedef struct {
   void (*pause)(void);
   // called when scene is resumed.
   void (*resume)(void);
-  // called when scene is exited. called before enter of next scene.
-  void (*exit)(void);
+  // called when scene is leave. called before enter of next scene.
+  void (*leave)(void);
 } engine_app_t;
 
 typedef enum {
@@ -58,7 +58,7 @@ typedef struct {
   engine_app_t *app;
 } engine_t;
 
-extern engine_t engine;
+extern engine_t g_engine;
 void engine_init();
 void engine_run_forever();
 void engine_set_app(engine_app_t *app);
@@ -66,3 +66,41 @@ void engine_buttons_init();
 bool engine_button_read(button_id_t button_id);
 void engine_enter_sleep();           // todo: finalize api
 void engine_sleep_until_interrupt(); // implement
+
+static inline button_t *engine_button_from_id(button_id_t button_id) {
+  switch (button_id) {
+  case BUTTON_LEFT:
+    return &g_engine.buttons.left;
+  case BUTTON_RIGHT:
+    return &g_engine.buttons.right;
+  case BUTTON_MENU:
+    return &g_engine.buttons.menu;
+  default:
+    return NULL;
+  }
+}
+
+static inline bool engine_button_keydown(button_id_t button_id) {
+  button_t *button = engine_button_from_id(button_id);
+  return button->pressed && button->edge;
+}
+
+static inline bool engine_button_keyup(button_id_t button_id) {
+  button_t *button = engine_button_from_id(button_id);
+  return !button->pressed && button->edge;
+}
+
+static inline bool engine_button_pressed(button_id_t button_id) {
+  button_t *button = engine_button_from_id(button_id);
+  return button->pressed;
+}
+
+static inline bool engine_button_released(button_id_t button_id) {
+  button_t *button = engine_button_from_id(button_id);
+  return !button->pressed;
+}
+
+#define BUTTON_KEYDOWN(button_id) engine_button_keydown(button_id)
+#define BUTTON_KEYUP(button_id) engine_button_keyup(button_id)
+#define BUTTON_PRESSED(button_id) engine_button_pressed(button_id)
+#define BUTTON_RELEASED(button_id) engine_button_released(button_id)

@@ -4,11 +4,11 @@
 
 static void frame() {
   static uint8_t i = 0;
-  if (!engine.buttons.right.pressed && engine.buttons.right.edge) {
+  if (!g_engine.buttons.right.pressed && g_engine.buttons.right.edge) {
     // enter sleep
     engine_enter_sleep();
   }
-  u8g2_t *u8g2 = &engine.display.u8g2;
+  u8g2_t *u8g2 = &g_engine.display.u8g2;
   u8g2_SetFont(u8g2, u8g2_font_5x7_tf);
   u8g2_SetDrawColor(u8g2, 1);
 
