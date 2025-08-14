@@ -9,7 +9,7 @@
 #include "apps/apps.h"
 #include "engine.h"
 
-#define DEBUG_FPS
+// #define DEBUG_FPS
 
 // global engine instance
 engine_t g_engine;
@@ -86,9 +86,6 @@ void engine_enter_sleep() {
   peripheral_set_enabled(&g_engine.peripheral, false);
   audio_playback_set_enabled(false);
 
-  // while (true)
-  //   sleep_ms(1000);
-
   engine_sleep_until_interrupt();
 
   audio_playback_set_enabled(true);
@@ -108,7 +105,7 @@ void engine_run_forever() {
   ti_init(&ti_show);
 
   uint64_t last_frame_us = 0;
-  uint64_t last_log_us = 0;
+  absolute_time_t last_log_us = get_absolute_time();
   uint32_t last_log_frames = 0;
   uint32_t fps = 0;
 
@@ -117,9 +114,11 @@ void engine_run_forever() {
   uint32_t dt = 0;
   uint32_t peripheral_update_counter = 0;
   watchdog_enable(200, 1);
+  g_engine.now = get_absolute_time();
+  g_engine.tick = 0;
   while (1) {
-    absolute_time_t now = time_us_64();
-    uint32_t dt = absolute_time_diff_us(g_engine.now, now) + dt;
+    absolute_time_t now = get_absolute_time();
+    dt = ((uint32_t)absolute_time_diff_us(g_engine.now, now)) + dt;
     divmod_result_t res = hw_divider_divmod_u32(dt, TICK_INTERVAL_US);
     uint32_t ticks = to_quotient_u32(res);
     dt = to_remainder_u32(res);
@@ -159,21 +158,6 @@ void engine_run_forever() {
     if (g_engine.app->frame != NULL)
       g_engine.app->frame();
 
-    // u8g2_SetDrawColor(u8g2, 1);
-    // u8g2_SetFont(u8g2, u8g2_font_5x7_tf);
-    // if (g_engine.peripheral.plugged_in) {
-    //   u8g2_DrawStr(u8g2, 0, 30, "USB");
-    // } else {
-    //   u8g2_DrawStr(u8g2, 0, 30, "BAT");
-    // }
-    // char battery_str[8];
-    // snprintf(battery_str, sizeof(battery_str), "%d",
-    //          g_engine.peripheral.battery_level);
-    // u8g2_DrawStr(u8g2, 0, 40, battery_str);
-
-    // todo: remove
-    // update();
-
     ti_stop(&ti_tick);
 #ifdef DEBUG_FPS
     draw_fps(u8g2, fps);
@@ -188,7 +172,7 @@ void engine_run_forever() {
 
     // log fps and frame limit
     last_log_frames++;
-    if (now - last_log_us > 1000000) {
+    if (absolute_time_diff_us(last_log_us, now) > 1000000) {
       fps = last_log_frames;
       float ti_tick_avg = ti_get_average_ms(&ti_tick, true);
       float ti_show_avg = ti_get_average_ms(&ti_show, true);
@@ -201,11 +185,11 @@ void engine_run_forever() {
       last_log_frames = 0;
     }
 
-    now = time_us_64(); // update timestamp for frame limit calc
-    uint64_t spent_us = now - last_frame_us;
+    now = get_absolute_time(); // update timestamp for frame limit calc
+    uint64_t spent_us = absolute_time_diff_us(last_frame_us, now);
     if (spent_us < TARGET_FRAME_INTERVAL_US) {
       sleep_us(TARGET_FRAME_INTERVAL_US - spent_us);
-      last_frame_us = time_us_64();
+      last_frame_us = get_absolute_time();
     } else {
       last_frame_us = now;
     }

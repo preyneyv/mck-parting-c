@@ -74,8 +74,8 @@ int main() {
     ti_stop(&ti_show);
 
     last_log_frames++;
-    uint64_t now = time_us_64();
-    if (now - last_log_us > 1000000) {
+    absolute_time_t now = get_absolute_time();
+    if (absolute_time_diff_us(last_log_us, now) > 1000000) {
       fps = last_log_frames;
       float ti_tick_avg = ti_get_average_ms(&ti_tick, true);
       float ti_show_avg = ti_get_average_ms(&ti_show, true);
@@ -86,10 +86,10 @@ int main() {
       last_log_frames = 0;
     }
 
-    uint64_t spent_us = now - last_frame_us;
+    uint64_t spent_us = absolute_time_diff_us(last_frame_us, now);
     if (spent_us < TARGET_FRAME_INTERVAL_US) {
       sleep_us(TARGET_FRAME_INTERVAL_US - spent_us);
-      last_frame_us = time_us_64();
+      last_frame_us = get_absolute_time();
     } else {
       last_frame_us = now;
     }
