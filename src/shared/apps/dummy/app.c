@@ -18,7 +18,7 @@ static void frame() {
   i += 1;
 }
 
-engine_app_t app_dummy = {
+app_t app_dummy = {
     .name = "dummy",
     .frame = frame,
 };

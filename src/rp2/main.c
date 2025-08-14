@@ -90,7 +90,10 @@ int main() {
   set_sys_clock_hz(SYS_CLOCK_HZ, true);
   stdio_init_all();
   sleep_ms(500);
+  while (!stdio_usb_connected())
+    sleep_ms(100);
 
+  printf("hey its me prism\n");
   engine_init();
 
   // start audio core

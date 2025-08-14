@@ -70,7 +70,7 @@ static void tick() {
   }
 }
 
-engine_app_t app_bongocat = {
+app_t app_bongocat = {
     .name = "bongocat",
     .enter = enter,
     .tick = tick,

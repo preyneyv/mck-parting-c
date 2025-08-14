@@ -1,4 +1,5 @@
 #include "anim.h"
+#include <stdio.h>
 
 anim_sys_t g_anim;
 
@@ -67,8 +68,10 @@ int anim_to(volatile int32_t *out, int32_t to, uint32_t duration_ticks,
   int idx = find_slot_by_ptr(out);
   if (idx < 0)
     idx = find_free_slot();
-  if (idx < 0)
+  if (idx < 0) {
+    *out = to; // jump to end
     return -1; // no capacity
+  }
 
   anim_slot_t *s = &g_anim.slots[idx];
   s->out = out;
@@ -104,6 +107,7 @@ void anim_cancel(volatile int32_t *out, int snap_to_end) {
 }
 
 void anim_tick(void) {
+  // printf("hi.");
   for (int i = 0; i < ANIM_MAX; ++i) {
     anim_slot_t *s = &g_anim.slots[i];
     if (!s->active)

@@ -218,7 +218,7 @@ static void frame() {
   }
 }
 
-engine_app_t app_full_test = {
+app_t app_full_test = {
     .name = "full_test",
     .enter = enter,
     .frame = frame,

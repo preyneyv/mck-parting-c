@@ -25,7 +25,7 @@ typedef struct {
   void (*resume)(void);
   // called when scene is leave. called before enter of next scene.
   void (*leave)(void);
-} engine_app_t;
+} app_t;
 
 typedef enum {
   BUTTON_LEFT,
@@ -55,13 +55,13 @@ typedef struct {
   absolute_time_t now;
   uint32_t tick;
 
-  engine_app_t *app;
+  app_t *app;
 } engine_t;
 
 extern engine_t g_engine;
 void engine_init();
 void engine_run_forever();
-void engine_set_app(engine_app_t *app);
+void engine_set_app(app_t *app);
 void engine_buttons_init();
 bool engine_button_read(button_id_t button_id);
 void engine_enter_sleep();           // todo: finalize api

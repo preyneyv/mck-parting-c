@@ -212,7 +212,7 @@ void engine_run_forever() {
   }
 }
 
-void engine_set_app(engine_app_t *app) {
+void engine_set_app(app_t *app) {
   if (g_engine.app != NULL && g_engine.app->leave != NULL) {
     g_engine.app->leave();
   }
