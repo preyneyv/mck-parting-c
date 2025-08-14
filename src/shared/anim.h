@@ -8,8 +8,9 @@
 #endif
 
 typedef enum {
-  ANIM_EASE_LINEAR = 0,
-  ANIM_EASE_INOUT_QUAD = 1,
+  ANIM_EASE_LINEAR,
+  ANIM_EASE_INOUT_QUAD,
+  ANIM_EASE_OUT_CUBIC,
 } anim_ease_t;
 
 typedef void (*anim_done_fn)(void *ctx);
@@ -48,3 +49,9 @@ static inline int anim_by(volatile int32_t *out, int32_t by,
 }
 void anim_cancel(volatile int32_t *out, int snap_to_end);
 void anim_tick(void);
+
+static inline uint32_t q16_from_ratio(uint32_t num, uint32_t den) {
+  // returns round((num << 16) / den), guarding den==0 at callsites.
+  uint64_t t = ((uint64_t)num << 16) + (den >> 1);
+  return (uint32_t)(t / den);
+}

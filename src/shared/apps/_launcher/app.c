@@ -3,9 +3,10 @@
 #include <shared/anim.h>
 #include <shared/apps/apps.h>
 #include <shared/engine.h>
+#include <shared/utils/vec.h>
 
 static const int32_t HOLD_MS_MIN = 300;
-static const int32_t HOLD_MS_CONFIRM = 1000;
+static const int32_t HOLD_MS_CONFIRM = 1500;
 static const int16_t APP_SIZE = 36;
 static const int16_t APP_MARGIN = 8;
 static const int16_t APP_SCROLL_MARGIN =
@@ -22,7 +23,8 @@ static struct {
   bool ignore_right_release;
   int32_t active_offset;
   int32_t scroll_offset;
-} state = {.scroll_offset = APP_SCROLL_MARGIN};
+  uint32_t box_start;
+} state = {.scroll_offset = APP_SCROLL_MARGIN, .box_start = DISP_WIDTH};
 
 static inline int32_t app_x(uint8_t app_index) {
   return (APP_SIZE + APP_MARGIN) * app_index;
@@ -44,33 +46,50 @@ static void change_active(int8_t delta) {
           NULL);
 }
 
+static inline float ease_out_cubic(float t) {
+  float inv = 1.0f - t;
+  return 1.0f - inv * inv * inv;
+}
+
 static void frame() {
+  float held = 0.f;
   if (BUTTON_PRESSED(BUTTON_RIGHT)) {
     int32_t ms =
         absolute_time_diff_us(g_engine.buttons.right.pressed_at, g_engine.now) /
         1000;
-    float held = (ms - HOLD_MS_MIN) / (float)(HOLD_MS_CONFIRM - HOLD_MS_MIN);
-    state.ignore_right_release = held > 0.2f;
+    held = (ms - HOLD_MS_MIN) / (float)(HOLD_MS_CONFIRM - HOLD_MS_MIN);
+    state.ignore_right_release = held > 0.f;
     if (held >= 1.f) {
       engine_set_app(apps[state.active]);
     }
   }
+  if (held > 0) {
+    state.box_start = DISP_WIDTH * (1.f - ease_out_cubic(held));
+  } // otherwise use the existing value instead of overwriting it.
+  if (BUTTON_KEYUP(BUTTON_RIGHT)) {
+    anim_to(&state.box_start, DISP_WIDTH, 150, ANIM_EASE_OUT_CUBIC, NULL, NULL);
+  }
+
   if (BUTTON_KEYUP(BUTTON_LEFT)) {
     // key released
     change_active(-1);
   }
   if (BUTTON_KEYUP(BUTTON_RIGHT) && !state.ignore_right_release) {
-    // key released
     change_active(1);
   }
+
   u8g2_t *u8g2 = &g_engine.display.u8g2;
 
+  u8g2_SetDrawColor(u8g2, 1);
   for (int i = 0; i < APP_COUNT; i++) {
-    u8g2_DrawFrame(u8g2, state.scroll_offset + app_x(i), 11, APP_SIZE,
-                   APP_SIZE);
+    vec2_t pos = vec2(state.scroll_offset + app_x(i), 11);
+    if (apps[i]->icon) {
+      u8g2_DrawXBM(u8g2, pos.x, pos.y, APP_SIZE, APP_SIZE, apps[i]->icon);
+    }
+    u8g2_DrawRFrame(u8g2, pos.x, pos.y, APP_SIZE, APP_SIZE, 1);
   }
-  u8g2_DrawFrame(u8g2, state.scroll_offset + state.active_offset - 2, 9,
-                 APP_SIZE + 4, APP_SIZE + 4);
+  u8g2_DrawRFrame(u8g2, state.scroll_offset + state.active_offset - 2, 9,
+                  APP_SIZE + 4, APP_SIZE + 4, 3);
 
   u8g2_SetFont(u8g2, u8g2_font_6x10_tf);
   char *name = apps[state.active]->name;
@@ -88,6 +107,11 @@ static void frame() {
   u8g2_DrawStr(u8g2, 128 - u8g2_GetStrWidth(u8g2, chg_str), 6, chg_str);
 
   u8g2_DrawStr(u8g2, 0, 6, "prism");
+
+  // fill up
+  u8g2_SetDrawColor(u8g2, 2);
+
+  u8g2_DrawBox(u8g2, state.box_start, 0, DISP_WIDTH, DISP_HEIGHT);
 }
 
 app_t app_launcher = {

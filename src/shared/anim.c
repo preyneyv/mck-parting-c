@@ -3,10 +3,10 @@
 
 anim_sys_t g_anim;
 
-inline uint32_t anim_ease_linear(uint32_t p_q16) { return p_q16; }
+static inline uint32_t anim_ease_linear(uint32_t p_q16) { return p_q16; }
 
 // InOut quad: 2p^2 (p<0.5) else 1 - 2(1-p)^2
-inline uint32_t anim_ease_inout_quad(uint32_t p_q16) {
+static inline uint32_t anim_ease_inout_quad(uint32_t p_q16) {
   // p in [0, 65536]
   if (p_q16 <= 32768u) {
     // 2 * p^2
@@ -26,11 +26,27 @@ inline uint32_t anim_ease_inout_quad(uint32_t p_q16) {
   }
 }
 
+static inline uint32_t anim_ease_out_cubic(uint32_t p_q16) {
+  // p_q16 is in [0, 65536]
+  uint32_t one = 65536u;
+  uint32_t inv = one - p_q16; // (1 - t)
+
+  // inv^3 in Q16.16: (inv * inv * inv) >> 32
+  uint64_t inv2 = (uint64_t)inv * inv;        // Q32.32
+  uint64_t inv3 = (inv2 >> 16) * inv;         // (Q16.16 * Q16.16) -> Q32.32
+  uint32_t inv3_q16 = (uint32_t)(inv3 >> 16); // back to Q16.16
+
+  return one - inv3_q16;
+}
+
 static inline uint32_t anim_apply_ease(anim_ease_t e, uint32_t p_q16) {
   switch (e) {
   case ANIM_EASE_INOUT_QUAD:
     return anim_ease_inout_quad(p_q16);
   case ANIM_EASE_LINEAR:
+    return anim_ease_linear(p_q16);
+  case ANIM_EASE_OUT_CUBIC:
+    return anim_ease_out_cubic(p_q16);
   default:
     return anim_ease_linear(p_q16);
   }
@@ -48,12 +64,6 @@ static inline int find_free_slot(void) {
     if (!g_anim.slots[i].active)
       return i;
   return -1;
-}
-
-static inline uint32_t q16_from_ratio(uint32_t num, uint32_t den) {
-  // returns round((num << 16) / den), guarding den==0 at callsites.
-  uint64_t t = ((uint64_t)num << 16) + (den >> 1);
-  return (uint32_t)(t / den);
 }
 
 void anim_init(void) {

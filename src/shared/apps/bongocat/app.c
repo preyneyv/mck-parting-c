@@ -1,3 +1,4 @@
+#include "assets.h"
 #include <shared/apps/apps.h>
 #include <shared/engine.h>
 
@@ -72,6 +73,7 @@ static void tick() {
 
 app_t app_bongocat = {
     .name = "bongocat",
+    .icon = icon__0_bits,
     .enter = enter,
     .tick = tick,
 };

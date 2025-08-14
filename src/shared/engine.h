@@ -11,7 +11,8 @@
 #include "peripheral.h"
 
 typedef struct {
-  char name[32]; // app name
+  char name[32];       // app name
+  const uint8_t *icon; // app icon
 
   // called when scene is entered. called after exit of previous scene.
   void (*enter)(void);
