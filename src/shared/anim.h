@@ -1,10 +1,11 @@
 #pragma once
 
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
 #ifndef ANIM_MAX
-#define ANIM_MAX 32 // tune for your needs
+#define ANIM_MAX 32
 #endif
 
 typedef enum {
@@ -30,16 +31,27 @@ typedef struct {
   anim_done_fn on_done;
   void *ctx;
 
+  bool is_sys; // sys animations are not paused and cancelled by app switch
+
 } anim_slot_t;
 
 typedef struct {
   anim_slot_t slots[ANIM_MAX];
+  bool paused;
 } anim_sys_t;
 
 extern anim_sys_t g_anim;
 
-// ---------- core ----------
 void anim_init(void);
+
+void anim_sys_set_paused(bool paused);
+// clear all non-sys animations (used for scene switches)
+void anim_sys_clear_all();
+// a non-pausable animation (used by system UI)
+int anim_sys_to(volatile int32_t *out, int32_t to, uint32_t duration_ticks,
+                anim_ease_t ease, anim_done_fn on_done, void *ctx);
+
+// a pausable animation (used by apps)
 int anim_to(volatile int32_t *out, int32_t to, uint32_t duration_ticks,
             anim_ease_t ease, anim_done_fn on_done, void *ctx);
 static inline int anim_by(volatile int32_t *out, int32_t by,

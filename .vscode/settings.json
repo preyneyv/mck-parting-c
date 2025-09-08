@@ -66,6 +66,8 @@
     "utility": "c",
     "vector": "c",
     "compare": "c",
-    "__config": "c"
+    "__config": "c",
+    "__locale": "c",
+    "ios": "c"
   }
 }

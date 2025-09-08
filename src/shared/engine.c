@@ -52,12 +52,13 @@ static void read_button(button_t *button, absolute_time_t now) {
   button->edge = false;
   bool pressed = engine_button_read(button->id);
   if (pressed) {
-    if (!button->pressed) {
+    if (!button->pressed && !button->ignore) {
       button->pressed = true;
       button->pressed_at = now;
       button->edge = true;
     }
   } else {
+    button->ignore = false;
     if (button->pressed) {
       // released
       button->pressed = false;
@@ -65,6 +66,23 @@ static void read_button(button_t *button, absolute_time_t now) {
       button->edge = true;
     }
   }
+}
+
+static void reset_buttons() {
+  g_engine.buttons.left.edge = false;
+  g_engine.buttons.left.pressed = false;
+  g_engine.buttons.left.pressed_at = nil_time;
+  g_engine.buttons.left.ignore = true;
+
+  g_engine.buttons.right.edge = false;
+  g_engine.buttons.right.pressed = false;
+  g_engine.buttons.right.pressed_at = nil_time;
+  g_engine.buttons.right.ignore = true;
+
+  // g_engine.buttons.menu.edge = false;
+  // g_engine.buttons.menu.pressed = false;
+  // g_engine.buttons.menu.pressed_at = nil_time;
+  // g_engine.buttons.menu.ignore = true;
 }
 
 static void handle_menu_reset() {
@@ -94,10 +112,38 @@ void engine_enter_sleep() {
   watchdog_enable(200, 1);
 }
 
+static struct {
+  int selected;
+} menu_state;
+
+static void menu_frame() {
+  u8g2_t *u8g2 = display_get_u8g2(&g_engine.display);
+  // first handle menu button
+  if (BUTTON_KEYDOWN(BUTTON_MENU)) {
+    if (g_engine.show_menu) {
+      // close menu
+      g_engine.show_menu = false;
+      engine_resume();
+    } else {
+      // open menu
+      engine_pause();
+      g_engine.show_menu = true;
+    }
+  }
+
+  // if (g_engine.show_menu) {
+  //   // draw menu
+  //   u8g2_ClearBuffer(u8g2);
+  //   menu_draw(u8g2);
+  //   u8g2_SendBuffer(u8g2);
+  // }
+}
+
 void engine_run_forever() {
-  const uint32_t UPDATE_PERIPHERAL_EVERY = 1000; // ticks
+  const uint32_t UPDATE_PERIPHERAL_EVERY = 120; // frames
   display_set_enabled(&g_engine.display, true);
   peripheral_set_enabled(&g_engine.peripheral, true);
+  peripheral_read_inputs(&g_engine.peripheral);
 
   TimingInstrumenter ti_tick;
   TimingInstrumenter ti_show;
@@ -131,44 +177,48 @@ void engine_run_forever() {
 
     handle_menu_reset();
 
-    ti_start(&ti_tick);
-    while (ticks--) {
-      if (g_engine.app->tick != NULL) {
-        g_engine.app->tick();
-        // reset button edge. if no tick(), they will instead be reset next
-        // frame
-        g_engine.buttons.left.edge = false;
-        g_engine.buttons.right.edge = false;
-        g_engine.buttons.menu.edge = false;
-      }
-
-      anim_tick();
-
-      peripheral_update_counter++;
-      if (peripheral_update_counter >= UPDATE_PERIPHERAL_EVERY) {
-        peripheral_read_inputs(&g_engine.peripheral);
-        peripheral_update_counter = 0;
-      }
-      g_engine.tick++;
+    peripheral_update_counter++;
+    if (peripheral_update_counter >= UPDATE_PERIPHERAL_EVERY) {
+      peripheral_read_inputs(&g_engine.peripheral);
+      peripheral_update_counter = 0;
     }
 
-    // draw screen buffer
-    u8g2_ClearBuffer(u8g2);
+    if (!g_engine.paused) {
+      ti_start(&ti_tick);
 
-    if (g_engine.app->frame != NULL)
-      g_engine.app->frame();
+      while (ticks--) {
+        if (g_engine.app->tick != NULL) {
+          g_engine.app->tick();
+          // reset button edge. if no tick(), they will instead be reset next
+          // frame
+          g_engine.buttons.left.edge = false;
+          g_engine.buttons.right.edge = false;
+        }
 
-    ti_stop(&ti_tick);
+        anim_tick();
+        g_engine.tick++;
+      }
+
+      // draw screen buffer
+      u8g2_ClearBuffer(u8g2);
+
+      if (g_engine.app->frame != NULL)
+        g_engine.app->frame();
+
+      ti_stop(&ti_tick);
 #ifdef DEBUG_FPS
-    draw_fps(u8g2, fps);
+      draw_fps(u8g2, fps);
 #endif
 
-    ti_start(&ti_show);
-    // write display
-    u8g2_SendBuffer(u8g2);
-    // write LEDs
-    leds_show(&g_engine.leds);
-    ti_stop(&ti_show);
+      ti_start(&ti_show);
+      // write display
+      u8g2_SendBuffer(u8g2);
+      // write LEDs
+      leds_show(&g_engine.leds);
+      ti_stop(&ti_show);
+    }
+
+    menu_frame();
 
     // log fps and frame limit
     last_log_frames++;
@@ -204,8 +254,30 @@ void engine_set_app(app_t *app) {
     g_engine.app = &app_launcher;
     return;
   }
+
+  reset_buttons();
+
+  g_engine.tick = 0;
   g_engine.app = app;
+  g_engine.paused = false;
+
   if (g_engine.app != NULL && g_engine.app->enter != NULL) {
     g_engine.app->enter();
+  }
+}
+
+void engine_pause() {
+  reset_buttons();
+  g_engine.paused = true;
+  if (g_engine.app != NULL && g_engine.app->pause != NULL) {
+    g_engine.app->pause();
+  }
+}
+
+void engine_resume() {
+  reset_buttons();
+  g_engine.paused = false;
+  if (g_engine.app != NULL && g_engine.app->resume != NULL) {
+    g_engine.app->resume();
   }
 }

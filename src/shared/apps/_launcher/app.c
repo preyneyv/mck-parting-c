@@ -24,7 +24,11 @@ static struct {
   int32_t active_offset;
   int32_t scroll_offset;
   uint32_t box_start;
-} state = {.scroll_offset = APP_SCROLL_MARGIN, .box_start = DISP_WIDTH};
+  // float held;
+} state = {
+    .scroll_offset = APP_SCROLL_MARGIN, .box_start = DISP_WIDTH,
+    // .held = 0.f,
+};
 
 static inline int32_t app_x(uint8_t app_index) {
   return (APP_SIZE + APP_MARGIN) * app_index;
@@ -64,6 +68,7 @@ static void frame() {
     }
   }
   if (held > 0) {
+    anim_cancel(&state.box_start, false);
     state.box_start = DISP_WIDTH * (1.f - ease_out_cubic(held));
   } // otherwise use the existing value instead of overwriting it.
   if (BUTTON_KEYUP(BUTTON_RIGHT)) {
@@ -114,8 +119,13 @@ static void frame() {
   u8g2_DrawBox(u8g2, state.box_start, 0, DISP_WIDTH, DISP_HEIGHT);
 }
 
+static void resume() {
+  anim_to(&state.box_start, DISP_WIDTH, 150, ANIM_EASE_OUT_CUBIC, NULL, NULL);
+}
+
 app_t app_launcher = {
     .name = "launcher",
     // .enter = enter,
     .frame = frame,
+    .resume = resume,
 };

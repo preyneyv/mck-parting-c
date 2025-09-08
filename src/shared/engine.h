@@ -40,6 +40,7 @@ typedef struct {
   bool pressed; // true if button is currently pressed
   bool edge;    // true if button was just transitioned this frame. will
                 // automatically be reset next tick or frame
+  bool ignore;  // true if press should be ignored until next release
 } button_t;
 
 typedef struct {
@@ -56,6 +57,8 @@ typedef struct {
   absolute_time_t now;
   uint32_t tick;
 
+  bool paused;
+  bool show_menu;
   app_t *app;
 } engine_t;
 
@@ -67,6 +70,8 @@ void engine_buttons_init();
 bool engine_button_read(button_id_t button_id);
 void engine_enter_sleep();           // todo: finalize api
 void engine_sleep_until_interrupt(); // implement
+void engine_pause();
+void engine_resume();
 
 static inline button_t *engine_button_from_id(button_id_t button_id) {
   switch (button_id) {

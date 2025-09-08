@@ -1,5 +1,6 @@
-#include "anim.h"
 #include <stdio.h>
+
+#include "anim.h"
 
 anim_sys_t g_anim;
 
@@ -73,8 +74,9 @@ void anim_init(void) {
 
 // Start/overwrite: animate *out from its current value to 'to' over
 // 'duration_ticks'
-int anim_to(volatile int32_t *out, int32_t to, uint32_t duration_ticks,
-            anim_ease_t ease, anim_done_fn on_done, void *ctx) {
+static int _anim_to_impl(volatile int32_t *out, int32_t to,
+                         uint32_t duration_ticks, anim_ease_t ease,
+                         anim_done_fn on_done, void *ctx, bool is_sys) {
   int idx = find_slot_by_ptr(out);
   if (idx < 0)
     idx = find_free_slot();
@@ -91,6 +93,7 @@ int anim_to(volatile int32_t *out, int32_t to, uint32_t duration_ticks,
   s->ease = ease;
   s->on_done = on_done;
   s->ctx = ctx;
+  s->is_sys = is_sys;
 
   if (duration_ticks == 0u) {
     *s->out = s->end;
@@ -106,21 +109,35 @@ int anim_to(volatile int32_t *out, int32_t to, uint32_t duration_ticks,
   return idx;
 }
 
+int anim_to(volatile int32_t *out, int32_t to, uint32_t duration_ticks,
+            anim_ease_t ease, anim_done_fn on_done, void *ctx) {
+  return _anim_to_impl(out, to, duration_ticks, ease, on_done, ctx, false);
+}
+
+int anim_sys_to(volatile int32_t *out, int32_t to, uint32_t duration_ticks,
+                anim_ease_t ease, anim_done_fn on_done, void *ctx) {
+  return _anim_to_impl(out, to, duration_ticks, ease, on_done, ctx, true);
+}
+
 void anim_cancel(volatile int32_t *out, int snap_to_end) {
   int idx = find_slot_by_ptr(out);
   if (idx < 0)
     return;
   anim_slot_t *s = &g_anim.slots[idx];
+  if (!s->active)
+    return;
   if (snap_to_end)
     *s->out = s->end;
   s->active = 0;
 }
 
 void anim_tick(void) {
-  // printf("hi.");
   for (int i = 0; i < ANIM_MAX; ++i) {
     anim_slot_t *s = &g_anim.slots[i];
     if (!s->active)
+      continue;
+    if (g_anim.paused && !s->is_sys)
+      // if paused, skip non-sys animations
       continue;
 
     uint32_t p = s->p_q16;
@@ -148,3 +165,11 @@ void anim_tick(void) {
     }
   }
 }
+
+void anim_sys_clear_all() {
+  for (int i = 0; i < ANIM_MAX; ++i)
+    if (!g_anim.slots[i].is_sys)
+      g_anim.slots[i].active = 0;
+}
+
+void anim_sys_set_paused(bool paused) { g_anim.paused = paused; }

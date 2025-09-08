@@ -5,22 +5,22 @@
 static void enter() {
   audio_synth_operator_config_t config = audio_synth_operator_config_default;
   config.env = (audio_synth_env_config_t){
-      .a = 0,
-      .d = 700,
-      .s = q1x31_f(.2f), // sustain level
-      .r = 200,
+      .a = 2,
+      .d = 50,
+      .s = q1x31_f(0.f), // sustain level
+      .r = 50,
   };
-  config.freq_mult = 11;
-  config.level = q1x15_f(0.3f);
+  config.freq_mult = 6;
+  config.level = q1x15_f(.4f);
   audio_synth_operator_set_config(&g_engine.synth.voices[0].ops[0], config);
   audio_synth_operator_set_config(&g_engine.synth.voices[1].ops[0], config);
 
   config = audio_synth_operator_config_default;
   config.env = (audio_synth_env_config_t){
-      .a = 0,
-      .d = 1200,
+      .a = 2,
+      .d = 150,
       .s = q1x31_f(0.f), // sustain level
-      .r = 300,
+      .r = 100,
   };
   config.level = q1x15_f(.5f);
   config.mode = AUDIO_SYNTH_OP_MODE_FREQ_MOD;
@@ -37,7 +37,7 @@ static void tick() {
                               .data.note_on =
                                   {
                                       .voice = 0,
-                                      .note_number = note("C4"),
+                                      .note_number = 50,
                                       .velocity = 100,
                                   },
                           });
@@ -57,7 +57,7 @@ static void tick() {
                               .data.note_on =
                                   {
                                       .voice = 1,
-                                      .note_number = note("G4"),
+                                      .note_number = 57,
                                       .velocity = 100,
                                   },
                           });
@@ -71,9 +71,30 @@ static void tick() {
   }
 }
 
+static void frame() {
+  u8g2_t *u8g2 = &g_engine.display.u8g2;
+  u8g2_SetDrawColor(u8g2, 1);
+  bool left = BUTTON_PRESSED(BUTTON_LEFT);
+  bool right = BUTTON_PRESSED(BUTTON_RIGHT);
+  bool breathe = (g_engine.tick / 500) % 2;
+
+  const uint8_t *cat = cat_idle_0_bits;
+  if (left && right) {
+    cat = cat_both_0_bits;
+  } else if (left) {
+    cat = cat_left_0_bits;
+  } else if (right) {
+    cat = cat_right_0_bits;
+  } else if (breathe) {
+    cat = cat_idle_1_bits;
+  }
+  u8g2_DrawXBM(u8g2, 0, 0, 128, 64, cat);
+}
+
 app_t app_bongocat = {
     .name = "bongocat",
     .icon = icon__0_bits,
     .enter = enter,
     .tick = tick,
+    .frame = frame,
 };
