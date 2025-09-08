@@ -4,9 +4,11 @@
 #include <hardware/watchdog.h>
 
 #include <shared/utils/timing.h>
+#include <shared/utils/vec.h>
 
 #include "anim.h"
 #include "apps/apps.h"
+#include "elm.h"
 #include "engine.h"
 
 // #define DEBUG_FPS
@@ -112,31 +114,47 @@ void engine_enter_sleep() {
   watchdog_enable(200, 1);
 }
 
+static const int32_t MENU_CONTAINER_OFFSET_CLOSED = -DISP_HEIGHT - 1;
 static struct {
   int selected;
-} menu_state;
+  int32_t container_offset;
+} menu_state = {
+    .container_offset = MENU_CONTAINER_OFFSET_CLOSED,
+};
 
 static void menu_frame() {
   u8g2_t *u8g2 = display_get_u8g2(&g_engine.display);
-  // first handle menu button
+
   if (BUTTON_KEYDOWN(BUTTON_MENU)) {
     if (g_engine.show_menu) {
       // close menu
       g_engine.show_menu = false;
       engine_resume();
+      anim_sys_to(&menu_state.container_offset, MENU_CONTAINER_OFFSET_CLOSED,
+                  300, ANIM_EASE_OUT_CUBIC, NULL, NULL);
+
     } else {
       // open menu
       engine_pause();
       g_engine.show_menu = true;
+      anim_sys_to(&menu_state.container_offset, 0, 300, ANIM_EASE_OUT_CUBIC,
+                  NULL, NULL);
     }
   }
 
-  // if (g_engine.show_menu) {
-  //   // draw menu
-  //   u8g2_ClearBuffer(u8g2);
-  //   menu_draw(u8g2);
-  //   u8g2_SendBuffer(u8g2);
-  // }
+  if (menu_state.container_offset == MENU_CONTAINER_OFFSET_CLOSED) {
+    // menu closed, nothing to do
+    return;
+  }
+  vec2_t pos = vec2(0, menu_state.container_offset);
+
+  elm_t root = elm_root(u8g2, pos);
+  u8g2_SetDrawColor(u8g2, 0);
+  elm_box(&root, vec2(0, 0), DISP_WIDTH, DISP_HEIGHT);
+  u8g2_SetDrawColor(u8g2, 1);
+  elm_hline(&root, vec2(0, DISP_HEIGHT), DISP_WIDTH);
+  u8g2_SetFont(u8g2, u8g2_font_6x10_tf);
+  elm_str(&root, vec2(4, 10), "menu");
 }
 
 void engine_run_forever() {
@@ -183,10 +201,13 @@ void engine_run_forever() {
       peripheral_update_counter = 0;
     }
 
-    if (!g_engine.paused) {
-      ti_start(&ti_tick);
+    ti_start(&ti_tick);
 
-      while (ticks--) {
+    while (ticks--) {
+      anim_tick(); // always tick animations
+
+      if (!g_engine.paused) {
+        // advance app if not paused
         if (g_engine.app->tick != NULL) {
           g_engine.app->tick();
           // reset button edge. if no tick(), they will instead be reset next
@@ -194,31 +215,31 @@ void engine_run_forever() {
           g_engine.buttons.left.edge = false;
           g_engine.buttons.right.edge = false;
         }
-
-        anim_tick();
-        g_engine.tick++;
+        g_engine.tick++; // todo: this should technically be part of the app,
+                         // not the engine
       }
+    }
 
+    if (!g_engine.paused) {
       // draw screen buffer
       u8g2_ClearBuffer(u8g2);
-
       if (g_engine.app->frame != NULL)
         g_engine.app->frame();
-
-      ti_stop(&ti_tick);
-#ifdef DEBUG_FPS
-      draw_fps(u8g2, fps);
-#endif
-
-      ti_start(&ti_show);
-      // write display
-      u8g2_SendBuffer(u8g2);
-      // write LEDs
-      leds_show(&g_engine.leds);
-      ti_stop(&ti_show);
     }
 
     menu_frame();
+
+    ti_stop(&ti_tick);
+#ifdef DEBUG_FPS
+    draw_fps(u8g2, fps);
+#endif
+
+    ti_start(&ti_show);
+    // write display
+    u8g2_SendBuffer(u8g2);
+    // write LEDs
+    leds_show(&g_engine.leds);
+    ti_stop(&ti_show);
 
     // log fps and frame limit
     last_log_frames++;
@@ -250,12 +271,12 @@ void engine_set_app(app_t *app) {
   if (g_engine.app != NULL && g_engine.app->leave != NULL) {
     g_engine.app->leave();
   }
-  if (app == NULL) {
-    g_engine.app = &app_launcher;
-    return;
-  }
-
+  anim_sys_clear_all();
   reset_buttons();
+
+  if (app == NULL) {
+    app = &app_launcher;
+  }
 
   g_engine.tick = 0;
   g_engine.app = app;
@@ -269,6 +290,7 @@ void engine_set_app(app_t *app) {
 void engine_pause() {
   reset_buttons();
   g_engine.paused = true;
+  anim_sys_set_paused(true);
   if (g_engine.app != NULL && g_engine.app->pause != NULL) {
     g_engine.app->pause();
   }
@@ -277,6 +299,7 @@ void engine_pause() {
 void engine_resume() {
   reset_buttons();
   g_engine.paused = false;
+  anim_sys_set_paused(false);
   if (g_engine.app != NULL && g_engine.app->resume != NULL) {
     g_engine.app->resume();
   }
