@@ -59,9 +59,11 @@ static void enter() {
 }
 
 static void frame() {
+  bool ignore_left_release = false;
+
   if (BUTTON_PRESSED(BUTTON_RIGHT)) {
     float held = engine_button_held_ratio(BUTTON_RIGHT);
-    state.ignore_right_release = held > 0.f;
+    ignore_left_release = state.ignore_right_release = held > 0.f;
     if (held >= 1.f) {
       engine_set_app(apps[state.active]);
     }
@@ -71,8 +73,7 @@ static void frame() {
     } // otherwise use the existing value instead of overwriting it.
   }
 
-  if (BUTTON_KEYUP(BUTTON_LEFT)) {
-    // key released
+  if (BUTTON_KEYUP(BUTTON_LEFT) && !ignore_left_release) {
     change_active(-1);
   }
 

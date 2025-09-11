@@ -19,7 +19,6 @@ engine_t g_engine;
 void engine_init() {
   // initialize all subsystems
   audio_synth_init(&g_engine.synth, AUDIO_SAMPLE_RATE, 1000);
-  g_engine.synth.master_level = q1x15_f(.5f); // todo: volume control
 
   display_init(&g_engine.display);
   peripheral_init(&g_engine.peripheral);
@@ -31,6 +30,16 @@ void engine_init() {
   engine_buttons_init(&g_engine.buttons);
 
   engine_set_app(NULL);
+  engine_set_volume(4); // todo: save/restore from flash (somehow)
+}
+
+void engine_set_volume(int8_t level) {
+  g_engine.volume = (uint8_t)MAX(MIN((int)level, 8), 0);
+  g_engine.synth.master_level = q1x15_f(g_engine.volume / 8.0f);
+}
+
+inline void engine_change_volume(int8_t direction) {
+  engine_set_volume(g_engine.volume + direction);
 }
 
 static void draw_fps(u8g2_t *u8g2, uint32_t fps) {
@@ -119,13 +128,15 @@ void engine_enter_sleep() {
 static const int32_t MENU_CONTAINER_OFFSET_CLOSED = -DISP_HEIGHT - 2;
 static struct {
   int active;
-  int32_t container_offset;
-  int32_t active_offset;
-  int32_t held_offset;
-  bool ignore_right_release;
-  bool ignore_left_release;
+  bool ignore_release;
+  struct {
+    int32_t container;
+    int32_t active;
+    int32_t held;
+    int32_t volume_kick;
+  } anim;
 } menu_state = {
-    .container_offset = MENU_CONTAINER_OFFSET_CLOSED,
+    .anim.container = MENU_CONTAINER_OFFSET_CLOSED,
 };
 
 static void menu_action_go_home() {
@@ -143,6 +154,7 @@ static const menu_action_t menu_actions[] = {
     {.name = "sleep", .action = menu_action_sleep},
     {.name = "volume", .action = NULL},
 };
+static const uint8_t MENU_ACTION_VOLUME = 2;
 
 static const int32_t MENU_ACTION_COUNT =
     sizeof(menu_actions) / sizeof(menu_actions[0]);
@@ -160,8 +172,8 @@ static void menu_change_active(int8_t delta) {
     menu_state.active = 0;
   }
   int32_t target_offset = menu_action_y(menu_state.active);
-  anim_sys_to(&menu_state.active_offset, target_offset, 150,
-              ANIM_EASE_OUT_CUBIC, NULL, NULL);
+  anim_sys_to(&menu_state.anim.active, target_offset, 150, ANIM_EASE_OUT_CUBIC,
+              NULL, NULL);
 }
 
 static inline float ease_out_cubic(float t) {
@@ -170,13 +182,13 @@ static inline float ease_out_cubic(float t) {
 }
 
 static void menu_enter() {
-  menu_state.held_offset = 0;
-  anim_sys_to(&menu_state.container_offset, 0, 300, ANIM_EASE_OUT_CUBIC, NULL,
+  menu_state.anim.held = 0;
+  anim_sys_to(&menu_state.anim.container, 0, 300, ANIM_EASE_OUT_CUBIC, NULL,
               NULL);
 }
 
 static void menu_exit() {
-  anim_sys_to(&menu_state.container_offset, MENU_CONTAINER_OFFSET_CLOSED, 300,
+  anim_sys_to(&menu_state.anim.container, MENU_CONTAINER_OFFSET_CLOSED, 300,
               ANIM_EASE_OUT_CUBIC, NULL, NULL);
 }
 
@@ -194,40 +206,77 @@ static void menu_frame() {
 
   // only handle other buttons if menu is open
   if (g_engine.paused) {
-    if (BUTTON_PRESSED(BUTTON_RIGHT)) {
-      float held = engine_button_held_ratio(BUTTON_RIGHT);
-      menu_state.ignore_right_release = held > 0.f;
-      if (held >= 1.f) {
-        printf("menu action %d triggered\n", menu_state.active);
-        if (menu_actions[menu_state.active].action) {
-          menu_actions[menu_state.active].action();
-        }
+    button_id_t button_id = BUTTON_NONE;
+    if (BUTTON_PRESSED(BUTTON_LEFT) && BUTTON_PRESSED(BUTTON_RIGHT)) {
+      // only consider the earlier-pressed button
+      if (g_engine.buttons.left.pressed_at <
+          g_engine.buttons.right.pressed_at) {
+        button_id = BUTTON_LEFT;
+      } else {
+        button_id = BUTTON_RIGHT;
       }
-      if (held > 0) {
-        anim_cancel(&menu_state.held_offset, false);
-        menu_state.held_offset = 14 * ease_out_cubic(held);
-      }
+    } else if (BUTTON_PRESSED(BUTTON_LEFT)) {
+      button_id = BUTTON_LEFT;
+    } else if (BUTTON_PRESSED(BUTTON_RIGHT)) {
+      button_id = BUTTON_RIGHT;
     }
 
+    if (button_id != BUTTON_NONE) {
+      float held = engine_button_held_ratio(button_id);
+      menu_state.ignore_release = held > 0.f;
+      if (menu_state.active == MENU_ACTION_VOLUME) {
+        // change volume repeatedly when held
+        if (held >= .2f) {
+          static absolute_time_t last_change = {0};
+          if (time_reached(delayed_by_ms(last_change, 200))) {
+            last_change = get_absolute_time();
+            if (button_id == BUTTON_LEFT) {
+              engine_change_volume(-1);
+              menu_state.anim.volume_kick = -3;
+            } else {
+              engine_change_volume(1);
+              menu_state.anim.volume_kick = 3;
+            }
+            anim_sys_to(&menu_state.anim.volume_kick, 0, 150,
+                        ANIM_EASE_OUT_CUBIC, NULL, NULL);
+          }
+        }
+      } else {
+        if (held >= 1.f) {
+          if (menu_actions[menu_state.active].action) {
+            menu_actions[menu_state.active].action();
+          }
+        }
+        if (held > 0) {
+          anim_cancel(&menu_state.anim.held, false);
+          menu_state.anim.held = 14 * ease_out_cubic(held);
+        }
+      }
+    }
     if (BUTTON_KEYUP(BUTTON_LEFT)) {
-      menu_change_active(-1);
+      anim_sys_to(&menu_state.anim.held, 0, 150, ANIM_EASE_OUT_CUBIC, NULL,
+                  NULL);
+      if (!menu_state.ignore_release)
+        menu_change_active(-1);
+      menu_state.ignore_release = false;
     }
 
     if (BUTTON_KEYUP(BUTTON_RIGHT)) {
-      anim_sys_to(&menu_state.held_offset, 0, 150, ANIM_EASE_OUT_CUBIC, NULL,
+      anim_sys_to(&menu_state.anim.held, 0, 150, ANIM_EASE_OUT_CUBIC, NULL,
                   NULL);
-      if (!menu_state.ignore_right_release)
+      if (!menu_state.ignore_release)
         menu_change_active(1);
+      menu_state.ignore_release = false;
     }
   }
 
-  if (menu_state.container_offset == MENU_CONTAINER_OFFSET_CLOSED) {
+  if (menu_state.anim.container == MENU_CONTAINER_OFFSET_CLOSED) {
     // menu closed, we can skip drawing since it will all be off-screen anyway
     return;
   }
 
   u8g2_t *u8g2 = display_get_u8g2(&g_engine.display);
-  vec2_t pos = vec2(0, menu_state.container_offset);
+  vec2_t pos = vec2(0, menu_state.anim.container);
 
   elm_t root = elm_root(u8g2, pos);
   // draw background
@@ -243,14 +292,29 @@ static void menu_frame() {
     vec2_t item_pos = vec2(0, menu_action_y(i));
     elm_t item = elm_child(&items, item_pos);
     uint16_t item_text_x = 5;
-    if (i == menu_state.active) {
-      item_text_x += menu_state.held_offset;
-      elm_hline(&item, vec2(5, 9), MAX(menu_state.held_offset - 3, 0));
+    if (i == MENU_ACTION_VOLUME) {
+      // volume item, render the bubbles
+      elm_t right_edge = elm_child(&item, vec2(DISP_WIDTH - 5, 0));
+      for (uint8_t j = 0; j < 8; j++) {
+        uint8_t tick = 7 - j;
+        elm_t tick_tl = elm_child(&right_edge, vec2(-4 - (j * 5), 5));
+        if (tick < g_engine.volume) {
+          elm_rounded_box(&tick_tl, VEC2_Z, 4, 8, 1);
+        } else {
+          elm_rounded_frame(&tick_tl, VEC2_Z, 4, 8, 1);
+        }
+      }
+      item_text_x += menu_state.anim.volume_kick;
+    } else {
+      if (i == menu_state.active) {
+        item_text_x += menu_state.anim.held;
+        elm_hline(&item, vec2(5, 9), MAX(menu_state.anim.held - 3, 0));
+      }
     }
     elm_str(&item, vec2(item_text_x, 12), menu_actions[i].name);
   }
 
-  elm_rounded_frame(&items, vec2(0, menu_state.active_offset), DISP_WIDTH,
+  elm_rounded_frame(&items, vec2(0, menu_state.anim.active), DISP_WIDTH,
                     MENU_ACTION_HEIGHT, 3);
 
   // draw hud

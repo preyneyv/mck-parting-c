@@ -29,6 +29,7 @@ typedef struct {
 } app_t;
 
 typedef enum {
+  BUTTON_NONE = 0,
   BUTTON_LEFT,
   BUTTON_RIGHT,
   BUTTON_MENU,
@@ -59,6 +60,8 @@ typedef struct {
 
   bool paused;
   app_t *app;
+
+  uint8_t volume;
 } engine_t;
 
 extern engine_t g_engine;
@@ -71,6 +74,8 @@ void engine_enter_sleep();           // todo: finalize api
 void engine_sleep_until_interrupt(); // implement
 void engine_pause();
 void engine_resume();
+void engine_set_volume(int8_t level);
+void engine_change_volume(int8_t direction);
 
 static inline button_t *engine_button_from_id(button_id_t button_id) {
   switch (button_id) {
