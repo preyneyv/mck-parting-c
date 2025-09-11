@@ -21,10 +21,9 @@ static struct {
   bool ignore_right_release;
   int32_t active_offset;
   int32_t scroll_offset;
-  uint32_t box_start;
+  uint32_t held_width;
 } state = {
     .scroll_offset = APP_SCROLL_MARGIN,
-    .box_start = DISP_WIDTH,
 };
 
 static inline int32_t app_x(uint8_t app_index) {
@@ -38,6 +37,8 @@ static void change_active(int8_t delta) {
   } else if (state.active >= APP_COUNT) {
     state.active = 0;
   }
+
+  // scroll to active
   int32_t offset = app_x(state.active);
   anim_to(&state.active_offset, offset, 150, ANIM_EASE_INOUT_QUAD, NULL, NULL);
   int32_t scroll_idx = state.active / 2;
@@ -60,13 +61,13 @@ static void frame() {
       engine_set_app(apps[state.active]);
     }
     if (held > 0) {
-      anim_cancel(&state.box_start, false);
-      state.box_start = DISP_WIDTH * (1.f - ease_out_cubic(held));
+      anim_cancel(&state.held_width, false);
+      state.held_width = APP_SIZE * ease_out_cubic(held);
     } // otherwise use the existing value instead of overwriting it.
   }
 
   if (BUTTON_KEYUP(BUTTON_RIGHT)) {
-    anim_to(&state.box_start, DISP_WIDTH, 150, ANIM_EASE_OUT_CUBIC, NULL, NULL);
+    anim_to(&state.held_width, 0, 150, ANIM_EASE_OUT_CUBIC, NULL, NULL);
   }
 
   if (BUTTON_KEYUP(BUTTON_LEFT)) {
@@ -82,14 +83,24 @@ static void frame() {
   u8g2_SetDrawColor(u8g2, 1);
   for (int i = 0; i < APP_COUNT; i++) {
     vec2_t pos = vec2(state.scroll_offset + app_x(i), 11);
+    u8g2_SetDrawColor(u8g2, 1);
     if (apps[i]->icon) {
       u8g2_DrawXBM(u8g2, pos.x, pos.y, APP_SIZE, APP_SIZE, apps[i]->icon);
     }
+    if (i == state.active) {
+      u8g2_SetDrawColor(u8g2, 2);
+      u8g2_DrawBox(u8g2, pos.x + APP_SIZE - state.held_width, pos.y,
+                   state.held_width, APP_SIZE);
+    }
+    u8g2_SetDrawColor(u8g2, 1);
     u8g2_DrawRFrame(u8g2, pos.x, pos.y, APP_SIZE, APP_SIZE, 1);
   }
+
+  u8g2_SetDrawColor(u8g2, 1);
   u8g2_DrawRFrame(u8g2, state.scroll_offset + state.active_offset - 2, 9,
                   APP_SIZE + 4, APP_SIZE + 4, 3);
 
+  u8g2_SetDrawColor(u8g2, 1);
   u8g2_SetFont(u8g2, u8g2_font_6x10_tf);
   char *name = apps[state.active]->name;
   uint16_t width = u8g2_GetStrWidth(u8g2, name);
@@ -106,15 +117,10 @@ static void frame() {
   u8g2_DrawStr(u8g2, 128 - u8g2_GetStrWidth(u8g2, chg_str), 6, chg_str);
 
   u8g2_DrawStr(u8g2, 0, 6, "prism");
-
-  // fill up
-  u8g2_SetDrawColor(u8g2, 2);
-
-  u8g2_DrawBox(u8g2, state.box_start, 0, DISP_WIDTH, DISP_HEIGHT);
 }
 
 static void resume() {
-  anim_to(&state.box_start, DISP_WIDTH, 150, ANIM_EASE_OUT_CUBIC, NULL, NULL);
+  anim_to(&state.held_width, DISP_WIDTH, 150, ANIM_EASE_OUT_CUBIC, NULL, NULL);
 }
 
 app_t app_launcher = {
