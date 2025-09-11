@@ -10,13 +10,16 @@
 #include <hardware/clocks.h>
 #include <hardware/gpio.h>
 #include <hardware/irq.h>
+#include <hardware/pll.h>
 #include <hardware/pwm.h>
 #include <hardware/resets.h>
 #include <hardware/spi.h>
+#include <hardware/structs/rosc.h>
 #include <hardware/sync.h>
 #include <hardware/watchdog.h>
 #include <hardware/xosc.h>
 #include <pico/multicore.h>
+#include <pico/runtime_init.h>
 #include <pico/stdlib.h>
 
 #include <shared/engine.h>
@@ -24,6 +27,7 @@
 
 #include "audio.h"
 #include "config.h"
+#include "lib/sleep/sleep.h"
 
 void core1_main() {
   audio_playback_init();
@@ -62,8 +66,66 @@ bool engine_button_read(button_id_t button_id) {
   return 1 - gpio_get(gpio); // active low
 }
 
+void measure_freqs(void) {
+  uint f_pll_sys =
+      frequency_count_khz(CLOCKS_FC0_SRC_VALUE_PLL_SYS_CLKSRC_PRIMARY);
+  uint f_pll_usb =
+      frequency_count_khz(CLOCKS_FC0_SRC_VALUE_PLL_USB_CLKSRC_PRIMARY);
+  uint f_rosc = frequency_count_khz(CLOCKS_FC0_SRC_VALUE_ROSC_CLKSRC);
+  uint f_clk_sys = frequency_count_khz(CLOCKS_FC0_SRC_VALUE_CLK_SYS);
+  uint f_clk_peri = frequency_count_khz(CLOCKS_FC0_SRC_VALUE_CLK_PERI);
+  uint f_clk_usb = frequency_count_khz(CLOCKS_FC0_SRC_VALUE_CLK_USB);
+  uint f_clk_adc = frequency_count_khz(CLOCKS_FC0_SRC_VALUE_CLK_ADC);
+#ifdef CLOCKS_FC0_SRC_VALUE_CLK_RTC
+  uint f_clk_rtc = frequency_count_khz(CLOCKS_FC0_SRC_VALUE_CLK_RTC);
+#endif
+
+  printf("pll_sys  = %dkHz\n", f_pll_sys);
+  printf("pll_usb  = %dkHz\n", f_pll_usb);
+  printf("rosc     = %dkHz\n", f_rosc);
+  printf("clk_sys  = %dkHz\n", f_clk_sys);
+  printf("clk_peri = %dkHz\n", f_clk_peri);
+  printf("clk_usb  = %dkHz\n", f_clk_usb);
+  printf("clk_adc  = %dkHz\n", f_clk_adc);
+#ifdef CLOCKS_FC0_SRC_VALUE_CLK_RTC
+  printf("clk_rtc  = %dkHz\n", f_clk_rtc);
+#endif
+
+  // Can't measure clk_ref / xosc as it is the ref
+}
+
 void engine_sleep_until_interrupt() {
-  uint32_t event = IO_BANK0_DORMANT_WAKE_INTE0_GPIO0_EDGE_HIGH_BITS;
+  sleep_ms(100); // let things settle
+
+  // configure clocks
+  uint src_hz = XOSC_HZ;
+  uint clk_ref_src = CLOCKS_CLK_REF_CTRL_SRC_VALUE_XOSC_CLKSRC;
+  clock_configure(clk_ref, clk_ref_src, 0, src_hz, src_hz);
+  clock_configure(clk_sys, CLOCKS_CLK_SYS_CTRL_SRC_VALUE_CLK_REF, 0, src_hz,
+                  src_hz);
+  clock_stop(clk_adc);
+  // clock_stop(clk_usb);
+
+  clock_configure(clk_rtc, 0, CLOCKS_CLK_RTC_CTRL_AUXSRC_VALUE_XOSC_CLKSRC,
+                  src_hz, 46875);
+  clock_configure(clk_peri, 0, CLOCKS_CLK_PERI_CTRL_AUXSRC_VALUE_CLK_SYS,
+                  src_hz, src_hz);
+  pll_deinit(pll_sys);
+  // pll_deinit(pll_usb);
+
+  uint32_t tmp = rosc_hw->ctrl;
+  tmp &= (~ROSC_CTRL_ENABLE_BITS);
+  tmp |= (ROSC_CTRL_ENABLE_VALUE_DISABLE << ROSC_CTRL_ENABLE_LSB);
+  hw_clear_bits(&rosc_hw->status, ROSC_STATUS_BADWRITE_BITS);
+  assert(!(rosc_hw->status & ROSC_STATUS_BADWRITE_BITS));
+  rosc_hw->ctrl = tmp;
+  assert(!(rosc_hw->status & ROSC_STATUS_BADWRITE_BITS));
+  // Wait for stable to go away
+  while (rosc_hw->status & ROSC_STATUS_STABLE_BITS)
+    ;
+
+  // enter sleep
+  uint32_t event = IO_BANK0_DORMANT_WAKE_INTE0_GPIO0_EDGE_LOW_BITS;
 
   gpio_set_dormant_irq_enabled(BUTTON_PIN_L, event, true);
   gpio_set_dormant_irq_enabled(BUTTON_PIN_R, event, true);
@@ -74,6 +136,24 @@ void engine_sleep_until_interrupt() {
   gpio_acknowledge_irq(BUTTON_PIN_L, event);
   gpio_acknowledge_irq(BUTTON_PIN_R, event);
   gpio_acknowledge_irq(BUTTON_PIN_M, event);
+
+  // wake from sleep
+  // todo: enable rosc
+  hw_clear_bits(&rosc_hw->status, ROSC_STATUS_BADWRITE_BITS);
+  assert(!(rosc_hw->status & ROSC_STATUS_BADWRITE_BITS));
+  rosc_hw->ctrl = ROSC_CTRL_ENABLE_BITS;
+  assert(!(rosc_hw->status & ROSC_STATUS_BADWRITE_BITS));
+  while (!(rosc_hw->status & ROSC_STATUS_STABLE_BITS))
+    ;
+
+  clocks_hw->sleep_en0 |= ~(0u);
+  clocks_hw->sleep_en1 |= ~(0u);
+  clocks_init();
+  set_sys_clock_hz(SYS_CLOCK_HZ, true);
+
+  sleep_ms(100); // let things settle
+  // while (1)
+  //   sleep_ms(100);
 }
 
 int main() {

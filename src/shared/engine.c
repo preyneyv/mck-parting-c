@@ -116,7 +116,14 @@ void engine_enter_sleep() {
   peripheral_set_enabled(&g_engine.peripheral, false);
   audio_playback_set_enabled(false);
 
-  sleep_ms(1000);
+  // wait until all buttons are released.
+  bool all_released = false;
+  while (!all_released) {
+    all_released = !engine_button_read(BUTTON_MENU) &&
+                   !engine_button_read(BUTTON_LEFT) &&
+                   !engine_button_read(BUTTON_RIGHT);
+  }
+
   engine_sleep_until_interrupt();
 
   audio_playback_set_enabled(true);
