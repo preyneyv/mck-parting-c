@@ -63,7 +63,7 @@ bool engine_button_read(button_id_t button_id) {
 }
 
 void engine_sleep_until_interrupt() {
-  uint32_t event = IO_BANK0_DORMANT_WAKE_INTE0_GPIO0_EDGE_LOW_BITS;
+  uint32_t event = IO_BANK0_DORMANT_WAKE_INTE0_GPIO0_EDGE_HIGH_BITS;
 
   gpio_set_dormant_irq_enabled(BUTTON_PIN_L, event, true);
   gpio_set_dormant_irq_enabled(BUTTON_PIN_R, event, true);

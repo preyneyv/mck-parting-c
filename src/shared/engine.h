@@ -111,8 +111,8 @@ static inline bool engine_button_released(button_id_t button_id) {
 #define BUTTON_RELEASED(button_id) engine_button_released(button_id)
 
 // helper functions for button holding
-static const int32_t ENGINE_BUTTON_HOLD_MS_MIN = 300;
-static const int32_t ENGINE_BUTTON_HOLD_MS_CONFIRM = 1500;
+static const int32_t ENGINE_BUTTON_HOLD_MS_TRIGGER = 300;
+static const int32_t ENGINE_BUTTON_HOLD_MS_CONFIRM = 1200;
 
 static inline float engine_button_held_ratio(button_id_t button_id) {
   button_t *button = engine_button_from_id(button_id);
@@ -120,8 +120,8 @@ static inline float engine_button_held_ratio(button_id_t button_id) {
     return 0.f;
   int32_t ms = absolute_time_diff_us(button->pressed_at, g_engine.now) / 1000;
   float held =
-      (ms - ENGINE_BUTTON_HOLD_MS_MIN) /
-      (float)(ENGINE_BUTTON_HOLD_MS_CONFIRM - ENGINE_BUTTON_HOLD_MS_MIN);
+      (ms - ENGINE_BUTTON_HOLD_MS_TRIGGER) /
+      (float)(ENGINE_BUTTON_HOLD_MS_CONFIRM - ENGINE_BUTTON_HOLD_MS_TRIGGER);
   if (held < 0.f)
     held = 0.f;
   if (held > 1.f)

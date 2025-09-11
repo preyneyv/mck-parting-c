@@ -101,11 +101,13 @@ static void handle_menu_reset() {
 }
 
 void engine_enter_sleep() {
+  // TODO: this sometimes causes a hard fault on wakeup, investigate
   watchdog_disable();
   display_set_enabled(&g_engine.display, false);
   peripheral_set_enabled(&g_engine.peripheral, false);
   audio_playback_set_enabled(false);
 
+  sleep_ms(1000);
   engine_sleep_until_interrupt();
 
   audio_playback_set_enabled(true);
@@ -114,20 +116,31 @@ void engine_enter_sleep() {
   watchdog_enable(200, 1);
 }
 
-static const int32_t MENU_CONTAINER_OFFSET_CLOSED = -DISP_HEIGHT - 1;
+static const int32_t MENU_CONTAINER_OFFSET_CLOSED = -DISP_HEIGHT - 2;
 static struct {
   int active;
   int32_t container_offset;
   int32_t active_offset;
+  int32_t held_offset;
   bool ignore_right_release;
   bool ignore_left_release;
 } menu_state = {
     .container_offset = MENU_CONTAINER_OFFSET_CLOSED,
 };
 
+static void menu_action_go_home() {
+  engine_resume();
+  engine_set_app(NULL);
+}
+
+static void menu_action_sleep() {
+  engine_resume();
+  engine_enter_sleep();
+}
+
 static const menu_action_t menu_actions[] = {
-    {.name = "go home", .action = NULL},
-    {.name = "sleep", .action = NULL},
+    {.name = "go home", .action = menu_action_go_home},
+    {.name = "sleep", .action = menu_action_sleep},
     {.name = "volume", .action = NULL},
 };
 
@@ -151,46 +164,77 @@ static void menu_change_active(int8_t delta) {
               ANIM_EASE_OUT_CUBIC, NULL, NULL);
 }
 
-static void menu_frame() {
-  u8g2_t *u8g2 = display_get_u8g2(&g_engine.display);
+static inline float ease_out_cubic(float t) {
+  float inv = 1.0f - t;
+  return 1.0f - inv * inv * inv;
+}
 
+static void menu_enter() {
+  menu_state.held_offset = 0;
+  anim_sys_to(&menu_state.container_offset, 0, 300, ANIM_EASE_OUT_CUBIC, NULL,
+              NULL);
+}
+
+static void menu_exit() {
+  anim_sys_to(&menu_state.container_offset, MENU_CONTAINER_OFFSET_CLOSED, 300,
+              ANIM_EASE_OUT_CUBIC, NULL, NULL);
+}
+
+static void menu_frame() {
+  // always handle menu button
   if (BUTTON_KEYDOWN(BUTTON_MENU)) {
     if (g_engine.paused) {
       // close menu
       engine_resume();
-      anim_sys_to(&menu_state.container_offset, MENU_CONTAINER_OFFSET_CLOSED,
-                  300, ANIM_EASE_OUT_CUBIC, NULL, NULL);
-
     } else {
       // open menu
       engine_pause();
-      anim_sys_to(&menu_state.container_offset, 0, 300, ANIM_EASE_OUT_CUBIC,
-                  NULL, NULL);
     }
   }
 
+  // only handle other buttons if menu is open
   if (g_engine.paused) {
-    // handle button events
+    if (BUTTON_PRESSED(BUTTON_RIGHT)) {
+      float held = engine_button_held_ratio(BUTTON_RIGHT);
+      menu_state.ignore_right_release = held > 0.f;
+      if (held >= 1.f) {
+        printf("menu action %d triggered\n", menu_state.active);
+        if (menu_actions[menu_state.active].action) {
+          menu_actions[menu_state.active].action();
+        }
+      }
+      if (held > 0) {
+        anim_cancel(&menu_state.held_offset, false);
+        menu_state.held_offset = 14 * ease_out_cubic(held);
+      }
+    }
+
     if (BUTTON_KEYUP(BUTTON_LEFT)) {
       menu_change_active(-1);
     }
+
     if (BUTTON_KEYUP(BUTTON_RIGHT)) {
-      menu_change_active(1);
+      anim_sys_to(&menu_state.held_offset, 0, 150, ANIM_EASE_OUT_CUBIC, NULL,
+                  NULL);
+      if (!menu_state.ignore_right_release)
+        menu_change_active(1);
     }
   }
 
   if (menu_state.container_offset == MENU_CONTAINER_OFFSET_CLOSED) {
-    // menu closed, nothing to do
+    // menu closed, we can skip drawing since it will all be off-screen anyway
     return;
   }
+
+  u8g2_t *u8g2 = display_get_u8g2(&g_engine.display);
   vec2_t pos = vec2(0, menu_state.container_offset);
 
   elm_t root = elm_root(u8g2, pos);
   // draw background
   u8g2_SetDrawColor(u8g2, 0);
-  elm_box(&root, vec2(0, 0), DISP_WIDTH, DISP_HEIGHT);
+  elm_box(&root, vec2(0, 0), DISP_WIDTH, DISP_HEIGHT + 1);
   u8g2_SetDrawColor(u8g2, 1);
-  elm_hline(&root, vec2(0, DISP_HEIGHT), DISP_WIDTH);
+  elm_hline(&root, vec2(0, DISP_HEIGHT + 1), DISP_WIDTH);
 
   // draw menu items
   elm_t items = elm_child(&root, vec2(0, 10));
@@ -198,7 +242,12 @@ static void menu_frame() {
   for (uint8_t i = 0; i < MENU_ACTION_COUNT; i++) {
     vec2_t item_pos = vec2(0, menu_action_y(i));
     elm_t item = elm_child(&items, item_pos);
-    elm_str(&item, vec2(5, 12), menu_actions[i].name);
+    uint16_t item_text_x = 5;
+    if (i == menu_state.active) {
+      item_text_x += menu_state.held_offset;
+      elm_hline(&item, vec2(5, 9), MAX(menu_state.held_offset - 3, 0));
+    }
+    elm_str(&item, vec2(item_text_x, 12), menu_actions[i].name);
   }
 
   elm_rounded_frame(&items, vec2(0, menu_state.active_offset), DISP_WIDTH,
@@ -356,6 +405,7 @@ void engine_pause() {
   if (g_engine.app != NULL && g_engine.app->pause != NULL) {
     g_engine.app->pause();
   }
+  menu_enter();
 }
 
 void engine_resume() {
@@ -365,4 +415,5 @@ void engine_resume() {
   if (g_engine.app != NULL && g_engine.app->resume != NULL) {
     g_engine.app->resume();
   }
+  menu_exit();
 }

@@ -53,6 +53,11 @@ static inline float ease_out_cubic(float t) {
   return 1.0f - inv * inv * inv;
 }
 
+static void enter() {
+  state.ignore_right_release = false;
+  state.held_width = 0;
+}
+
 static void frame() {
   if (BUTTON_PRESSED(BUTTON_RIGHT)) {
     float held = engine_button_held_ratio(BUTTON_RIGHT);
@@ -66,16 +71,15 @@ static void frame() {
     } // otherwise use the existing value instead of overwriting it.
   }
 
-  if (BUTTON_KEYUP(BUTTON_RIGHT)) {
-    anim_to(&state.held_width, 0, 150, ANIM_EASE_OUT_CUBIC, NULL, NULL);
-  }
-
   if (BUTTON_KEYUP(BUTTON_LEFT)) {
     // key released
     change_active(-1);
   }
-  if (BUTTON_KEYUP(BUTTON_RIGHT) && !state.ignore_right_release) {
-    change_active(1);
+
+  if (BUTTON_KEYUP(BUTTON_RIGHT)) {
+    anim_to(&state.held_width, 0, 150, ANIM_EASE_OUT_CUBIC, NULL, NULL);
+    if (!state.ignore_right_release)
+      change_active(1);
   }
 
   u8g2_t *u8g2 = &g_engine.display.u8g2;
@@ -119,13 +123,14 @@ static void frame() {
   u8g2_DrawStr(u8g2, 0, 6, "prism");
 }
 
-static void resume() {
-  anim_to(&state.held_width, DISP_WIDTH, 150, ANIM_EASE_OUT_CUBIC, NULL, NULL);
+static void pause() {
+  anim_cancel(&state.held_width, false);
+  state.held_width = 0;
 }
 
 app_t app_launcher = {
     .name = "prism",
-    // .enter = enter,
+    .enter = enter,
     .frame = frame,
-    .resume = resume,
+    .pause = pause,
 };
