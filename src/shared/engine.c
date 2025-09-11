@@ -206,21 +206,7 @@ static void menu_frame() {
 
   // only handle other buttons if menu is open
   if (g_engine.paused) {
-    button_id_t button_id = BUTTON_NONE;
-    if (BUTTON_PRESSED(BUTTON_LEFT) && BUTTON_PRESSED(BUTTON_RIGHT)) {
-      // only consider the earlier-pressed button
-      if (g_engine.buttons.left.pressed_at <
-          g_engine.buttons.right.pressed_at) {
-        button_id = BUTTON_LEFT;
-      } else {
-        button_id = BUTTON_RIGHT;
-      }
-    } else if (BUTTON_PRESSED(BUTTON_LEFT)) {
-      button_id = BUTTON_LEFT;
-    } else if (BUTTON_PRESSED(BUTTON_RIGHT)) {
-      button_id = BUTTON_RIGHT;
-    }
-
+    button_id_t button_id = engine_button_get_pressed_first();
     if (button_id != BUTTON_NONE) {
       float held = engine_button_held_ratio(button_id);
       menu_state.ignore_release = held > 0.f;
@@ -232,16 +218,17 @@ static void menu_frame() {
             last_change = get_absolute_time();
             if (button_id == BUTTON_LEFT) {
               engine_change_volume(-1);
-              menu_state.anim.volume_kick = -3;
+              menu_state.anim.volume_kick = -2;
             } else {
               engine_change_volume(1);
-              menu_state.anim.volume_kick = 3;
+              menu_state.anim.volume_kick = 2;
             }
             anim_sys_to(&menu_state.anim.volume_kick, 0, 150,
                         ANIM_EASE_OUT_CUBIC, NULL, NULL);
           }
         }
       } else {
+        // once held enough, trigger menu action
         if (held >= 1.f) {
           if (menu_actions[menu_state.active].action) {
             menu_actions[menu_state.active].action();
@@ -297,11 +284,11 @@ static void menu_frame() {
       elm_t right_edge = elm_child(&item, vec2(DISP_WIDTH - 5, 0));
       for (uint8_t j = 0; j < 8; j++) {
         uint8_t tick = 7 - j;
-        elm_t tick_tl = elm_child(&right_edge, vec2(-4 - (j * 5), 5));
+        elm_t tick_tl = elm_child(&right_edge, vec2(-4 - (j * 6), 4));
         if (tick < g_engine.volume) {
-          elm_rounded_box(&tick_tl, VEC2_Z, 4, 8, 1);
+          elm_rounded_box(&tick_tl, VEC2_Z, 5, 10, 1);
         } else {
-          elm_rounded_frame(&tick_tl, VEC2_Z, 4, 8, 1);
+          elm_rounded_frame(&tick_tl, VEC2_Z, 5, 10, 1);
         }
       }
       item_text_x += menu_state.anim.volume_kick;

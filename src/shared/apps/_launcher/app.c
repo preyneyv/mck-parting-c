@@ -18,10 +18,11 @@ static app_t *apps[] = {
 
 static struct {
   int8_t active;
-  bool ignore_right_release;
+  bool ignore_release;
   int32_t active_offset;
   int32_t scroll_offset;
   uint32_t held_width;
+  button_id_t held_button;
 } state = {
     .scroll_offset = APP_SCROLL_MARGIN,
 };
@@ -54,32 +55,34 @@ static inline float ease_out_cubic(float t) {
 }
 
 static void enter() {
-  state.ignore_right_release = false;
+  state.ignore_release = false;
   state.held_width = 0;
 }
 
 static void frame() {
-  bool ignore_left_release = false;
-
-  if (BUTTON_PRESSED(BUTTON_RIGHT)) {
-    float held = engine_button_held_ratio(BUTTON_RIGHT);
-    ignore_left_release = state.ignore_right_release = held > 0.f;
+  button_id_t button_id = engine_button_get_pressed_first();
+  if (button_id != BUTTON_NONE) {
+    float held = engine_button_held_ratio(button_id);
+    state.ignore_release = held > 0.f;
     if (held >= 1.f) {
       engine_set_app(apps[state.active]);
     }
     if (held > 0) {
       anim_cancel(&state.held_width, false);
       state.held_width = APP_SIZE * ease_out_cubic(held);
+      state.held_button = button_id;
     } // otherwise use the existing value instead of overwriting it.
   }
 
-  if (BUTTON_KEYUP(BUTTON_LEFT) && !ignore_left_release) {
-    change_active(-1);
+  if (BUTTON_KEYUP(BUTTON_LEFT)) {
+    anim_to(&state.held_width, 0, 150, ANIM_EASE_OUT_CUBIC, NULL, NULL);
+    if (!state.ignore_release)
+      change_active(-1);
   }
 
   if (BUTTON_KEYUP(BUTTON_RIGHT)) {
     anim_to(&state.held_width, 0, 150, ANIM_EASE_OUT_CUBIC, NULL, NULL);
-    if (!state.ignore_right_release)
+    if (!state.ignore_release)
       change_active(1);
   }
 
@@ -94,8 +97,13 @@ static void frame() {
     }
     if (i == state.active) {
       u8g2_SetDrawColor(u8g2, 2);
-      u8g2_DrawBox(u8g2, pos.x + APP_SIZE - state.held_width, pos.y,
-                   state.held_width, APP_SIZE);
+      uint8_t box_x = 0;
+      if (state.held_button == BUTTON_RIGHT) {
+        box_x = pos.x + APP_SIZE - state.held_width;
+      } else if (state.held_button == BUTTON_LEFT) {
+        box_x = pos.x;
+      }
+      u8g2_DrawBox(u8g2, box_x, pos.y, state.held_width, APP_SIZE);
     }
     u8g2_SetDrawColor(u8g2, 1);
     u8g2_DrawRFrame(u8g2, pos.x, pos.y, APP_SIZE, APP_SIZE, 1);

@@ -115,6 +115,21 @@ static inline bool engine_button_released(button_id_t button_id) {
 #define BUTTON_PRESSED(button_id) engine_button_pressed(button_id)
 #define BUTTON_RELEASED(button_id) engine_button_released(button_id)
 
+static inline button_id_t engine_button_get_pressed_first() {
+  if (g_engine.buttons.left.pressed && g_engine.buttons.right.pressed) {
+    if (absolute_time_diff_us(g_engine.buttons.left.pressed_at,
+                              g_engine.buttons.right.pressed_at) < 0)
+      return BUTTON_RIGHT;
+    else
+      return BUTTON_LEFT;
+  }
+  if (g_engine.buttons.left.pressed)
+    return BUTTON_LEFT;
+  if (g_engine.buttons.right.pressed)
+    return BUTTON_RIGHT;
+  return BUTTON_NONE;
+}
+
 // helper functions for button holding
 static const int32_t ENGINE_BUTTON_HOLD_MS_TRIGGER = 300;
 static const int32_t ENGINE_BUTTON_HOLD_MS_CONFIRM = 1200;
