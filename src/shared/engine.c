@@ -3,12 +3,12 @@
 #include <hardware/divider.h>
 #include <hardware/watchdog.h>
 
+#include <shared/utils/elm.h>
 #include <shared/utils/timing.h>
 #include <shared/utils/vec.h>
 
 #include "anim.h"
 #include "apps/apps.h"
-#include "elm.h"
 #include "engine.h"
 
 // #define DEBUG_FPS
@@ -116,19 +116,47 @@ void engine_enter_sleep() {
 
 static const int32_t MENU_CONTAINER_OFFSET_CLOSED = -DISP_HEIGHT - 1;
 static struct {
-  int selected;
+  int active;
   int32_t container_offset;
+  int32_t active_offset;
+  bool ignore_right_release;
+  bool ignore_left_release;
 } menu_state = {
     .container_offset = MENU_CONTAINER_OFFSET_CLOSED,
 };
+
+static const menu_action_t menu_actions[] = {
+    {.name = "go home", .action = NULL},
+    {.name = "sleep", .action = NULL},
+    {.name = "volume", .action = NULL},
+};
+
+static const int32_t MENU_ACTION_COUNT =
+    sizeof(menu_actions) / sizeof(menu_actions[0]);
+static const int32_t MENU_ACTION_HEIGHT = 18;
+static const int32_t MENU_ACTION_MARGIN = 0;
+
+static inline int32_t menu_action_y(int index) {
+  return index * (MENU_ACTION_HEIGHT + MENU_ACTION_MARGIN);
+}
+static void menu_change_active(int8_t delta) {
+  menu_state.active += delta;
+  if (menu_state.active < 0) {
+    menu_state.active = MENU_ACTION_COUNT - 1;
+  } else if (menu_state.active >= MENU_ACTION_COUNT) {
+    menu_state.active = 0;
+  }
+  int32_t target_offset = menu_action_y(menu_state.active);
+  anim_sys_to(&menu_state.active_offset, target_offset, 150,
+              ANIM_EASE_OUT_CUBIC, NULL, NULL);
+}
 
 static void menu_frame() {
   u8g2_t *u8g2 = display_get_u8g2(&g_engine.display);
 
   if (BUTTON_KEYDOWN(BUTTON_MENU)) {
-    if (g_engine.show_menu) {
+    if (g_engine.paused) {
       // close menu
-      g_engine.show_menu = false;
       engine_resume();
       anim_sys_to(&menu_state.container_offset, MENU_CONTAINER_OFFSET_CLOSED,
                   300, ANIM_EASE_OUT_CUBIC, NULL, NULL);
@@ -136,9 +164,18 @@ static void menu_frame() {
     } else {
       // open menu
       engine_pause();
-      g_engine.show_menu = true;
       anim_sys_to(&menu_state.container_offset, 0, 300, ANIM_EASE_OUT_CUBIC,
                   NULL, NULL);
+    }
+  }
+
+  if (g_engine.paused) {
+    // handle button events
+    if (BUTTON_KEYUP(BUTTON_LEFT)) {
+      menu_change_active(-1);
+    }
+    if (BUTTON_KEYUP(BUTTON_RIGHT)) {
+      menu_change_active(1);
     }
   }
 
@@ -149,12 +186,37 @@ static void menu_frame() {
   vec2_t pos = vec2(0, menu_state.container_offset);
 
   elm_t root = elm_root(u8g2, pos);
+  // draw background
   u8g2_SetDrawColor(u8g2, 0);
   elm_box(&root, vec2(0, 0), DISP_WIDTH, DISP_HEIGHT);
   u8g2_SetDrawColor(u8g2, 1);
   elm_hline(&root, vec2(0, DISP_HEIGHT), DISP_WIDTH);
+
+  // draw menu items
+  elm_t items = elm_child(&root, vec2(0, 10));
   u8g2_SetFont(u8g2, u8g2_font_6x10_tf);
-  elm_str(&root, vec2(4, 10), "menu");
+  for (uint8_t i = 0; i < MENU_ACTION_COUNT; i++) {
+    vec2_t item_pos = vec2(0, menu_action_y(i));
+    elm_t item = elm_child(&items, item_pos);
+    elm_str(&item, vec2(5, 12), menu_actions[i].name);
+  }
+
+  elm_rounded_frame(&items, vec2(0, menu_state.active_offset), DISP_WIDTH,
+                    MENU_ACTION_HEIGHT, 3);
+
+  // draw hud
+  u8g2_SetDrawColor(u8g2, 0);
+  elm_box(&root, vec2(0, 0), DISP_WIDTH, 8);
+  u8g2_SetDrawColor(u8g2, 1);
+  u8g2_SetFont(u8g2, u8g2_font_5x7_tr);
+  elm_str(&root, vec2(0, 6), g_engine.app->name);
+
+  char chg_str[8] = "CHG\0";
+  if (!g_engine.peripheral.charging) {
+    snprintf(chg_str, sizeof(chg_str), "%d", g_engine.peripheral.battery_level);
+  }
+  elm_str(&root, vec2(DISP_WIDTH - u8g2_GetStrWidth(u8g2, chg_str), 6),
+          chg_str);
 }
 
 void engine_run_forever() {

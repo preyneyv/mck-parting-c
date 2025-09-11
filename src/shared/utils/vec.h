@@ -15,7 +15,7 @@ typedef union {
 static inline vec2_t vec2(int16_t x, int16_t y) {
   return (vec2_t){.x = x, .y = y};
 }
-static inline vec2_t vec2_zero(void) { return (vec2_t){.x = 0, .y = 0}; }
+static const vec2_t VEC2_Z = {.x = 0, .y = 0};
 static inline vec2_t vec2_add(vec2_t a, vec2_t b) {
   return (vec2_t){.x = a.x + b.x, .y = a.y + b.y};
 }

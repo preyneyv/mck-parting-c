@@ -125,3 +125,10 @@ static inline elm_t elm_hline(elm_t *parent, vec2_t pos, uint16_t w) {
   u8g2_DrawHLine(child.u8g2, child.pos.x, child.pos.y, w);
   return child;
 }
+
+static inline elm_t elm_xbm(elm_t *parent, vec2_t pos, uint16_t w, uint16_t h,
+                            const uint8_t *bitmap) {
+  elm_t child = elm_child(parent, pos);
+  u8g2_DrawXBM(child.u8g2, child.pos.x, child.pos.y, w, h, bitmap);
+  return child;
+}

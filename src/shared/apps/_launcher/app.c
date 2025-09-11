@@ -5,8 +5,6 @@
 #include <shared/engine.h>
 #include <shared/utils/vec.h>
 
-static const int32_t HOLD_MS_MIN = 300;
-static const int32_t HOLD_MS_CONFIRM = 1500;
 static const int16_t APP_SIZE = 36;
 static const int16_t APP_MARGIN = 8;
 static const int16_t APP_SCROLL_MARGIN =
@@ -24,10 +22,9 @@ static struct {
   int32_t active_offset;
   int32_t scroll_offset;
   uint32_t box_start;
-  // float held;
 } state = {
-    .scroll_offset = APP_SCROLL_MARGIN, .box_start = DISP_WIDTH,
-    // .held = 0.f,
+    .scroll_offset = APP_SCROLL_MARGIN,
+    .box_start = DISP_WIDTH,
 };
 
 static inline int32_t app_x(uint8_t app_index) {
@@ -56,21 +53,18 @@ static inline float ease_out_cubic(float t) {
 }
 
 static void frame() {
-  float held = 0.f;
   if (BUTTON_PRESSED(BUTTON_RIGHT)) {
-    int32_t ms =
-        absolute_time_diff_us(g_engine.buttons.right.pressed_at, g_engine.now) /
-        1000;
-    held = (ms - HOLD_MS_MIN) / (float)(HOLD_MS_CONFIRM - HOLD_MS_MIN);
+    float held = engine_button_held_ratio(BUTTON_RIGHT);
     state.ignore_right_release = held > 0.f;
     if (held >= 1.f) {
       engine_set_app(apps[state.active]);
     }
+    if (held > 0) {
+      anim_cancel(&state.box_start, false);
+      state.box_start = DISP_WIDTH * (1.f - ease_out_cubic(held));
+    } // otherwise use the existing value instead of overwriting it.
   }
-  if (held > 0) {
-    anim_cancel(&state.box_start, false);
-    state.box_start = DISP_WIDTH * (1.f - ease_out_cubic(held));
-  } // otherwise use the existing value instead of overwriting it.
+
   if (BUTTON_KEYUP(BUTTON_RIGHT)) {
     anim_to(&state.box_start, DISP_WIDTH, 150, ANIM_EASE_OUT_CUBIC, NULL, NULL);
   }
@@ -124,7 +118,7 @@ static void resume() {
 }
 
 app_t app_launcher = {
-    .name = "launcher",
+    .name = "prism",
     // .enter = enter,
     .frame = frame,
     .resume = resume,
