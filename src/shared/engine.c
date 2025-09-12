@@ -90,10 +90,10 @@ static void reset_buttons() {
   g_engine.buttons.right.pressed_at = nil_time;
   g_engine.buttons.right.ignore = true;
 
-  // g_engine.buttons.menu.edge = false;
-  // g_engine.buttons.menu.pressed = false;
-  // g_engine.buttons.menu.pressed_at = nil_time;
-  // g_engine.buttons.menu.ignore = true;
+  g_engine.buttons.menu.edge = false;
+  g_engine.buttons.menu.pressed = false;
+  g_engine.buttons.menu.pressed_at = nil_time;
+  g_engine.buttons.menu.ignore = true;
 }
 
 static void handle_menu_reset() {
@@ -130,6 +130,8 @@ void engine_enter_sleep() {
   display_set_enabled(&g_engine.display, true);
   peripheral_set_enabled(&g_engine.peripheral, true);
   watchdog_enable(200, 1);
+
+  reset_buttons();
 }
 
 static const int32_t MENU_CONTAINER_OFFSET_CLOSED = -DISP_HEIGHT - 2;
@@ -151,10 +153,7 @@ static void menu_action_go_home() {
   engine_set_app(NULL);
 }
 
-static void menu_action_sleep() {
-  engine_resume();
-  engine_enter_sleep();
-}
+static void menu_action_sleep() { engine_enter_sleep(); }
 
 static const menu_action_t menu_actions[] = {
     {.name = "go home", .action = menu_action_go_home},
@@ -236,14 +235,15 @@ static void menu_frame() {
         }
       } else {
         // once held enough, trigger menu action
+        if (held > 0) {
+          anim_cancel(&menu_state.anim.held, false);
+          menu_state.anim.held = 14 * ease_out_cubic(held);
+        }
         if (held >= 1.f) {
           if (menu_actions[menu_state.active].action) {
             menu_actions[menu_state.active].action();
           }
-        }
-        if (held > 0) {
-          anim_cancel(&menu_state.anim.held, false);
-          menu_state.anim.held = 14 * ease_out_cubic(held);
+          menu_state.anim.held = 0;
         }
       }
     }
@@ -457,6 +457,8 @@ void engine_set_app(app_t *app) {
 }
 
 void engine_pause() {
+  if (g_engine.paused)
+    return;
   reset_buttons();
   g_engine.paused = true;
   anim_sys_set_paused(true);
@@ -467,6 +469,8 @@ void engine_pause() {
 }
 
 void engine_resume() {
+  if (!g_engine.paused)
+    return;
   reset_buttons();
   g_engine.paused = false;
   anim_sys_set_paused(false);

@@ -93,7 +93,12 @@ void measure_freqs(void) {
   // Can't measure clk_ref / xosc as it is the ref
 }
 
+static critical_section_t sleep_critical_section;
+
 void engine_sleep_until_interrupt() {
+  critical_section_enter_blocking(&sleep_critical_section);
+  sleep_ms(10);
+
   // configure clocks
   uint src_hz = XOSC_HZ;
   uint clk_ref_src = CLOCKS_CLK_REF_CTRL_SRC_VALUE_XOSC_CLKSRC;
@@ -147,6 +152,9 @@ void engine_sleep_until_interrupt() {
   clocks_hw->sleep_en1 |= ~(0u);
   clocks_init();
   set_sys_clock_hz(SYS_CLOCK_HZ, true);
+
+  sleep_ms(10);
+  critical_section_exit(&sleep_critical_section);
 }
 
 int main() {
@@ -164,6 +172,7 @@ int main() {
   stdio_init_all();
 
   printf("prism v1\n");
+  critical_section_init(&sleep_critical_section);
   engine_init();
 
   // start audio core

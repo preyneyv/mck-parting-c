@@ -14,9 +14,9 @@ if(WIN32)
 else()
     set(USERHOME $ENV{HOME})
 endif()
-set(sdkVersion 2.1.1)
+set(sdkVersion 2.2.0)
 set(toolchainVersion 14_2_Rel1)
-set(picotoolVersion 2.1.1)
+set(picotoolVersion 2.2.0)
 set(picoVscode ${USERHOME}/.pico-sdk/cmake/pico-vscode.cmake)
 if (EXISTS ${picoVscode})
     include(${picoVscode})
@@ -25,6 +25,8 @@ endif()
 
 include(pico_sdk_import.cmake)
 project(mck-parting-c C CXX ASM)
+
+list(APPEND PICO_CONFIG_HEADER_FILES ${CMAKE_CURRENT_LIST_DIR}/src/rp2/board.h)
 pico_sdk_init()
 
 # super important for u8g2 otherwise we get a 11 MB binary :skull:
@@ -119,7 +121,6 @@ if(PICO_PLATFORM STREQUAL "host")
     # endforeach()
 else()
     # --- rp2 build ---
-    set(PICO_BOARD pico CACHE STRING "Board type")
     add_executable(mck-parting-c
         src/rp2/main.c
         src/rp2/display.c
@@ -147,7 +148,7 @@ else()
 
 
     pico_enable_stdio_uart(mck-parting-c 0)
-    pico_enable_stdio_usb(mck-parting-c 0)
+    pico_enable_stdio_usb(mck-parting-c 1)
     pico_set_program_name(mck-parting-c "mck-parting-c")
     pico_set_program_version(mck-parting-c "0.1")
     pico_add_extra_outputs(mck-parting-c)
