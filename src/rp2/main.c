@@ -27,7 +27,6 @@
 
 #include "audio.h"
 #include "config.h"
-#include "lib/sleep/sleep.h"
 
 void core1_main() {
   audio_playback_init();
@@ -95,8 +94,6 @@ void measure_freqs(void) {
 }
 
 void engine_sleep_until_interrupt() {
-  sleep_ms(100); // let things settle
-
   // configure clocks
   uint src_hz = XOSC_HZ;
   uint clk_ref_src = CLOCKS_CLK_REF_CTRL_SRC_VALUE_XOSC_CLKSRC;
@@ -104,14 +101,14 @@ void engine_sleep_until_interrupt() {
   clock_configure(clk_sys, CLOCKS_CLK_SYS_CTRL_SRC_VALUE_CLK_REF, 0, src_hz,
                   src_hz);
   clock_stop(clk_adc);
-  // clock_stop(clk_usb);
+  clock_stop(clk_usb);
 
   clock_configure(clk_rtc, 0, CLOCKS_CLK_RTC_CTRL_AUXSRC_VALUE_XOSC_CLKSRC,
                   src_hz, 46875);
   clock_configure(clk_peri, 0, CLOCKS_CLK_PERI_CTRL_AUXSRC_VALUE_CLK_SYS,
                   src_hz, src_hz);
   pll_deinit(pll_sys);
-  // pll_deinit(pll_usb);
+  pll_deinit(pll_usb);
 
   uint32_t tmp = rosc_hw->ctrl;
   tmp &= (~ROSC_CTRL_ENABLE_BITS);
@@ -150,10 +147,6 @@ void engine_sleep_until_interrupt() {
   clocks_hw->sleep_en1 |= ~(0u);
   clocks_init();
   set_sys_clock_hz(SYS_CLOCK_HZ, true);
-
-  sleep_ms(100); // let things settle
-  // while (1)
-  //   sleep_ms(100);
 }
 
 int main() {
@@ -169,7 +162,6 @@ int main() {
   // set clock for audio and LED timing reasons
   set_sys_clock_hz(SYS_CLOCK_HZ, true);
   stdio_init_all();
-  sleep_ms(500);
 
   printf("prism v1\n");
   engine_init();

@@ -147,7 +147,7 @@ else()
 
 
     pico_enable_stdio_uart(mck-parting-c 0)
-    pico_enable_stdio_usb(mck-parting-c 1)
+    pico_enable_stdio_usb(mck-parting-c 0)
     pico_set_program_name(mck-parting-c "mck-parting-c")
     pico_set_program_version(mck-parting-c "0.1")
     pico_add_extra_outputs(mck-parting-c)
