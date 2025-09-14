@@ -95,36 +95,59 @@ void measure_freqs(void) {
 
 static critical_section_t sleep_critical_section;
 
+inline static void rosc_write(io_rw_32 *addr, uint32_t value) {
+  hw_clear_bits(&rosc_hw->status, ROSC_STATUS_BADWRITE_BITS);
+  assert(!(rosc_hw->status & ROSC_STATUS_BADWRITE_BITS));
+  *addr = value;
+  assert(!(rosc_hw->status & ROSC_STATUS_BADWRITE_BITS));
+}
+
 void engine_sleep_until_interrupt() {
   critical_section_enter_blocking(&sleep_critical_section);
   sleep_ms(10);
 
+  // rosc or xosc can be used. rosc is lower power.
+  const bool use_xosc = false;
+
   // configure clocks
-  uint src_hz = XOSC_HZ;
-  uint clk_ref_src = CLOCKS_CLK_REF_CTRL_SRC_VALUE_XOSC_CLKSRC;
+  uint src_hz;
+  uint clk_ref_src;
+
+  if (use_xosc) {
+    src_hz = XOSC_HZ;
+    clk_ref_src = CLOCKS_CLK_REF_CTRL_SRC_VALUE_XOSC_CLKSRC;
+  } else {
+    src_hz = 6500 * KHZ;
+    clk_ref_src = CLOCKS_CLK_REF_CTRL_SRC_VALUE_ROSC_CLKSRC_PH;
+  }
   clock_configure(clk_ref, clk_ref_src, 0, src_hz, src_hz);
   clock_configure(clk_sys, CLOCKS_CLK_SYS_CTRL_SRC_VALUE_CLK_REF, 0, src_hz,
                   src_hz);
   clock_stop(clk_adc);
   clock_stop(clk_usb);
 
-  clock_configure(clk_rtc, 0, CLOCKS_CLK_RTC_CTRL_AUXSRC_VALUE_XOSC_CLKSRC,
-                  src_hz, 46875);
+  uint clk_rtc_src = use_xosc ? CLOCKS_CLK_RTC_CTRL_AUXSRC_VALUE_XOSC_CLKSRC
+                              : CLOCKS_CLK_RTC_CTRL_AUXSRC_VALUE_ROSC_CLKSRC_PH;
+  clock_configure(clk_rtc, 0, clk_rtc_src, src_hz, 46875);
   clock_configure(clk_peri, 0, CLOCKS_CLK_PERI_CTRL_AUXSRC_VALUE_CLK_SYS,
                   src_hz, src_hz);
   pll_deinit(pll_sys);
   pll_deinit(pll_usb);
 
-  uint32_t tmp = rosc_hw->ctrl;
-  tmp &= (~ROSC_CTRL_ENABLE_BITS);
-  tmp |= (ROSC_CTRL_ENABLE_VALUE_DISABLE << ROSC_CTRL_ENABLE_LSB);
-  hw_clear_bits(&rosc_hw->status, ROSC_STATUS_BADWRITE_BITS);
-  assert(!(rosc_hw->status & ROSC_STATUS_BADWRITE_BITS));
-  rosc_hw->ctrl = tmp;
-  assert(!(rosc_hw->status & ROSC_STATUS_BADWRITE_BITS));
-  // Wait for stable to go away
-  while (rosc_hw->status & ROSC_STATUS_STABLE_BITS)
-    ;
+  // kill the unused oscillator
+  if (use_xosc) {
+    // disable rosc
+    uint32_t tmp = rosc_hw->ctrl;
+    tmp &= (~ROSC_CTRL_ENABLE_BITS);
+    tmp |= (ROSC_CTRL_ENABLE_VALUE_DISABLE << ROSC_CTRL_ENABLE_LSB);
+    rosc_write(&rosc_hw->ctrl, tmp);
+    // Wait for stable to go away
+    while (rosc_hw->status & ROSC_STATUS_STABLE_BITS)
+      ;
+  } else {
+
+    xosc_disable();
+  }
 
   // enter sleep
   uint32_t event = IO_BANK0_DORMANT_WAKE_INTE0_GPIO0_EDGE_LOW_BITS;
@@ -133,23 +156,30 @@ void engine_sleep_until_interrupt() {
   gpio_set_dormant_irq_enabled(BUTTON_PIN_R, event, true);
   gpio_set_dormant_irq_enabled(BUTTON_PIN_M, event, true);
 
-  xosc_dormant();
+  if (use_xosc) {
+    xosc_dormant();
+  } else {
+    rosc_write(&rosc_hw->dormant, ROSC_DORMANT_VALUE_DORMANT);
+    while (!(rosc_hw->status & ROSC_STATUS_STABLE_BITS))
+      ;
+  }
 
   gpio_acknowledge_irq(BUTTON_PIN_L, event);
   gpio_acknowledge_irq(BUTTON_PIN_R, event);
   gpio_acknowledge_irq(BUTTON_PIN_M, event);
 
   // wake from sleep
-  // todo: enable rosc
-  hw_clear_bits(&rosc_hw->status, ROSC_STATUS_BADWRITE_BITS);
-  assert(!(rosc_hw->status & ROSC_STATUS_BADWRITE_BITS));
+  // - enable rosc
+  rosc_write(&rosc_hw->ctrl, ROSC_CTRL_ENABLE_BITS);
   rosc_hw->ctrl = ROSC_CTRL_ENABLE_BITS;
-  assert(!(rosc_hw->status & ROSC_STATUS_BADWRITE_BITS));
   while (!(rosc_hw->status & ROSC_STATUS_STABLE_BITS))
     ;
 
+  // - reset clock flags
   clocks_hw->sleep_en0 |= ~(0u);
   clocks_hw->sleep_en1 |= ~(0u);
+
+  // - reset clock speeds (this will wake xosc)
   clocks_init();
   set_sys_clock_hz(SYS_CLOCK_HZ, true);
 

@@ -4,7 +4,7 @@
 
 static void frame() {
   static uint8_t i = 0;
-  if (BUTTON_KEYDOWN(BUTTON_RIGHT)) {
+  if (BUTTON_KEYDOWN(BUTTON_RIGHT) || BUTTON_KEYDOWN(BUTTON_LEFT)) {
     // enter sleep
     engine_enter_sleep();
   }

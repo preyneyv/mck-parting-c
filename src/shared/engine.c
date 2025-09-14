@@ -79,7 +79,7 @@ static void read_button(button_t *button, absolute_time_t now) {
   }
 }
 
-static void reset_buttons() {
+static void reset_buttons(bool ignore_menu) {
   g_engine.buttons.left.edge = false;
   g_engine.buttons.left.pressed = false;
   g_engine.buttons.left.pressed_at = nil_time;
@@ -90,10 +90,12 @@ static void reset_buttons() {
   g_engine.buttons.right.pressed_at = nil_time;
   g_engine.buttons.right.ignore = true;
 
-  g_engine.buttons.menu.edge = false;
-  g_engine.buttons.menu.pressed = false;
-  g_engine.buttons.menu.pressed_at = nil_time;
-  g_engine.buttons.menu.ignore = true;
+  if (ignore_menu) {
+    g_engine.buttons.menu.edge = false;
+    g_engine.buttons.menu.pressed = false;
+    g_engine.buttons.menu.pressed_at = nil_time;
+    g_engine.buttons.menu.ignore = true;
+  }
 }
 
 static void handle_menu_reset() {
@@ -131,7 +133,7 @@ void engine_enter_sleep() {
   peripheral_set_enabled(&g_engine.peripheral, true);
   watchdog_enable(200, 1);
 
-  reset_buttons();
+  reset_buttons(true);
 }
 
 static const int32_t MENU_CONTAINER_OFFSET_CLOSED = -DISP_HEIGHT - 2;
@@ -441,7 +443,7 @@ void engine_set_app(app_t *app) {
     g_engine.app->leave();
   }
   anim_sys_clear_all();
-  reset_buttons();
+  reset_buttons(false);
 
   if (app == NULL) {
     app = &app_launcher;
@@ -459,7 +461,7 @@ void engine_set_app(app_t *app) {
 void engine_pause() {
   if (g_engine.paused)
     return;
-  reset_buttons();
+  reset_buttons(false);
   g_engine.paused = true;
   anim_sys_set_paused(true);
   if (g_engine.app != NULL && g_engine.app->pause != NULL) {
@@ -471,7 +473,7 @@ void engine_pause() {
 void engine_resume() {
   if (!g_engine.paused)
     return;
-  reset_buttons();
+  reset_buttons(false);
   g_engine.paused = false;
   anim_sys_set_paused(false);
   if (g_engine.app != NULL && g_engine.app->resume != NULL) {
