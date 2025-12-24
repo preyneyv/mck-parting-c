@@ -23,7 +23,16 @@
         "command": "${env:USERPROFILE}/.pico-sdk/ninja/v1.12.1/ninja.exe"
       }
     },
-
+    {
+      "label": "rp2: bootsel",
+      "type": "process",
+      "command": "${env:HOME}/.pico-sdk/picotool/2.1.1/picotool/picotool",
+      "args": ["reboot", "-f", "-u"],
+      "problemMatcher": [],
+      "windows": {
+        "command": "${env:USERPROFILE}/.pico-sdk/picotool/2.1.1/picotool/picotool.exe"
+      }
+    },
     {
       "label": "rp2: run",
       "type": "process",
@@ -33,6 +42,7 @@
       "windows": {
         "command": "${env:USERPROFILE}/.pico-sdk/picotool/2.1.1/picotool/picotool.exe"
       },
+      "dependsOn": ["rp2: bootsel"],
       "group": {
         "kind": "build",
         "isDefault": true
