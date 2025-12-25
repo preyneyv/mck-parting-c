@@ -132,18 +132,64 @@ static void _update_current_word()
 static void enter()
 {
   state = calloc(1, sizeof(state_t));
+
   // pick words
   for (uint32_t i = 0; i < WORD_LOOKAHEAD - 1; i++)
   {
     state->words[i] = rand() % WORDS_COUNT;
   }
+  // prep first word
   _update_current_word();
-  _update_current_word();
-  state->current_letter = 3;
+
+  // setup audio synth
+  audio_synth_operator_config_t config = audio_synth_operator_config_default;
+  config.level = q1x15_f(.8f);
+  config.env = (audio_synth_env_config_t){
+      .a = 2,
+      .d = 0,
+      .s = q1x31_f(1.0f),
+      .r = 5,
+  };
+  audio_synth_operator_set_config(&g_engine.synth.voices[0].ops[0], config);
 }
 
 static void tick()
 {
+  if (BUTTON_KEYDOWN(BUTTON_RIGHT))
+  {
+    // begin mark
+    // update T based on time since last keyup
+    audio_synth_enqueue(
+        &g_engine.synth,
+        &(audio_synth_message_t){
+            .type = AUDIO_SYNTH_MESSAGE_NOTE_ON,
+            .data.note_on =
+                {
+                    .voice = 0,
+                    .note_number = note("C5"),
+                    .velocity = 100,
+                },
+        });
+  }
+  else if (BUTTON_KEYUP(BUTTON_RIGHT))
+  {
+    // end mark
+    // update T based on time since keydown
+    audio_synth_enqueue(
+        &g_engine.synth,
+        &(audio_synth_message_t){
+            .type = AUDIO_SYNTH_MESSAGE_NOTE_OFF,
+            .data.note_off =
+                {
+                    .voice = 0,
+                },
+        });
+  }
+  else if (BUTTON_KEYDOWN(BUTTON_LEFT))
+  {
+    // reset current word progress
+    // reset T to initial
+  }
 }
 
 static void _frame_words(u8g2_t *u8g2, elm_t *root)

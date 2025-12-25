@@ -528,6 +528,10 @@ void engine_set_app(app_t *app)
   g_engine.tick = 0;
   g_engine.app = app;
   g_engine.paused = false;
+
+  // reset audio synth
+  audio_synth_panic(&g_engine.synth);
+  audio_synth_reset_voices(&g_engine.synth);
   // seed based on time
   srand(to_ms_since_boot(get_absolute_time()));
 

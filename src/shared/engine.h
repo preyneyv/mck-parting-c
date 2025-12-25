@@ -10,7 +10,8 @@
 #include "leds.h"
 #include "peripheral.h"
 
-typedef struct {
+typedef struct
+{
   char name[32];       // app name
   const uint8_t *icon; // app icon
 
@@ -28,14 +29,16 @@ typedef struct {
   void (*leave)(void);
 } app_t;
 
-typedef enum {
+typedef enum
+{
   BUTTON_NONE = 0,
   BUTTON_LEFT,
   BUTTON_RIGHT,
   BUTTON_MENU,
 } button_id_t;
 
-typedef struct {
+typedef struct
+{
   button_id_t id;
   absolute_time_t pressed_at;
   bool pressed; // true if button is currently pressed
@@ -44,12 +47,14 @@ typedef struct {
   bool ignore;  // true if press should be ignored until next release
 } button_t;
 
-typedef struct {
+typedef struct
+{
   audio_synth_t synth;
   display_t display;
   leds_t leds;
   peripheral_t peripheral;
-  struct {
+  struct
+  {
     button_t left;
     button_t right;
     button_t menu;
@@ -77,8 +82,10 @@ void engine_resume();
 void engine_set_volume(int8_t level);
 void engine_change_volume(int8_t direction);
 
-static inline button_t *engine_button_from_id(button_id_t button_id) {
-  switch (button_id) {
+static inline button_t *engine_button_from_id(button_id_t button_id)
+{
+  switch (button_id)
+  {
   case BUTTON_LEFT:
     return &g_engine.buttons.left;
   case BUTTON_RIGHT:
@@ -90,22 +97,26 @@ static inline button_t *engine_button_from_id(button_id_t button_id) {
   }
 }
 
-static inline bool engine_button_keydown(button_id_t button_id) {
+static inline bool engine_button_keydown(button_id_t button_id)
+{
   button_t *button = engine_button_from_id(button_id);
   return button->pressed && button->edge;
 }
 
-static inline bool engine_button_keyup(button_id_t button_id) {
+static inline bool engine_button_keyup(button_id_t button_id)
+{
   button_t *button = engine_button_from_id(button_id);
   return !button->pressed && button->edge;
 }
 
-static inline bool engine_button_pressed(button_id_t button_id) {
+static inline bool engine_button_pressed(button_id_t button_id)
+{
   button_t *button = engine_button_from_id(button_id);
   return button->pressed;
 }
 
-static inline bool engine_button_released(button_id_t button_id) {
+static inline bool engine_button_released(button_id_t button_id)
+{
   button_t *button = engine_button_from_id(button_id);
   return !button->pressed;
 }
@@ -115,8 +126,10 @@ static inline bool engine_button_released(button_id_t button_id) {
 #define BUTTON_PRESSED(button_id) engine_button_pressed(button_id)
 #define BUTTON_RELEASED(button_id) engine_button_released(button_id)
 
-static inline button_id_t engine_button_get_pressed_first() {
-  if (g_engine.buttons.left.pressed && g_engine.buttons.right.pressed) {
+static inline button_id_t engine_button_get_pressed_first()
+{
+  if (g_engine.buttons.left.pressed && g_engine.buttons.right.pressed)
+  {
     if (absolute_time_diff_us(g_engine.buttons.left.pressed_at,
                               g_engine.buttons.right.pressed_at) < 0)
       return BUTTON_RIGHT;
@@ -134,7 +147,8 @@ static inline button_id_t engine_button_get_pressed_first() {
 static const int32_t ENGINE_BUTTON_HOLD_MS_TRIGGER = 300;
 static const int32_t ENGINE_BUTTON_HOLD_MS_CONFIRM = 1200;
 
-static inline float engine_button_held_ratio(button_id_t button_id) {
+static inline float engine_button_held_ratio(button_id_t button_id)
+{
   button_t *button = engine_button_from_id(button_id);
   if (!button->pressed)
     return 0.f;
@@ -149,7 +163,8 @@ static inline float engine_button_held_ratio(button_id_t button_id) {
   return held;
 }
 
-typedef struct {
+typedef struct
+{
   const char *name;
   void (*action)(void);
 } menu_action_t;
