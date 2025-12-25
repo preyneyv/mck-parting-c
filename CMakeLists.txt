@@ -50,6 +50,7 @@ set(SHARED_SOURCES
     src/shared/apps/_full_test/app.c
     src/shared/apps/bongocat/app.c
     src/shared/apps/dummy/app.c
+    src/shared/apps/morse/app.c
 )
 add_library(shared STATIC ${SHARED_SOURCES})
 target_include_directories(shared PRIVATE ${CMAKE_CURRENT_LIST_DIR}/src)

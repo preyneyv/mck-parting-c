@@ -12,7 +12,7 @@ static const int16_t APP_SCROLL_MARGIN =
 
 static const uint8_t APP_COUNT = 6;
 static app_t *apps[] = {
-    &app_bongocat, &app_dummy,    &app_bongocat,
+    &app_bongocat, &app_morse,    &app_bongocat,
     &app_dummy,    &app_bongocat, &app_dummy,
 };
 
