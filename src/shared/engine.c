@@ -459,6 +459,7 @@ void engine_run_forever()
       }
     }
 
+    leds_set_all(&g_engine.leds, (color_t){.hex = 0x000000});
     if (!g_engine.paused)
     {
       // draw screen buffer

@@ -143,7 +143,7 @@ static void enter()
 
   // setup audio synth
   audio_synth_operator_config_t config = audio_synth_operator_config_default;
-  config.level = q1x15_f(.8f);
+  config.level = q1x15_f(.5f);
   config.env = (audio_synth_env_config_t){
       .a = 2,
       .d = 0,
@@ -205,7 +205,7 @@ static void _frame_words(u8g2_t *u8g2, elm_t *root)
 
   // highlight current letter
   elm_box(&first_word,
-          vec2(state->current_letter * 7, 2),
+          vec2(state->current_letter * 7, 3),
           6, 1);
 
   // draw lookahead
@@ -263,14 +263,14 @@ static void frame()
 {
   u8g2_t *u8g2 = display_get_u8g2(&g_engine.display);
   elm_t root = elm_root(u8g2, VEC2_Z);
+
   elm_t ctx = elm_child(&root, vec2(0, 0));
   _frame_words(u8g2, &ctx);
+
   ctx = elm_child(&root, vec2(0, 20));
   _frame_target_morse(u8g2, &ctx);
 
-  // // draw target morse
-  // u8g2_SetFont(u8g2, u8g2_font_7x14B_mr);
-  // elm_str(&root, vec2(0, 40), state->current_letter_morse);
+  leds_set_all(&g_engine.leds, (color_t){.hex = 0x00ff00});
 }
 
 static void leave()
