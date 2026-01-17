@@ -95,6 +95,9 @@ typedef struct
   char target_morse[TARGET_MORSE_COUNT][TARGET_MORSE_LENGTH];
   const char *current_word;
   uint32_t current_letter;
+  uint32_t last_edge_tick;
+  char input_buffer[TARGET_MORSE_LENGTH * 2];
+  uint32_t input_len;
 } state_t;
 
 static state_t *state;
@@ -126,12 +129,18 @@ static void _update_current_word()
   state->words[WORD_LOOKAHEAD - 1] = rand() % WORDS_COUNT;
   state->current_word = words[state->words[0]];
   state->current_letter = 0;
+  state->input_len = 0;
+  state->input_buffer[0] = '\0';
   _generate_morse_for_current_word();
 }
 
 static void enter()
 {
   state = calloc(1, sizeof(state_t));
+
+  state->T = 100; // 100 ticks = 100ms
+  state->last_edge_tick = g_engine.tick;
+  state->input_len = 0;
 
   // pick words
   for (uint32_t i = 0; i < WORD_LOOKAHEAD - 1; i++)
@@ -157,8 +166,29 @@ static void tick()
 {
   if (BUTTON_KEYDOWN(BUTTON_RIGHT))
   {
-    // begin mark
-    // update T based on time since last keyup
+    // begin mark (end gap)
+    uint32_t dt = g_engine.tick - state->last_edge_tick;
+    state->last_edge_tick = g_engine.tick;
+
+    if (dt > 5 * state->T)
+    {
+      // reset word if gap was too long
+      state->current_letter = 0;
+      state->input_len = 0;
+      state->input_buffer[0] = '\0';
+    }
+    else if (dt > 2 * state->T)
+    {
+      // gap was > 2T, treat as 3T gap
+      // blend T: new_T = 0.9*old + 0.1*(dt/3)
+      state->T = (state->T * 9 + (dt / 3)) / 10;
+    }
+    else
+    {
+      // gap was < 2T, treat as 1T gap
+      state->T = (state->T * 9 + dt) / 10;
+    }
+
     audio_synth_enqueue(
         &g_engine.synth,
         &(audio_synth_message_t){
@@ -173,8 +203,64 @@ static void tick()
   }
   else if (BUTTON_KEYUP(BUTTON_RIGHT))
   {
-    // end mark
-    // update T based on time since keydown
+    // end mark (begin gap)
+    uint32_t dt = g_engine.tick - state->last_edge_tick;
+    state->last_edge_tick = g_engine.tick;
+
+    char symbol = 0;
+    if (dt > 2 * state->T)
+    {
+      // mark > 2T -> dash
+      state->T = (state->T * 9 + (dt / 3)) / 10;
+      symbol = '-';
+    }
+    else
+    {
+      // mark < 2T -> dot
+      state->T = (state->T * 9 + dt) / 10;
+      symbol = '.';
+    }
+
+    if (state->input_len < sizeof(state->input_buffer) - 1)
+    {
+      state->input_buffer[state->input_len++] = symbol;
+      state->input_buffer[state->input_len] = '\0';
+    }
+
+    // check current letter match
+    const char *target = state->target_morse[state->current_letter];
+    size_t target_len = strlen(target);
+
+    // check prefix
+    bool match = true;
+    for (size_t i = 0; i < state->input_len; i++)
+    {
+      if (state->input_buffer[i] != target[i])
+      {
+        match = false;
+        break;
+      }
+    }
+
+    if (!match)
+    {
+      // mismatch - clear input
+      state->input_len = 0;
+      state->input_buffer[0] = '\0';
+      // ideally play error sound
+    }
+    else if (state->input_len == target_len)
+    {
+      // full match
+      state->current_letter++;
+      state->input_len = 0;
+      state->input_buffer[0] = '\0';
+      if (state->current_letter >= strlen(state->current_word))
+      {
+        _update_current_word();
+      }
+    }
+
     audio_synth_enqueue(
         &g_engine.synth,
         &(audio_synth_message_t){
@@ -188,7 +274,11 @@ static void tick()
   else if (BUTTON_KEYDOWN(BUTTON_LEFT))
   {
     // reset current word progress
+    state->current_letter = 0;
+    state->input_len = 0;
+    state->input_buffer[0] = '\0';
     // reset T to initial
+    state->T = 100;
   }
 }
 
@@ -223,21 +313,28 @@ static void _frame_words(u8g2_t *u8g2, elm_t *root)
 
 static void _frame_target_morse(u8g2_t *u8g2, elm_t *root)
 {
-
   u8g2_SetDrawColor(u8g2, 1);
 
   uint32_t x_offset = 0;
-  bool is_first = true;
   for (uint32_t i = state->current_letter; i < TARGET_MORSE_COUNT; i++)
   {
     char *morse = state->target_morse[i];
     uint32_t letter_len = strlen(morse);
+    if (letter_len == 0 && i > state->current_letter)
+      break;
+
     for (uint32_t j = 0; j < letter_len; j++)
     {
       char symbol = morse[j];
+      bool filled = false;
+      if (i == state->current_letter && j < state->input_len)
+      {
+        filled = true;
+      }
+
       if (symbol == '.')
       {
-        if (is_first)
+        if (filled)
           elm_disc(root, vec2(x_offset + 2, 2), 2, U8G2_DRAW_ALL);
         else
           elm_circle(root, vec2(x_offset + 2, 2), 2, U8G2_DRAW_ALL);
@@ -245,7 +342,7 @@ static void _frame_target_morse(u8g2_t *u8g2, elm_t *root)
       }
       else if (symbol == '-')
       {
-        if (is_first)
+        if (filled)
           elm_rounded_box(root, vec2(x_offset, 0), 12, 5, 1);
         else
           elm_rounded_frame(root, vec2(x_offset, 0), 12, 5, 1);
@@ -255,8 +352,31 @@ static void _frame_target_morse(u8g2_t *u8g2, elm_t *root)
     }
     // space between letters
     x_offset += 6;
-    is_first = false;
   }
+
+  // // Draw timing progress
+  // uint32_t dt = g_engine.tick - state->last_edge_tick;
+  // bool pressed = BUTTON_PRESSED(BUTTON_RIGHT);
+
+  // uint32_t px_per_T = 10;
+  // // Markers
+  // // 1T (Dot limit / Intra-char gap)
+  // elm_line(root, vec2(1 * px_per_T, 10), vec2(1 * px_per_T, 16));
+  // // 3T (Dash limit / Letter gap)
+  // elm_line(root, vec2(3 * px_per_T, 10), vec2(3 * px_per_T, 16));
+
+  // uint32_t width = (dt * px_per_T) / state->T;
+  // if (width > 127)
+  //   width = 127;
+
+  // if (pressed)
+  // {
+  //   elm_box(root, vec2(0, 12), width, 3);
+  // }
+  // else
+  // {
+  //   elm_frame(root, vec2(0, 12), width, 3);
+  // }
 }
 
 static void frame()
