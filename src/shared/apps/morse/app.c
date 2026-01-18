@@ -99,6 +99,7 @@ typedef struct
   uint32_t last_edge_tick;
   char input_buffer[TARGET_MORSE_LENGTH * 2];
   uint32_t input_len;
+  char input_draft;
 } state_t;
 
 static state_t *state;
@@ -173,22 +174,21 @@ static void tick()
     state->input_buffer[0] = '\0';
   }
 
+  // if (BUTTON_PRESSED(BUTTON_RIGHT))
+  // {
+  //   state->input_draft = dt > 2 * state->T ? '-' : '.';
+  // }
+  // else
+  // {
+  //   state->input_draft = 0;
+  // }
+
   if (BUTTON_KEYDOWN(BUTTON_RIGHT))
   {
     // begin mark (end gap)
     state->last_edge_tick = g_engine.tick;
 
-    if (dt > 2 * state->T)
-    {
-      // gap was > 2T, treat as 3T gap
-      // ignore large gaps
-      // blend T: new_T = 0.9*old + 0.1*(dt/3)
-      if (dt < 5)
-      {
-        state->T = (state->T * 9 + (dt / 3)) / 10;
-      }
-    }
-    else
+    if (dt < 2 * state->T)
     {
       // gap was < 2T, treat as 1T gap
       state->T = (state->T * 9 + dt) / 10;
@@ -361,30 +361,36 @@ static void _frame_target_morse(u8g2_t *u8g2, elm_t *root)
     // space between letters
     x_offset += 6;
   }
+}
 
-  // // Draw timing progress
-  // uint32_t dt = g_engine.tick - state->last_edge_tick;
-  // bool pressed = BUTTON_PRESSED(BUTTON_RIGHT);
+static void _frame_current_input(u8g2_t *u8g2, elm_t *root)
+{
+  u8g2_SetDrawColor(u8g2, 1);
 
-  // uint32_t px_per_T = 10;
-  // // Markers
-  // // 1T (Dot limit / Intra-char gap)
-  // elm_line(root, vec2(1 * px_per_T, 10), vec2(1 * px_per_T, 16));
-  // // 3T (Dash limit / Letter gap)
-  // elm_line(root, vec2(3 * px_per_T, 10), vec2(3 * px_per_T, 16));
+  uint32_t dt = g_engine.tick - state->last_edge_tick;
+  bool pressed = BUTTON_PRESSED(BUTTON_RIGHT);
 
-  // uint32_t width = (dt * px_per_T) / state->T;
-  // if (width > 127)
-  //   width = 127;
+  char draft = dt > 2 * state->T ? '-' : '.';
+  elm_frame(root, vec2(0, 7), 61, 5);
+  if (pressed)
+  {
+    uint32_t width = (dt * 61) / (3 * state->T);
+    if (width > 61)
+      width = 61;
+    elm_box(root, vec2(0, 7), width, 5);
+  }
 
-  // if (pressed)
-  // {
-  //   elm_box(root, vec2(0, 12), width, 3);
-  // }
-  // else
-  // {
-  //   elm_frame(root, vec2(0, 12), width, 3);
-  // }
+  elm_triangle(root, vec2(28, 3), vec2(30, 6), vec2(33, 3));
+
+  if (pressed && draft == '.')
+    elm_disc(root, vec2(2, 2), 2, U8G2_DRAW_ALL);
+  else
+    elm_circle(root, vec2(2, 2), 2, U8G2_DRAW_ALL);
+
+  if (pressed && draft == '-')
+    elm_rounded_box(root, vec2(49, 0), 12, 5, 1);
+  else
+    elm_rounded_frame(root, vec2(49, 0), 12, 5, 1);
 }
 
 static void frame()
@@ -397,6 +403,9 @@ static void frame()
 
   ctx = elm_child(&root, vec2(0, 20));
   _frame_target_morse(u8g2, &ctx);
+
+  ctx = elm_child(&root, vec2(0, 30));
+  _frame_current_input(u8g2, &ctx);
 
   leds_set_all(&g_engine.leds, (color_t){.hex = 0x00ff00});
 }
