@@ -86,7 +86,8 @@ enum
   WORD_LOOKAHEAD = 5,
   TARGET_MORSE_COUNT = 16,
   TARGET_MORSE_LENGTH = 5,
-  INITIAL_T = 50, // 50 ticks = 50ms
+  INITIAL_T = 100,
+  DURATION_MS = 30000, // 30 seconds
 };
 
 typedef struct
@@ -100,6 +101,15 @@ typedef struct
   char input_buffer[TARGET_MORSE_LENGTH * 2];
   uint32_t input_len;
   char input_draft;
+
+  bool started;
+  bool finished;
+  absolute_time_t started_at;
+  struct
+  {
+    uint32_t letters;
+    uint32_t errors;
+  } stats;
 } state_t;
 
 static state_t *state;
@@ -136,13 +146,18 @@ static void _update_current_word()
   _generate_morse_for_current_word();
 }
 
-static void enter()
+static void _start_game()
 {
-  state = calloc(1, sizeof(state_t));
+  if (state != NULL)
+    free(state);
 
+  state = calloc(1, sizeof(state_t));
   state->T = INITIAL_T;
+
   state->last_edge_tick = g_engine.tick;
   state->input_len = 0;
+  state->started = false;
+  state->finished = false;
 
   // pick words
   for (uint32_t i = 0; i < WORD_LOOKAHEAD - 1; i++)
@@ -151,7 +166,10 @@ static void enter()
   }
   // prep first word
   _update_current_word();
+}
 
+static void enter()
+{
   // setup audio synth
   audio_synth_operator_config_t config = audio_synth_operator_config_default;
   config.level = q1x15_f(.5f);
@@ -162,29 +180,27 @@ static void enter()
       .r = 5,
   };
   audio_synth_operator_set_config(&g_engine.synth.voices[0].ops[0], config);
+
+  _start_game();
 }
 
 static void tick()
 {
   uint32_t dt = g_engine.tick - state->last_edge_tick;
-
-  if (dt > 15 * state->T)
+  if (BUTTON_KEYDOWN(BUTTON_LEFT))
   {
-    state->input_len = 0;
-    state->input_buffer[0] = '\0';
+    _start_game();
   }
-
-  // if (BUTTON_PRESSED(BUTTON_RIGHT))
-  // {
-  //   state->input_draft = dt > 2 * state->T ? '-' : '.';
-  // }
-  // else
-  // {
-  //   state->input_draft = 0;
-  // }
 
   if (BUTTON_KEYDOWN(BUTTON_RIGHT))
   {
+    if (!state->started)
+    {
+      state->started = true;
+      state->finished = false;
+      state->started_at = get_absolute_time();
+    }
+
     // begin mark (end gap)
     state->last_edge_tick = g_engine.tick;
 
@@ -256,10 +272,13 @@ static void tick()
       state->input_len = 0;
       state->input_buffer[0] = '\0';
       // ideally play error sound
+      state->stats.errors++;
     }
     else if (state->input_len == target_len)
     {
-      // full match
+      // letter matched
+      state->stats.letters++;
+
       state->current_letter++;
       state->input_len = 0;
       state->input_buffer[0] = '\0';
@@ -278,15 +297,6 @@ static void tick()
                     .voice = 0,
                 },
         });
-  }
-  if (BUTTON_KEYDOWN(BUTTON_LEFT))
-  {
-    // reset current word progress
-    state->current_letter = 0;
-    state->input_len = 0;
-    state->input_buffer[0] = '\0';
-    // reset T to initial
-    state->T = INITIAL_T;
   }
 }
 
@@ -371,13 +381,13 @@ static void _frame_current_input(u8g2_t *u8g2, elm_t *root)
   bool pressed = BUTTON_PRESSED(BUTTON_RIGHT);
 
   char draft = dt > 2 * state->T ? '-' : '.';
-  elm_frame(root, vec2(0, 7), 61, 5);
+  elm_frame(root, vec2(0, 7), 61, 4);
   if (pressed)
   {
     uint32_t width = (dt * 61) / (3 * state->T);
     if (width > 61)
       width = 61;
-    elm_box(root, vec2(0, 7), width, 5);
+    elm_box(root, vec2(0, 7), width, 4);
   }
 
   elm_triangle(root, vec2(28, 3), vec2(30, 6), vec2(33, 3));
@@ -393,6 +403,53 @@ static void _frame_current_input(u8g2_t *u8g2, elm_t *root)
     elm_rounded_frame(root, vec2(49, 0), 12, 5, 1);
 }
 
+static void _frame_stats(u8g2_t *u8g2, elm_t *root)
+{
+  uint32_t elapsed_ms = absolute_time_diff_us(state->started_at, get_absolute_time()) / 1000;
+  uint32_t remaining_ms = DURATION_MS > elapsed_ms ? DURATION_MS - elapsed_ms : 0;
+  uint32_t remaining_s = remaining_ms / 1000;
+
+  uint32_t letters = state->stats.letters;
+  uint32_t errors = state->stats.errors;
+
+  uint32_t wpm = (letters * 60000) / (elapsed_ms);
+  uint32_t accuracy = (letters + errors) > 0
+                          ? (letters * 100) / (letters + errors)
+                          : 100;
+
+  if (!state->started)
+  {
+    wpm = 0;
+    accuracy = 100;
+    remaining_s = DURATION_MS / 1000;
+  }
+
+  u8g2_SetDrawColor(u8g2, 1);
+  u8g2_SetFont(u8g2, u8g2_font_7x14_mr);
+
+  char stats_buffer[64];
+
+  elm_t ctx = elm_child(root, vec2(0, 0));
+  snprintf(stats_buffer, sizeof(stats_buffer), "%d", wpm);
+  elm_str(&ctx, vec2(0, 0), stats_buffer);
+
+  snprintf(stats_buffer, sizeof(stats_buffer), "%d", errors);
+  elm_str(&ctx, vec2(28 + 5, 0), stats_buffer);
+
+  snprintf(stats_buffer, sizeof(stats_buffer), "%3d%%", accuracy);
+  elm_str(&ctx, vec2(100 - 28 - 8, 0), stats_buffer);
+
+  snprintf(stats_buffer, sizeof(stats_buffer), "%3ds", remaining_s);
+  elm_str(&ctx, vec2(100, 0), stats_buffer);
+
+  u8g2_SetFont(u8g2, u8g2_font_5x7_tr);
+  ctx = elm_child(root, vec2(0, 8));
+  elm_str(&ctx, vec2(0, 0), "WPM");
+  elm_str(&ctx, vec2(28 + 5, 0), "ERR");
+  elm_str(&ctx, vec2(100 - 8 - 15, 0), "ACC");
+  elm_str(&ctx, vec2(128 - 20, 0), "TIME");
+}
+
 static void frame()
 {
   u8g2_t *u8g2 = display_get_u8g2(&g_engine.display);
@@ -404,15 +461,24 @@ static void frame()
   ctx = elm_child(&root, vec2(0, 20));
   _frame_target_morse(u8g2, &ctx);
 
-  ctx = elm_child(&root, vec2(0, 30));
+  elm_hline(&root, vec2(0, 27), 128);
+
+  ctx = elm_child(&root, vec2(33, 30));
   _frame_current_input(u8g2, &ctx);
+
+  elm_hline(&root, vec2(0, 43), 128);
+
+  ctx = elm_child(&root, vec2(0, 64 - 8));
+  _frame_stats(u8g2, &ctx);
 
   leds_set_all(&g_engine.leds, (color_t){.hex = 0x00ff00});
 }
 
 static void leave()
 {
-  free(state);
+  if (state != NULL)
+    free(state);
+  state = NULL;
 }
 
 app_t app_morse = {
