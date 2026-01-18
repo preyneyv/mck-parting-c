@@ -86,6 +86,7 @@ enum
   WORD_LOOKAHEAD = 5,
   TARGET_MORSE_COUNT = 16,
   TARGET_MORSE_LENGTH = 5,
+  INITIAL_T = 50, // 50 ticks = 50ms
 };
 
 typedef struct
@@ -138,7 +139,7 @@ static void enter()
 {
   state = calloc(1, sizeof(state_t));
 
-  state->T = 100; // 100 ticks = 100ms
+  state->T = INITIAL_T;
   state->last_edge_tick = g_engine.tick;
   state->input_len = 0;
 
@@ -164,24 +165,28 @@ static void enter()
 
 static void tick()
 {
+  uint32_t dt = g_engine.tick - state->last_edge_tick;
+
+  if (dt > 15 * state->T)
+  {
+    state->input_len = 0;
+    state->input_buffer[0] = '\0';
+  }
+
   if (BUTTON_KEYDOWN(BUTTON_RIGHT))
   {
     // begin mark (end gap)
-    uint32_t dt = g_engine.tick - state->last_edge_tick;
     state->last_edge_tick = g_engine.tick;
 
-    if (dt > 5 * state->T)
-    {
-      // reset word if gap was too long
-      state->current_letter = 0;
-      state->input_len = 0;
-      state->input_buffer[0] = '\0';
-    }
-    else if (dt > 2 * state->T)
+    if (dt > 2 * state->T)
     {
       // gap was > 2T, treat as 3T gap
+      // ignore large gaps
       // blend T: new_T = 0.9*old + 0.1*(dt/3)
-      state->T = (state->T * 9 + (dt / 3)) / 10;
+      if (dt < 5)
+      {
+        state->T = (state->T * 9 + (dt / 3)) / 10;
+      }
     }
     else
     {
@@ -211,7 +216,10 @@ static void tick()
     if (dt > 2 * state->T)
     {
       // mark > 2T -> dash
-      state->T = (state->T * 9 + (dt / 3)) / 10;
+      if (dt < 5)
+      {
+        state->T = (state->T * 9 + (dt / 3)) / 10;
+      }
       symbol = '-';
     }
     else
@@ -271,14 +279,14 @@ static void tick()
                 },
         });
   }
-  else if (BUTTON_KEYDOWN(BUTTON_LEFT))
+  if (BUTTON_KEYDOWN(BUTTON_LEFT))
   {
     // reset current word progress
     state->current_letter = 0;
     state->input_len = 0;
     state->input_buffer[0] = '\0';
     // reset T to initial
-    state->T = 100;
+    state->T = INITIAL_T;
   }
 }
 
