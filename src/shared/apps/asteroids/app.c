@@ -12,27 +12,32 @@
 
 // --- Tunables ---
 static const float SHIP_RADIUS = 4.0f;
-static const float DRIFT_ACCEL = 4.0f;             // px/s^2 (always applied)
-static const float BOOST_ACCEL = 40.0f;            // extra px/s^2 when both buttons held
-static const float MAX_SPEED = 12.0f;              // px/s (regular cap)
-static const float BOOST_MAX_SPEED = 200.0f;       // px/s (boost cap)
-static const float BOOST_BRAKE = 1.0f;             // 1/s (deceleration when boost released)
-static const float ANGULAR_ACCEL = 16.0f;          // rad/s^2
-static const float ANGULAR_DAMP = 4.0f;            // 1/s
-static const float STEER_HEADING_INFLUENCE = 1.0f; // 1/s (higher -> more pull to facing)
-static const float CAMERA_FOLLOW = 3.0f;           // 1/s (higher = snappier camera)
-static const float CAMERA_LOOK_START = 30.0f;      // px/s
-static const float CAMERA_LOOK_FULL = 200.0f;      // px/s
-static const float CAMERA_LOOK_DIST_X = 100.0f;    // px
-static const float CAMERA_LOOK_DIST_Y = 80.0f;     // px
-static const float CAMERA_SHAKE_START = 140.0f;    // px/s
-static const float CAMERA_SHAKE_FULL = 200.0f;     // px/s
-static const float CAMERA_SHAKE_MAX = 2.0f;        // px
+static const float DRIFT_ACCEL = 4.0f;            // px/s^2 (always applied)
+static const float BOOST_ACCEL_START = 80.0f;     // px/s^2 at low speed
+static const float BOOST_ACCEL_END = 10.0f;       // px/s^2 near max speed
+static const float MAX_SPEED = 12.0f;             // px/s (regular cap)
+static const float BOOST_MAX_SPEED = 200.0f;      // px/s (boost cap)
+static const float BOOST_BRAKE = 0.4f;            // 1/s (deceleration when boost released)
+static const float ANGULAR_ACCEL = 16.0f;         // rad/s^2
+static const float ANGULAR_DAMP = 4.0f;           // 1/s
+static const float STEER_HEADING_INFLUENCE = .8f; // 1/s (higher -> more pull to facing)
+static const float CAMERA_FOLLOW = 3.0f;          // 1/s (higher = snappier camera)
+static const float CAMERA_LOOK_START = 30.0f;     // px/s
+static const float CAMERA_LOOK_FULL = 200.0f;     // px/s
+static const float CAMERA_LOOK_DIST_X = 110.0f;   // px
+static const float CAMERA_LOOK_DIST_Y = 90.0f;    // px
+static const float CAMERA_SHAKE_START = 140.0f;   // px/s
+static const float CAMERA_SHAKE_FULL = 200.0f;    // px/s
+static const float CAMERA_SHAKE_MAX = 2.0f;       // px
 static const float STAR_FIELD_W = 320.0f;
 static const float STAR_FIELD_H = 200.0f;
 static const uint32_t TRAIL_INTERVAL_MS = 60;
 static const float TRAIL_START_SPEED = 80.0f; // px/s
 static const float TRAIL_FULL_SPEED = 200.0f; // px/s
+static const uint32_t TRAIL_TTL_MS = 700;
+static const float PATH_SPAWN_START = 140.0f; // px/s
+static const float PATH_SPAWN_FULL = 200.0f;  // px/s
+static const float PATH_SPAWN_ANGLE = 0.55f;  // rad half-angle cone
 
 static const uint32_t RESTART_HOLD_MS = 900;
 
@@ -70,6 +75,7 @@ typedef struct
 {
     vec2f_t pos;
     float angle;
+    uint32_t at_ms;
 } trail_node_t;
 
 typedef struct
@@ -88,6 +94,7 @@ typedef struct
 
     bool game_over;
     uint32_t score;
+    float distance;
 
     vec2f_t stars[STAR_COUNT];
     trail_node_t trail[TRAIL_MAX];
@@ -140,6 +147,14 @@ static inline vec2f_t world_to_screen(vec2f_t world)
     };
 }
 
+static inline vec2f_t world_to_screen_no_shake(vec2f_t world)
+{
+    return (vec2f_t){
+        .x = world.x - state.cam_pos.x + (float)DISP_WIDTH * 0.5f,
+        .y = world.y - state.cam_pos.y + (float)DISP_HEIGHT * 0.5f,
+    };
+}
+
 static inline vec2f_t vec2f_scale(vec2f_t v, float s)
 {
     return (vec2f_t){.x = v.x * s, .y = v.y * s};
@@ -148,6 +163,11 @@ static inline vec2f_t vec2f_scale(vec2f_t v, float s)
 static inline vec2f_t vec2f_add_local(vec2f_t a, vec2f_t b)
 {
     return (vec2f_t){.x = a.x + b.x, .y = a.y + b.y};
+}
+
+static inline vec2f_t vec2f_sub(vec2f_t a, vec2f_t b)
+{
+    return (vec2f_t){.x = a.x - b.x, .y = a.y - b.y};
 }
 
 static inline float vec2f_len(vec2f_t v)
@@ -173,6 +193,73 @@ static inline vec2f_t rotate_vec(vec2f_t v, float rad)
     float c = cosf(rad);
     float s = sinf(rad);
     return (vec2f_t){.x = v.x * c - v.y * s, .y = v.x * s + v.y * c};
+}
+
+static inline float vec2f_dot(vec2f_t a, vec2f_t b)
+{
+    return a.x * b.x + a.y * b.y;
+}
+
+static inline float vec2f_cross(vec2f_t a, vec2f_t b)
+{
+    return a.x * b.y - a.y * b.x;
+}
+
+static inline float dist2_point_segment(vec2f_t p, vec2f_t a, vec2f_t b)
+{
+    vec2f_t ab = vec2f_sub(b, a);
+    vec2f_t ap = vec2f_sub(p, a);
+    float ab_len2 = vec2f_dot(ab, ab);
+    if (ab_len2 <= 0.0001f)
+        return vec2f_dot(ap, ap);
+
+    float t = vec2f_dot(ap, ab) / ab_len2;
+    if (t < 0.0f)
+        t = 0.0f;
+    else if (t > 1.0f)
+        t = 1.0f;
+
+    vec2f_t closest = (vec2f_t){.x = a.x + ab.x * t, .y = a.y + ab.y * t};
+    vec2f_t d = vec2f_sub(p, closest);
+    return vec2f_dot(d, d);
+}
+
+static inline bool point_in_triangle(vec2f_t p, vec2f_t a, vec2f_t b, vec2f_t c)
+{
+    float c1 = vec2f_cross(vec2f_sub(b, a), vec2f_sub(p, a));
+    float c2 = vec2f_cross(vec2f_sub(c, b), vec2f_sub(p, b));
+    float c3 = vec2f_cross(vec2f_sub(a, c), vec2f_sub(p, c));
+    bool has_neg = (c1 < 0.0f) || (c2 < 0.0f) || (c3 < 0.0f);
+    bool has_pos = (c1 > 0.0f) || (c2 > 0.0f) || (c3 > 0.0f);
+    return !(has_neg && has_pos);
+}
+
+static inline bool circle_triangle_overlap(vec2f_t center, float radius,
+                                           vec2f_t a, vec2f_t b, vec2f_t c)
+{
+    float r2 = radius * radius;
+    if (point_in_triangle(center, a, b, c))
+        return true;
+    if (dist2_point_segment(center, a, b) <= r2)
+        return true;
+    if (dist2_point_segment(center, b, c) <= r2)
+        return true;
+    if (dist2_point_segment(center, c, a) <= r2)
+        return true;
+    return false;
+}
+
+static inline void ship_triangle(vec2f_t pos, float angle, float scale,
+                                 vec2f_t *nose, vec2f_t *p1, vec2f_t *p2)
+{
+    vec2f_t forward = (vec2f_t){.x = cosf(angle), .y = sinf(angle)};
+    vec2f_t left = rotate_vec(forward, 2.45f);
+    vec2f_t right = rotate_vec(forward, -2.45f);
+
+    float r = SHIP_RADIUS * scale;
+    *nose = vec2f_add_local(pos, vec2f_scale(forward, r + 3.0f * scale));
+    *p1 = vec2f_add_local(pos, vec2f_scale(left, r));
+    *p2 = vec2f_add_local(pos, vec2f_scale(right, r));
 }
 
 static inline uint8_t clip_code(int16_t x, int16_t y)
@@ -304,7 +391,7 @@ static void update_trail(uint32_t now_ms, float speed)
     state.last_trail_ms = now_ms;
 
     state.trail_head = (state.trail_head + 1) % TRAIL_MAX;
-    state.trail[state.trail_head] = (trail_node_t){.pos = state.pos, .angle = state.angle};
+    state.trail[state.trail_head] = (trail_node_t){.pos = state.pos, .angle = state.angle, .at_ms = now_ms};
     if (state.trail_count < TRAIL_MAX)
         state.trail_count++;
 }
@@ -336,6 +423,10 @@ static void spawn_asteroid(uint32_t current_ms)
     if (slot == ASTEROID_MAX)
         return;
 
+    float speed = vec2f_len(state.vel);
+    float path_ratio = clampf((speed - PATH_SPAWN_START) / (PATH_SPAWN_FULL - PATH_SPAWN_START), 0.0f, 1.0f);
+    bool spawn_in_path = (randf() < path_ratio);
+
     uint8_t edge = rand() % 4;
     float x = 0.0f;
     float y = 0.0f;
@@ -343,7 +434,19 @@ static void spawn_asteroid(uint32_t current_ms)
     float half_h = (float)DISP_HEIGHT * 0.5f;
     float cam_x = state.cam_pos.x;
     float cam_y = state.cam_pos.y;
-    if (edge == 0)
+    if (spawn_in_path)
+    {
+        vec2f_t dir = vec2f_norm(state.vel);
+        if (speed < 0.01f)
+            dir = (vec2f_t){.x = cosf(state.angle), .y = sinf(state.angle)};
+
+        float ang = atan2f(dir.y, dir.x) + (randf() * 2.0f - 1.0f) * PATH_SPAWN_ANGLE;
+        float off = (randf() - 0.5f) * 8.0f;
+        float dist = fmaxf(half_w, half_h) + 10.0f;
+        x = cam_x + cosf(ang) * dist + (-dir.y) * off;
+        y = cam_y + sinf(ang) * dist + (dir.x) * off;
+    }
+    else if (edge == 0)
     {
         x = cam_x - half_w - 4.0f;
         y = cam_y - half_h + randf() * (float)DISP_HEIGHT;
@@ -370,8 +473,8 @@ static void spawn_asteroid(uint32_t current_ms)
     float jitter = (randf() - 0.5f) * 0.8f; // +/- 0.4 rad
     float ang = base_ang + jitter;
 
-    float speed = ASTEROID_SPEED_MIN + randf() * (ASTEROID_SPEED_MAX - ASTEROID_SPEED_MIN);
-    vec2f_t vel = (vec2f_t){.x = cosf(ang) * speed, .y = sinf(ang) * speed};
+    float asteroid_speed = ASTEROID_SPEED_MIN + randf() * (ASTEROID_SPEED_MAX - ASTEROID_SPEED_MIN);
+    vec2f_t vel = (vec2f_t){.x = cosf(ang) * asteroid_speed, .y = sinf(ang) * asteroid_speed};
 
     uint8_t r = ASTEROID_R_MIN + (rand() % (ASTEROID_R_MAX - ASTEROID_R_MIN + 1));
     uint32_t ttl = ASTEROID_TTL_MIN_MS + (uint32_t)(randf() * (ASTEROID_TTL_MAX_MS - ASTEROID_TTL_MIN_MS));
@@ -407,7 +510,11 @@ static void update_ship(float dt_s, uint32_t dt_ms)
     if (boosting)
     {
         if (speed < BOOST_MAX_SPEED)
-            accel = DRIFT_ACCEL + BOOST_ACCEL;
+        {
+            float ratio = clampf(speed / BOOST_MAX_SPEED, 0.0f, 1.0f);
+            float boost_accel = BOOST_ACCEL_START + (BOOST_ACCEL_END - BOOST_ACCEL_START) * ratio;
+            accel = DRIFT_ACCEL + boost_accel;
+        }
     }
     else
     {
@@ -437,6 +544,8 @@ static void update_ship(float dt_s, uint32_t dt_ms)
     state.pos.x += state.vel.x * dt_s;
     state.pos.y += state.vel.y * dt_s;
 
+    state.distance += speed * dt_s;
+
     state.elapsed_ms += dt_ms;
 }
 
@@ -463,11 +572,10 @@ static void update_asteroids(float dt_s, uint32_t current_ms)
         a->pos.x += a->vel.x * dt_s;
         a->pos.y += a->vel.y * dt_s;
 
-        // collision check
-        float dx = a->pos.x - state.pos.x;
-        float dy = a->pos.y - state.pos.y;
-        float rr = SHIP_RADIUS + (float)a->r;
-        if ((dx * dx + dy * dy) <= (rr * rr))
+        // collision check (asteroid circle vs ship triangle)
+        vec2f_t nose, p1, p2;
+        ship_triangle(state.pos, state.angle, 1.0f, &nose, &p1, &p2);
+        if (circle_triangle_overlap(a->pos, (float)a->r, nose, p1, p2))
         {
             state.game_over = true;
             state.score = state.elapsed_ms / 1000;
@@ -553,13 +661,8 @@ static void tick()
 
 static void draw_ship(u8g2_t *u8g2)
 {
-    vec2f_t forward = (vec2f_t){.x = cosf(state.angle), .y = sinf(state.angle)};
-    vec2f_t left = rotate_vec(forward, 2.45f);
-    vec2f_t right = rotate_vec(forward, -2.45f);
-
-    vec2f_t nose_w = vec2f_add_local(state.pos, vec2f_scale(forward, SHIP_RADIUS + 3.0f));
-    vec2f_t p1_w = vec2f_add_local(state.pos, vec2f_scale(left, SHIP_RADIUS));
-    vec2f_t p2_w = vec2f_add_local(state.pos, vec2f_scale(right, SHIP_RADIUS));
+    vec2f_t nose_w, p1_w, p2_w;
+    ship_triangle(state.pos, state.angle, 1.0f, &nose_w, &p1_w, &p2_w);
 
     vec2f_t nose = world_to_screen(nose_w);
     vec2f_t p1 = world_to_screen(p1_w);
@@ -572,6 +675,7 @@ static void draw_ship(u8g2_t *u8g2)
 
     if (BUTTON_PRESSED(BUTTON_LEFT) && BUTTON_PRESSED(BUTTON_RIGHT))
     {
+        vec2f_t forward = (vec2f_t){.x = cosf(state.angle), .y = sinf(state.angle)};
         vec2f_t tail_w = vec2f_add_local(state.pos, vec2f_scale(forward, -(SHIP_RADIUS + 2.0f)));
         vec2f_t tail = world_to_screen(tail_w);
         u8g2_DrawLine(u8g2, (int16_t)tail.x, (int16_t)tail.y,
@@ -588,7 +692,7 @@ static void draw_asteroids(u8g2_t *u8g2)
             continue;
 
         asteroid_t *a = &state.ast[i];
-        vec2f_t screen = world_to_screen(a->pos);
+        vec2f_t screen = world_to_screen_no_shake(a->pos);
         if (screen.x < -(int16_t)a->r || screen.x > (DISP_WIDTH + a->r) ||
             screen.y < -(int16_t)a->r || screen.y > (DISP_HEIGHT + a->r))
             continue;
@@ -600,7 +704,7 @@ static void draw_starfield(u8g2_t *u8g2)
 {
     for (uint8_t i = 0; i < STAR_COUNT; i++)
     {
-        vec2f_t screen = world_to_screen(state.stars[i]);
+        vec2f_t screen = world_to_screen_no_shake(state.stars[i]);
         if (screen.x < 0 || screen.x >= DISP_WIDTH || screen.y < 0 || screen.y >= DISP_HEIGHT)
             continue;
         u8g2_DrawPixel(u8g2, (int16_t)screen.x, (int16_t)screen.y);
@@ -613,9 +717,12 @@ static void draw_trail(u8g2_t *u8g2)
         return;
 
     uint8_t count = state.trail_count;
+    uint32_t now = now_ms();
     for (uint8_t i = 0; i < count; i++)
     {
         uint8_t idx = (state.trail_head + TRAIL_MAX - i) % TRAIL_MAX;
+        if (now - state.trail[idx].at_ms > TRAIL_TTL_MS)
+            continue;
         float t = (float)(i + 1) / (float)(count + 1);
         float scale = 1.0f - 0.6f * t;
 
@@ -639,10 +746,37 @@ static void draw_trail(u8g2_t *u8g2)
         int16_t x2 = (int16_t)p2.x;
         int16_t y2 = (int16_t)p2.y;
 
-        draw_clipped_line(u8g2, nx, ny, x1, y1);
+        // draw_clipped_line(u8g2, nx, ny, x1, y1);
         draw_clipped_line(u8g2, x1, y1, x2, y2);
-        draw_clipped_line(u8g2, x2, y2, nx, ny);
+        // draw_clipped_line(u8g2, x2, y2, nx, ny);
     }
+}
+
+static void draw_speedometer(u8g2_t *u8g2)
+{
+    float speed = vec2f_len(state.vel);
+    float ratio = clampf(speed / BOOST_MAX_SPEED, 0.0f, 1.0f);
+
+    int16_t cx = DISP_WIDTH - 20;
+    int16_t cy = 18;
+    uint8_t r = 12;
+
+    uint16_t start_deg = 200;
+    uint16_t end_deg = 340;
+    float angle_deg = start_deg + (end_deg - start_deg) * ratio;
+    float angle_rad = angle_deg * (float)M_PI / 180.0f;
+
+    u8g2_DrawArc(u8g2, cx, cy, r, start_deg, end_deg);
+
+    int16_t nx = (int16_t)(cx + cosf(angle_rad) * (r - 2));
+    int16_t ny = (int16_t)(cy + sinf(angle_rad) * (r - 2));
+    u8g2_DrawLine(u8g2, cx, cy, nx, ny);
+
+    u8g2_SetFont(u8g2, u8g2_font_5x7_tr);
+    char buf[8];
+    snprintf(buf, sizeof(buf), "%d", (int)speed);
+    uint16_t w = u8g2_GetStrWidth(u8g2, buf);
+    u8g2_DrawStr(u8g2, cx - (w / 2), cy + r + 8, buf);
 }
 
 static void draw_hud(u8g2_t *u8g2)
@@ -654,9 +788,10 @@ static void draw_hud(u8g2_t *u8g2)
     snprintf(buf, sizeof(buf), "T:%lus", (unsigned long)(state.elapsed_ms / 1000));
     u8g2_DrawStr(u8g2, 0, 6, buf);
 
-    float speed = vec2f_len(state.vel);
-    snprintf(buf, sizeof(buf), "V:%d", (int)speed);
-    u8g2_DrawStr(u8g2, 78, 6, buf);
+    snprintf(buf, sizeof(buf), "D:%lu", (unsigned long)state.distance);
+    u8g2_DrawStr(u8g2, 0, 14, buf);
+
+    draw_speedometer(u8g2);
 }
 
 static void draw_game_over(u8g2_t *u8g2)
