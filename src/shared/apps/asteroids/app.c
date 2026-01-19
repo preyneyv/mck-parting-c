@@ -5,6 +5,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include <shared/utils/elm.h>
+
 #include <shared/apps/apps.h>
 #include <shared/config.h>
 #include <shared/engine.h>
@@ -24,26 +26,30 @@ static const float STEER_HEADING_INFLUENCE = .8f; // 1/s (higher -> more pull to
 static const float CAMERA_FOLLOW = 3.0f;          // 1/s (higher = snappier camera)
 static const float CAMERA_LOOK_START = 30.0f;     // px/s
 static const float CAMERA_LOOK_FULL = 200.0f;     // px/s
-static const float CAMERA_LOOK_DIST_X = 110.0f;   // px
+static const float CAMERA_LOOK_DIST_X = 100.0f;   // px
 static const float CAMERA_LOOK_DIST_Y = 90.0f;    // px
-static const float CAMERA_SHAKE_START = 140.0f;   // px/s
+static const float CAMERA_SHAKE_START = 120.0f;   // px/s
 static const float CAMERA_SHAKE_FULL = 200.0f;    // px/s
-static const float CAMERA_SHAKE_MAX = 2.0f;       // px
+static const float CAMERA_SHAKE_MAX = 3.0f;       // px
+static const float CAMERA_CENTER_X = 54.0f;       // px
+static const float CAMERA_CENTER_Y = 32.0f;       // px
 static const float STAR_FIELD_W = 320.0f;
 static const float STAR_FIELD_H = 200.0f;
 static const uint32_t TRAIL_INTERVAL_MS = 60;
 static const float TRAIL_START_SPEED = 80.0f; // px/s
 static const float TRAIL_FULL_SPEED = 200.0f; // px/s
 static const uint32_t TRAIL_TTL_MS = 700;
-static const float PATH_SPAWN_START = 140.0f; // px/s
-static const float PATH_SPAWN_FULL = 200.0f;  // px/s
-static const float PATH_SPAWN_ANGLE = 0.55f;  // rad half-angle cone
+static const float TRAIL_DRIFT_SCALE = 0.25f;     // fraction of ship speed
+static const float PATH_SPAWN_START = 140.0f;     // px/s
+static const float PATH_SPAWN_FULL = 200.0f;      // px/s
+static const float PATH_SPAWN_ANGLE = 0.55f;      // rad half-angle cone
+static const float COLLISION_CHECK_RANGE = 40.0f; // px
 
 static const uint32_t RESTART_HOLD_MS = 900;
 
 enum
 {
-    ASTEROID_MAX = 60,
+    ASTEROID_MAX = 40,
     STAR_COUNT = 48,
     TRAIL_MAX = 60,
 };
@@ -76,6 +82,8 @@ typedef struct
     vec2f_t pos;
     float angle;
     uint32_t at_ms;
+    float speed;
+    vec2f_t vel;
 } trail_node_t;
 
 typedef struct
@@ -142,16 +150,16 @@ static inline vec2f_t world_to_screen(vec2f_t world)
         .y = state.cam_pos.y + state.cam_shake.y,
     };
     return (vec2f_t){
-        .x = world.x - cam.x + (float)DISP_WIDTH * 0.5f,
-        .y = world.y - cam.y + (float)DISP_HEIGHT * 0.5f,
+        .x = world.x - cam.x + CAMERA_CENTER_X,
+        .y = world.y - cam.y + CAMERA_CENTER_Y,
     };
 }
 
 static inline vec2f_t world_to_screen_no_shake(vec2f_t world)
 {
     return (vec2f_t){
-        .x = world.x - state.cam_pos.x + (float)DISP_WIDTH * 0.5f,
-        .y = world.y - state.cam_pos.y + (float)DISP_HEIGHT * 0.5f,
+        .x = world.x - state.cam_pos.x + CAMERA_CENTER_X,
+        .y = world.y - state.cam_pos.y + CAMERA_CENTER_Y,
     };
 }
 
@@ -391,7 +399,14 @@ static void update_trail(uint32_t now_ms, float speed)
     state.last_trail_ms = now_ms;
 
     state.trail_head = (state.trail_head + 1) % TRAIL_MAX;
-    state.trail[state.trail_head] = (trail_node_t){.pos = state.pos, .angle = state.angle, .at_ms = now_ms};
+    vec2f_t drift = vec2f_scale(state.vel, TRAIL_DRIFT_SCALE);
+    state.trail[state.trail_head] = (trail_node_t){
+        .pos = state.pos,
+        .angle = state.angle,
+        .at_ms = now_ms,
+        .speed = speed,
+        .vel = drift,
+    };
     if (state.trail_count < TRAIL_MAX)
         state.trail_count++;
 }
@@ -572,6 +587,11 @@ static void update_asteroids(float dt_s, uint32_t current_ms)
         a->pos.x += a->vel.x * dt_s;
         a->pos.y += a->vel.y * dt_s;
 
+        float dx = a->pos.x - state.pos.x;
+        float dy = a->pos.y - state.pos.y;
+        if (fabsf(dx) > COLLISION_CHECK_RANGE || fabsf(dy) > COLLISION_CHECK_RANGE)
+            continue;
+
         // collision check (asteroid circle vs ship triangle)
         vec2f_t nose, p1, p2;
         ship_triangle(state.pos, state.angle, 1.0f, &nose, &p1, &p2);
@@ -678,9 +698,10 @@ static void draw_ship(u8g2_t *u8g2)
         vec2f_t forward = (vec2f_t){.x = cosf(state.angle), .y = sinf(state.angle)};
         vec2f_t tail_w = vec2f_add_local(state.pos, vec2f_scale(forward, -(SHIP_RADIUS + 2.0f)));
         vec2f_t tail = world_to_screen(tail_w);
-        u8g2_DrawLine(u8g2, (int16_t)tail.x, (int16_t)tail.y,
-                      (int16_t)(tail.x - forward.x * 4.0f),
-                      (int16_t)(tail.y - forward.y * 4.0f));
+        draw_clipped_line(u8g2,
+                          (int16_t)tail.x, (int16_t)tail.y,
+                          (int16_t)(tail.x - forward.x * 4.0f),
+                          (int16_t)(tail.y - forward.y * 4.0f));
     }
 }
 
@@ -723,6 +744,9 @@ static void draw_trail(u8g2_t *u8g2)
         uint8_t idx = (state.trail_head + TRAIL_MAX - i) % TRAIL_MAX;
         if (now - state.trail[idx].at_ms > TRAIL_TTL_MS)
             continue;
+        float age = (float)(now - state.trail[idx].at_ms) / 1000.0f;
+        vec2f_t drifted = vec2f_add_local(state.trail[idx].pos, vec2f_scale(state.trail[idx].vel, age));
+
         float t = (float)(i + 1) / (float)(count + 1);
         float scale = 1.0f - 0.6f * t;
 
@@ -730,10 +754,15 @@ static void draw_trail(u8g2_t *u8g2)
         vec2f_t left = rotate_vec(forward, 2.45f);
         vec2f_t right = rotate_vec(forward, -2.45f);
 
-        float r = SHIP_RADIUS * scale;
-        vec2f_t nose_w = vec2f_add_local(state.trail[idx].pos, vec2f_scale(forward, r + 2.0f * scale));
-        vec2f_t p1_w = vec2f_add_local(state.trail[idx].pos, vec2f_scale(left, r));
-        vec2f_t p2_w = vec2f_add_local(state.trail[idx].pos, vec2f_scale(right, r));
+        float speed_ratio = clampf((state.trail[idx].speed - TRAIL_START_SPEED) /
+                                       (TRAIL_FULL_SPEED - TRAIL_START_SPEED),
+                                   0.0f, 1.0f);
+        float r = SHIP_RADIUS * scale * (0.6f + 0.4f * speed_ratio);
+        vec2f_t nose_w = vec2f_add_local(drifted, vec2f_scale(forward, r + 2.0f * scale));
+        vec2f_t p1_w = vec2f_add_local(drifted, vec2f_scale(left, r));
+        vec2f_t p2_w = vec2f_add_local(drifted, vec2f_scale(right, r));
+        vec2f_t mid_w = vec2f_lerp(p1_w, p2_w, 0.5f);
+        nose_w = vec2f_lerp(mid_w, nose_w, speed_ratio);
 
         vec2f_t nose = world_to_screen(nose_w);
         vec2f_t p1 = world_to_screen(p1_w);
@@ -746,9 +775,9 @@ static void draw_trail(u8g2_t *u8g2)
         int16_t x2 = (int16_t)p2.x;
         int16_t y2 = (int16_t)p2.y;
 
-        // draw_clipped_line(u8g2, nx, ny, x1, y1);
+        draw_clipped_line(u8g2, nx, ny, x1, y1);
         draw_clipped_line(u8g2, x1, y1, x2, y2);
-        // draw_clipped_line(u8g2, x2, y2, nx, ny);
+        draw_clipped_line(u8g2, x2, y2, nx, ny);
     }
 }
 
@@ -757,39 +786,51 @@ static void draw_speedometer(u8g2_t *u8g2)
     float speed = vec2f_len(state.vel);
     float ratio = clampf(speed / BOOST_MAX_SPEED, 0.0f, 1.0f);
 
-    int16_t cx = DISP_WIDTH - 20;
-    int16_t cy = 18;
+    int16_t cx = DISP_WIDTH - 14;
+    int16_t cy = DISP_HEIGHT - 14;
     uint8_t r = 12;
 
-    uint16_t start_deg = 200;
-    uint16_t end_deg = 340;
-    float angle_deg = start_deg + (end_deg - start_deg) * ratio;
+    uint16_t start_deg = 320;
+    uint16_t end_deg = 220;
+    uint16_t redline_deg = 10;
+    float sweep = (end_deg - start_deg);
+    if (sweep < 0.0f)
+        sweep += 360.0f;
+    float angle_deg = start_deg + sweep * (1.0f - ratio);
+    float shake_ratio = clampf((speed - CAMERA_SHAKE_START) / (CAMERA_SHAKE_FULL - CAMERA_SHAKE_START), 0.0f, 1.0f);
+    float jitter = (randf() * 2.0f - 1.0f) * 10.0f * shake_ratio;
+    angle_deg += jitter;
+    if (angle_deg >= 360.0f)
+        angle_deg -= 360.0f;
     float angle_rad = angle_deg * (float)M_PI / 180.0f;
 
-    u8g2_DrawArc(u8g2, cx, cy, r, start_deg, end_deg);
+    u8g2_DrawArc(u8g2, cx, cy, r, (start_deg * 256) / 360, (end_deg * 256) / 360);
+    u8g2_DrawArc(u8g2, cx, cy, r - 2, (start_deg * 256) / 360, (redline_deg * 256) / 360);
 
     int16_t nx = (int16_t)(cx + cosf(angle_rad) * (r - 2));
-    int16_t ny = (int16_t)(cy + sinf(angle_rad) * (r - 2));
+    int16_t ny = (int16_t)(cy - sinf(angle_rad) * (r - 2));
     u8g2_DrawLine(u8g2, cx, cy, nx, ny);
 
     u8g2_SetFont(u8g2, u8g2_font_5x7_tr);
     char buf[8];
     snprintf(buf, sizeof(buf), "%d", (int)speed);
     uint16_t w = u8g2_GetStrWidth(u8g2, buf);
-    u8g2_DrawStr(u8g2, cx - (w / 2), cy + r + 8, buf);
+    u8g2_DrawStr(u8g2, cx - (w / 2), cy + r + 2, buf);
 }
 
 static void draw_hud(u8g2_t *u8g2)
 {
+    elm_t root = elm_root(u8g2, VEC2_Z);
     u8g2_SetFont(u8g2, u8g2_font_5x7_tr);
     u8g2_SetDrawColor(u8g2, 1);
 
     char buf[24];
-    snprintf(buf, sizeof(buf), "T:%lus", (unsigned long)(state.elapsed_ms / 1000));
-    u8g2_DrawStr(u8g2, 0, 6, buf);
+    snprintf(buf, sizeof(buf), "%lus", (unsigned long)(state.elapsed_ms / 1000));
+    elm_rstr(&root, vec2(128, 7), buf);
 
-    snprintf(buf, sizeof(buf), "D:%lu", (unsigned long)state.distance);
-    u8g2_DrawStr(u8g2, 0, 14, buf);
+    snprintf(buf, sizeof(buf), "%lum", (unsigned long)state.distance);
+    elm_rstr(&root, vec2(128, 14), buf);
+    // u8g2_DrawStr(u8g2, 0, 14, buf);
 
     draw_speedometer(u8g2);
 }
