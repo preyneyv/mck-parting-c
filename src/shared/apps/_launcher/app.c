@@ -15,9 +15,9 @@ static app_t *apps[] = {
     &app_bongocat,
     &app_morse,
     &app_rhythm,
+    &app_asteroids,
     &app_dummy,
     &app_bongocat,
-    &app_dummy,
 };
 
 static struct

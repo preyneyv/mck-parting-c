@@ -30,7 +30,7 @@ void engine_init()
   g_engine.buttons.menu.id = BUTTON_MENU;
   engine_buttons_init(&g_engine.buttons);
 
-  engine_set_app(&app_morse);
+  engine_set_app(&app_asteroids);
   engine_set_volume(4); // todo: save/restore from flash (somehow)
 }
 

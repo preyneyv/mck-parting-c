@@ -54,6 +54,7 @@ set(SHARED_SOURCES
     src/shared/apps/dummy/app.c
     src/shared/apps/morse/app.c
     src/shared/apps/rhythm/app.c
+    src/shared/apps/asteroids/app.c
     src/shared/apps/rhythm/tracker.c
 )
 add_library(shared STATIC ${SHARED_SOURCES})
