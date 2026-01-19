@@ -3,16 +3,75 @@
 
 #pragma once
 
-#include <shared/utils/vec.h>
 #include <u8g2.h>
-
 #include <qrcodegen.h>
 
+#include <shared/engine.h>
+#include <shared/utils/vec.h>
+#include <stdio.h>
+#include <shared/utils/misc.h>
 typedef struct
 {
   vec2_t pos;
   u8g2_t *u8g2;
 } elm_t;
+
+typedef enum
+{
+  ELM_ALIGN_TOP_LEFT = 0,
+  ELM_ALIGN_TOP_CENTER,
+  ELM_ALIGN_TOP_RIGHT,
+  ELM_ALIGN_CENTER_LEFT,
+  ELM_ALIGN_CENTER,
+  ELM_ALIGN_CENTER_RIGHT,
+  ELM_ALIGN_BOTTOM_LEFT,
+  ELM_ALIGN_BOTTOM_CENTER,
+  ELM_ALIGN_BOTTOM_RIGHT,
+} elm_align_t;
+
+static inline vec2_t _elm_calculate_aligned_pos(elm_t *parent, vec2_t pos,
+                                                uint16_t w, uint16_t h,
+                                                elm_align_t align)
+{
+  vec2_t aligned_pos = pos;
+
+  switch (align)
+  {
+  case ELM_ALIGN_TOP_LEFT:
+    // no-op
+    break;
+  case ELM_ALIGN_TOP_CENTER:
+    aligned_pos.x -= w / 2;
+    break;
+  case ELM_ALIGN_TOP_RIGHT:
+    aligned_pos.x -= w;
+    break;
+  case ELM_ALIGN_CENTER_LEFT:
+    aligned_pos.y -= h / 2;
+    break;
+  case ELM_ALIGN_CENTER:
+    aligned_pos.x -= w / 2;
+    aligned_pos.y -= h / 2;
+    break;
+  case ELM_ALIGN_CENTER_RIGHT:
+    aligned_pos.x -= w;
+    aligned_pos.y -= h / 2;
+    break;
+  case ELM_ALIGN_BOTTOM_LEFT:
+    aligned_pos.y -= h;
+    break;
+  case ELM_ALIGN_BOTTOM_CENTER:
+    aligned_pos.x -= w / 2;
+    aligned_pos.y -= h;
+    break;
+  case ELM_ALIGN_BOTTOM_RIGHT:
+    aligned_pos.x -= w;
+    aligned_pos.y -= h;
+    break;
+  }
+
+  return aligned_pos;
+}
 
 static inline elm_t elm_root(u8g2_t *u8g2, vec2_t pos)
 {
@@ -22,6 +81,13 @@ static inline elm_t elm_root(u8g2_t *u8g2, vec2_t pos)
 static inline elm_t elm_child(elm_t *parent, vec2_t pos)
 {
   return (elm_t){.pos = vec2_add(parent->pos, pos), .u8g2 = parent->u8g2};
+}
+
+static inline elm_t elm_child_aligned(elm_t *parent, vec2_t pos, uint16_t w,
+                                      uint16_t h, elm_align_t align)
+{
+  vec2_t aligned_pos = _elm_calculate_aligned_pos(parent, pos, w, h, align);
+  return (elm_t){.pos = aligned_pos, .u8g2 = parent->u8g2};
 }
 
 static inline elm_t elm_arc(elm_t *parent, vec2_t pos, uint16_t radius,
@@ -127,6 +193,13 @@ static inline elm_t elm_str(elm_t *parent, vec2_t pos, const char *str)
   return child;
 }
 
+static inline elm_t elm_rstr(elm_t *parent, vec2_t pos, const char *str)
+{
+  elm_t child = elm_child(parent, pos);
+  u8g2_DrawStr(child.u8g2, child.pos.x - u8g2_GetStrWidth(child.u8g2, str), child.pos.y, str);
+  return child;
+}
+
 static inline elm_t elm_utf8(elm_t *parent, vec2_t pos, const char *str)
 {
   elm_t child = elm_child(parent, pos);
@@ -155,14 +228,17 @@ static inline elm_t elm_xbm(elm_t *parent, vec2_t pos, uint16_t w, uint16_t h,
   return child;
 }
 
-static inline elm_t elm_qrcode(elm_t *parent, vec2_t pos, const uint8_t *qrcode, uint8_t border, uint8_t pixel_size)
+static inline elm_t elm_qrcode(elm_t *parent, vec2_t pos,
+                               elm_align_t align,
+                               const uint8_t *qrcode, uint8_t border, uint8_t pixel_size)
 {
-  elm_t child = elm_child(parent, pos);
+
   int size = qrcodegen_getSize(qrcode);
+  int dim = (size * pixel_size) + (2 * border);
+  elm_t child = elm_child_aligned(parent, pos, dim, dim, align);
 
   u8g2_SetDrawColor(child.u8g2, 1);
-  u8g2_DrawBox(child.u8g2, child.pos.x, child.pos.y,
-               (size * pixel_size) + (2 * border), (size * pixel_size) + (2 * border));
+  u8g2_DrawBox(child.u8g2, child.pos.x, child.pos.y, dim, dim);
 
   for (uint8_t y = 0; y < size; y++)
   {
@@ -174,5 +250,56 @@ static inline elm_t elm_qrcode(elm_t *parent, vec2_t pos, const uint8_t *qrcode,
                    pixel_size, pixel_size);
     }
   }
+  return child;
+}
+
+static inline elm_t elm_btn(elm_t *parent, vec2_t pos, const char *label, elm_align_t align, bool *pressed)
+{
+  const uint8_t padding = 3;
+  u8g2_t *u8g2 = parent->u8g2;
+
+  u8g2_SetDrawColor(u8g2, 1);
+  u8g2_SetFont(u8g2, u8g2_font_5x7_mr);
+
+  uint32_t width = u8g2_GetStrWidth(u8g2, label) + padding * 2;
+  uint32_t height = 7 + padding * 2;
+
+  elm_t child = elm_child_aligned(parent, pos, width, height, align);
+
+  elm_rounded_frame(&child, vec2(0, 0), width, height, 3);
+  elm_str(&child, vec2(padding, 7 + padding), label);
+
+  float ratio_l = engine_button_held_ratio(BUTTON_LEFT);
+  float ratio_r = engine_button_held_ratio(BUTTON_RIGHT);
+  float ratio;
+  bool fill_from_right = false;
+  if (ratio_l > ratio_r)
+    ratio = ratio_l;
+  else
+  {
+    ratio = ratio_r;
+    fill_from_right = true;
+  }
+
+  if (ratio > 0.f)
+  {
+    float draw_ratio = ease_out_cubic(ratio);
+    u8g2_SetDrawColor(u8g2, 2);
+    uint16_t fill_width = (uint16_t)((width - 1) * draw_ratio);
+    if (fill_from_right)
+    {
+      u8g2_DrawBox(u8g2, child.pos.x + width - 1 - fill_width, child.pos.y + 1, fill_width, height - 2);
+    }
+    else
+    {
+      u8g2_DrawBox(u8g2, child.pos.x + 1, child.pos.y + 1, fill_width, height - 2);
+    }
+  }
+
+  if (pressed != NULL)
+  {
+    *pressed = ratio >= 1.f;
+  }
+
   return child;
 }

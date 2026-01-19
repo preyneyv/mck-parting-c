@@ -6,6 +6,7 @@
 #include <shared/utils/elm.h>
 #include <shared/utils/timing.h>
 #include <shared/utils/vec.h>
+#include <shared/utils/misc.h>
 
 #include "anim.h"
 #include "apps/apps.h"
@@ -91,7 +92,7 @@ static void read_button(button_t *button, absolute_time_t now)
   }
 }
 
-static void reset_buttons(bool ignore_menu)
+void engine_buttons_reset()
 {
   g_engine.buttons.left.edge = false;
   g_engine.buttons.left.pressed = false;
@@ -102,6 +103,11 @@ static void reset_buttons(bool ignore_menu)
   g_engine.buttons.right.pressed = false;
   g_engine.buttons.right.pressed_at = nil_time;
   g_engine.buttons.right.ignore = true;
+}
+
+static void reset_buttons(bool ignore_menu)
+{
+  engine_buttons_reset();
 
   if (ignore_menu)
   {
@@ -209,12 +215,6 @@ static void menu_change_active(int8_t delta)
   int32_t target_offset = menu_action_y(menu_state.active);
   anim_sys_to(&menu_state.anim.active, target_offset, 150, ANIM_EASE_OUT_CUBIC,
               NULL, NULL);
-}
-
-static inline float ease_out_cubic(float t)
-{
-  float inv = 1.0f - t;
-  return 1.0f - inv * inv * inv;
 }
 
 static void menu_enter()

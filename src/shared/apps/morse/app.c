@@ -113,9 +113,54 @@ typedef struct
     uint32_t letters;
     uint32_t errors;
   } stats;
+
+  leaderboard_qrcode_t qr_code;
 } state_t;
 
+typedef struct
+{
+  uint32_t remaining_s;
+
+  uint32_t letters;
+  uint32_t errors;
+  uint32_t cpm;
+  uint32_t accuracy;
+} stats_t;
+
 static state_t *state;
+
+static stats_t get_stats()
+{
+  uint32_t elapsed_ms = absolute_time_diff_us(state->started_at, get_absolute_time()) / 1000;
+  if (state->finished)
+    elapsed_ms = DURATION_MS;
+
+  uint32_t remaining_ms = DURATION_MS - elapsed_ms;
+  uint32_t remaining_s = remaining_ms / 1000;
+
+  uint32_t letters = state->stats.letters;
+  uint32_t errors = state->stats.errors;
+
+  uint32_t cpm = (letters * 60000) / (elapsed_ms);
+  uint32_t accuracy = (letters + errors) > 0
+                          ? (letters * 100) / (letters + errors)
+                          : 100;
+
+  if (!state->started)
+  {
+    cpm = 0;
+    accuracy = 100;
+    remaining_s = DURATION_MS / 1000;
+  }
+
+  return (stats_t){
+      .remaining_s = remaining_s,
+      .letters = letters,
+      .errors = errors,
+      .cpm = cpm,
+      .accuracy = accuracy,
+  };
+}
 
 static void _generate_morse_for_current_word()
 {
@@ -149,6 +194,8 @@ static void _update_current_word()
   _generate_morse_for_current_word();
 }
 
+static void _finish_game();
+
 static void _start_game()
 {
   if (state != NULL)
@@ -159,8 +206,6 @@ static void _start_game()
 
   state->last_edge_tick = g_engine.tick;
   state->input_len = 0;
-  state->started = true;
-  state->finished = true;
 
   // pick words
   for (uint32_t i = 0; i < WORD_LOOKAHEAD - 1; i++)
@@ -307,6 +352,37 @@ static void tick_results()
 {
 }
 
+static void _finish_game()
+{
+  engine_buttons_reset();
+
+  state->finished = true;
+  audio_synth_enqueue(
+      &g_engine.synth,
+      &(audio_synth_message_t){
+          .type = AUDIO_SYNTH_MESSAGE_NOTE_OFF,
+          .data.note_off = {
+              .voice = 0,
+          },
+      });
+
+  uint8_t stats[8];
+  stats[0] = (uint8_t)(state->stats.letters & 0xFF);
+  stats[1] = (uint8_t)((state->stats.letters >> 8) & 0xFF);
+  stats[2] = (uint8_t)((state->stats.letters >> 16) & 0xFF);
+  stats[3] = (uint8_t)((state->stats.letters >> 24) & 0xFF);
+
+  stats[4] = (uint8_t)(state->stats.errors & 0xFF);
+  stats[5] = (uint8_t)((state->stats.errors >> 8) & 0xFF);
+  stats[6] = (uint8_t)((state->stats.errors >> 16) & 0xFF);
+  stats[7] = (uint8_t)((state->stats.errors >> 24) & 0xFF);
+
+  leaderboard_get_qrcode(
+      1,
+      &stats,
+      sizeof(stats), state->qr_code);
+}
+
 static void tick()
 {
   if (state->finished)
@@ -321,15 +397,7 @@ static void tick()
     uint32_t elapsed_ms = absolute_time_diff_us(state->started_at, get_absolute_time()) / 1000;
     if (state->started && elapsed_ms >= DURATION_MS)
     {
-      state->finished = true;
-      audio_synth_enqueue(
-          &g_engine.synth,
-          &(audio_synth_message_t){
-              .type = AUDIO_SYNTH_MESSAGE_NOTE_OFF,
-              .data.note_off = {
-                  .voice = 0,
-              },
-          });
+      _finish_game();
     }
   }
 }
@@ -444,46 +512,6 @@ static void _frame_current_input(u8g2_t *u8g2, elm_t *root)
   elm_str(root, vec2(128 - 15, 9), "dah");
 }
 
-typedef struct
-{
-  uint32_t remaining_s;
-
-  uint32_t letters;
-  uint32_t errors;
-  uint32_t cpm;
-  uint32_t accuracy;
-} stats_t;
-
-static stats_t get_stats()
-{
-  uint32_t elapsed_ms = absolute_time_diff_us(state->started_at, get_absolute_time()) / 1000;
-  uint32_t remaining_ms = DURATION_MS > elapsed_ms ? DURATION_MS - elapsed_ms : 0;
-  uint32_t remaining_s = remaining_ms / 1000;
-
-  uint32_t letters = state->stats.letters;
-  uint32_t errors = state->stats.errors;
-
-  uint32_t cpm = (letters * 60000) / (elapsed_ms);
-  uint32_t accuracy = (letters + errors) > 0
-                          ? (letters * 100) / (letters + errors)
-                          : 100;
-
-  if (!state->started)
-  {
-    cpm = 0;
-    accuracy = 100;
-    remaining_s = DURATION_MS / 1000;
-  }
-
-  return (stats_t){
-      .remaining_s = remaining_s,
-      .letters = letters,
-      .errors = errors,
-      .cpm = cpm,
-      .accuracy = accuracy,
-  };
-}
-
 static void _frame_stats(u8g2_t *u8g2, elm_t *root)
 {
   stats_t stats = get_stats();
@@ -536,6 +564,18 @@ static void frame_game()
   _frame_stats(u8g2, &ctx);
 }
 
+static void elm_score(elm_t *parent, vec2_t pos, const char *label, const char *value)
+{
+  u8g2_t *u8g2 = parent->u8g2;
+  elm_t child = elm_child(parent, pos);
+
+  u8g2_SetDrawColor(u8g2, 1);
+  u8g2_SetFont(u8g2, u8g2_font_5x7_tr);
+  elm_str(&child, vec2(0, 6), label);
+  u8g2_SetFont(u8g2, u8g2_font_7x14_mr);
+  elm_str(&child, vec2(0, 6 + 14), value);
+}
+
 static void frame_results()
 {
   u8g2_t *u8g2 = display_get_u8g2(&g_engine.display);
@@ -547,33 +587,29 @@ static void frame_results()
   char results_buffer[64];
   stats_t stats = get_stats();
 
-  // const char *text = "HTTPS://PRISM.PREYNEYV.DEV/S/E46488D8E72C0F2E/1/";
+  char stat_buffer[16];
+  snprintf(stat_buffer, sizeof(stat_buffer), "%d", stats.cpm / 5);
+  elm_score(&root, vec2(0, 0), "WPM", stat_buffer);
 
-  // uint8_t qr[qrcodegen_BUFFER_LEN_FOR_VERSION(11)];
-  // uint8_t temp[qrcodegen_BUFFER_LEN_FOR_VERSION(11)];
-  // bool ok = qrcodegen_encodeText(
-  //     text,
-  //     temp,
-  //     qr,
-  //     qrcodegen_Ecc_LOW,
-  //     11,
-  //     11,
-  //     qrcodegen_Mask_AUTO,
-  //     true);
+  snprintf(stat_buffer, sizeof(stat_buffer), "%d", stats.cpm);
+  elm_score(&root, vec2(40, 0), "CPM", stat_buffer);
 
-  // if (!ok)
-  // {
-  //   elm_str(&root, vec2(0, 0), "QR generation failed");
-  //   return;
-  // }
+  snprintf(stat_buffer, sizeof(stat_buffer), "%d", stats.errors);
+  elm_score(&root, vec2(0, 27), "ERR", stat_buffer);
 
-  uint8_t *qr = leaderboard_get_qrcode(
-      1,
-      &stats,
-      sizeof(stats));
+  snprintf(stat_buffer, sizeof(stat_buffer), "%d%%", stats.accuracy);
+  elm_score(&root, vec2(40, 27), "ACC", stat_buffer);
 
   // draw QR code
-  elm_qrcode(&root, vec2(0, 0), qr, 2, 1);
+  elm_qrcode(&root, vec2(128 - 5, 5), ELM_ALIGN_TOP_RIGHT, state->qr_code, 2, 1);
+
+  u8g2_SetFont(u8g2, u8g2_font_5x7_tr);
+  bool pressed;
+  elm_btn(&root, vec2(64, 64), "NEW GAME?", ELM_ALIGN_BOTTOM_CENTER, &pressed);
+  if (pressed)
+  {
+    _start_game();
+  }
 }
 
 static void frame()

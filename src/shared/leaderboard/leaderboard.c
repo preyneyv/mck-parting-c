@@ -7,20 +7,20 @@
 #include "leaderboard.h"
 #include "encoding.h"
 
-// total header bytes: 1 (app_id) + 8 (board_id) + 4 (entry_id) = 13 bytes
+// total header bytes: 1 (app_id) + 8 (board_id) + 4 (entry_id) + 1 (data_len) = 14 bytes
 // plus data for app
-// plus checksum
+// plus checksum (2 bytes)
+// total overhead = 16 bytes
 typedef struct
 {
     uint8_t app_id;
     pico_unique_board_id_t board_id;
     uint32_t entry_id;
+    uint8_t data_len; // max 255 bytes of data
     uint8_t *data;
-    size_t data_len;
 } leaderboard_entry_t;
 
-static uint8_t buffer[qrcodegen_BUFFER_LEN_FOR_VERSION(LEADERBOARD_QR_VERSION)];
-static uint8_t temp[qrcodegen_BUFFER_LEN_FOR_VERSION(LEADERBOARD_QR_VERSION)];
+static leaderboard_qrcode_t temp;
 static char url_buffer[115]; // max len for v4-L qr code in alphanum
 
 static void _pack_leaderboard_entry(leaderboard_entry_t *entry, uint8_t *out_buf, size_t *out_len)
@@ -42,20 +42,24 @@ static void _pack_leaderboard_entry(leaderboard_entry_t *entry, uint8_t *out_buf
     out_buf[offset++] = (entry->entry_id >> 8) & 0xFF;
     out_buf[offset++] = (entry->entry_id) & 0xFF;
 
-    // data [13:13+data_len]
+    // data_len (1 byte)
+    out_buf[offset++] = entry->data_len;
+
+    // data [14:14+data_len]
     for (size_t i = 0; i < entry->data_len; i++)
     {
         out_buf[offset++] = entry->data[i];
     }
-    *out_len = offset;
 
-    // checksum [13+data_len:15+data_len] (2 bytes)
+    // checksum [14+data_len:16+data_len] (2 bytes)
     uint16_t checksum = fletcher16(out_buf, offset);
     out_buf[offset++] = (checksum >> 8) & 0xFF;
     out_buf[offset++] = (checksum) & 0xFF;
+
+    *out_len = offset;
 }
 
-uint8_t *leaderboard_get_qrcode(uint8_t app_id, void *data, size_t data_len)
+bool leaderboard_get_qrcode(uint8_t app_id, void *data, size_t data_len, uint8_t *qrcode)
 {
     pico_unique_board_id_t board_id;
     pico_get_unique_board_id(&board_id);
@@ -67,25 +71,22 @@ uint8_t *leaderboard_get_qrcode(uint8_t app_id, void *data, size_t data_len)
         .data = data,
         .data_len = data_len,
     };
-    printf("Generating leaderboard QR code for app %u, entry ID %u\n", app_id, entry.entry_id);
 
     size_t packed_len = 0;
-    _pack_leaderboard_entry(&entry, buffer, &packed_len);
-    bytes_to_base36(buffer, packed_len, temp, sizeof(temp));
-    printf("b36 %s\n", temp);
-
+    // abuse url buffer for packed data
+    _pack_leaderboard_entry(&entry, url_buffer, &packed_len);
+    // abuse temp buffer for base36 encoding
+    bytes_to_base36(url_buffer, packed_len, temp, sizeof(temp));
+    // construct final url
     snprintf(
         url_buffer, sizeof(url_buffer),
         "%s%s",
         LEADERBOARD_QR_PREFIX,
         (char *)temp);
 
-    printf("url %s\n", url_buffer);
+    printf("[leaderboard] url gen: %s\n", url_buffer);
 
-    bool ok = qrcodegen_encodeText(url_buffer, temp, buffer, qrcodegen_Ecc_LOW, LEADERBOARD_QR_VERSION, LEADERBOARD_QR_VERSION, qrcodegen_Mask_AUTO, true);
-
-    if (!ok)
-        return NULL;
-
-    return buffer;
+    // build final qr code
+    bool ok = qrcodegen_encodeText(url_buffer, temp, qrcode, qrcodegen_Ecc_LOW, LEADERBOARD_QR_VERSION, LEADERBOARD_QR_VERSION, qrcodegen_Mask_AUTO, true);
+    return ok;
 }
