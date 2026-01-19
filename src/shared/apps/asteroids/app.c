@@ -10,6 +10,7 @@
 #include <shared/apps/apps.h>
 #include <shared/config.h>
 #include <shared/engine.h>
+#include <shared/leaderboard/leaderboard.h>
 #include <shared/utils/vec.h>
 
 // --- Tunables ---
@@ -30,7 +31,7 @@ static const float CAMERA_LOOK_DIST_X = 100.0f;   // px
 static const float CAMERA_LOOK_DIST_Y = 90.0f;    // px
 static const float CAMERA_SHAKE_START = 120.0f;   // px/s
 static const float CAMERA_SHAKE_FULL = 200.0f;    // px/s
-static const float CAMERA_SHAKE_MAX = 3.0f;       // px
+static const float CAMERA_SHAKE_MAX = 2.0f;       // px
 static const float CAMERA_CENTER_X = 54.0f;       // px
 static const float CAMERA_CENTER_Y = 32.0f;       // px
 static const float STAR_FIELD_W = 320.0f;
@@ -44,8 +45,6 @@ static const float PATH_SPAWN_START = 140.0f;     // px/s
 static const float PATH_SPAWN_FULL = 200.0f;      // px/s
 static const float PATH_SPAWN_ANGLE = 0.55f;      // rad half-angle cone
 static const float COLLISION_CHECK_RANGE = 40.0f; // px
-
-static const uint32_t RESTART_HOLD_MS = 900;
 
 enum
 {
@@ -98,11 +97,12 @@ typedef struct
     uint32_t last_tick_ms;
     uint32_t elapsed_ms;
     uint32_t next_spawn_at;
-    uint32_t restart_hold_ms;
 
     bool game_over;
-    uint32_t score;
+    bool results_ready;
     float distance;
+
+    leaderboard_qrcode_t qr_code;
 
     vec2f_t stars[STAR_COUNT];
     trail_node_t trail[TRAIL_MAX];
@@ -411,6 +411,32 @@ static void update_trail(uint32_t now_ms, float speed)
         state.trail_count++;
 }
 
+static void finish_game()
+{
+    if (state.results_ready)
+        return;
+
+    engine_buttons_reset();
+    state.game_over = true;
+    state.results_ready = true;
+
+    uint8_t stats[8];
+    uint32_t elapsed_ms = state.elapsed_ms;
+    uint32_t distance = (uint32_t)(state.distance);
+
+    stats[0] = (uint8_t)(elapsed_ms & 0xFF);
+    stats[1] = (uint8_t)((elapsed_ms >> 8) & 0xFF);
+    stats[2] = (uint8_t)((elapsed_ms >> 16) & 0xFF);
+    stats[3] = (uint8_t)((elapsed_ms >> 24) & 0xFF);
+
+    stats[4] = (uint8_t)(distance & 0xFF);
+    stats[5] = (uint8_t)((distance >> 8) & 0xFF);
+    stats[6] = (uint8_t)((distance >> 16) & 0xFF);
+    stats[7] = (uint8_t)((distance >> 24) & 0xFF);
+
+    leaderboard_get_qrcode(2, stats, sizeof(stats), state.qr_code);
+}
+
 static void reset_state()
 {
     memset(&state, 0, sizeof(state));
@@ -422,6 +448,7 @@ static void reset_state()
     state.next_spawn_at = state.last_tick_ms + SPAWN_INTERVAL_BASE_MS;
     init_starfield(state.cam_pos);
     state.last_trail_ms = state.last_tick_ms;
+    state.results_ready = false;
 }
 
 static void spawn_asteroid(uint32_t current_ms)
@@ -597,9 +624,7 @@ static void update_asteroids(float dt_s, uint32_t current_ms)
         ship_triangle(state.pos, state.angle, 1.0f, &nose, &p1, &p2);
         if (circle_triangle_overlap(a->pos, (float)a->r, nose, p1, p2))
         {
-            state.game_over = true;
-            state.score = state.elapsed_ms / 1000;
-            state.restart_hold_ms = 0;
+            finish_game();
             break;
         }
     }
@@ -631,23 +656,12 @@ static void tick()
 
     if (state.game_over)
     {
-        if (BUTTON_PRESSED(BUTTON_LEFT) && BUTTON_PRESSED(BUTTON_RIGHT))
-        {
-            state.restart_hold_ms += dt_ms;
-            if (state.restart_hold_ms >= RESTART_HOLD_MS)
-            {
-                reset_state();
-            }
-        }
-        else
-        {
-            state.restart_hold_ms = 0;
-        }
         return;
     }
 
     update_ship(dt_s, dt_ms);
-    update_trail(now, vec2f_len(state.vel));
+    if (BUTTON_PRESSED(BUTTON_LEFT) && BUTTON_PRESSED(BUTTON_RIGHT))
+        update_trail(now, vec2f_len(state.vel));
 
     float speed = vec2f_len(state.vel);
     float look_ratio = clampf((speed - CAMERA_LOOK_START) / (CAMERA_LOOK_FULL - CAMERA_LOOK_START), 0.0f, 1.0f);
@@ -818,6 +832,44 @@ static void draw_speedometer(u8g2_t *u8g2)
     u8g2_DrawStr(u8g2, cx - (w / 2), cy + r + 2, buf);
 }
 
+static void format_distance(char *buf, size_t len, float distance)
+{
+    if (distance < 1000.0f)
+    {
+        snprintf(buf, len, "%lum", (unsigned long)distance);
+        return;
+    }
+    if (distance < 1000000.0f)
+    {
+        float km = distance / 1000.0f;
+        if (km >= 100.0f)
+        {
+            snprintf(buf, len, "%luk", (unsigned long)(km + 0.5f));
+        }
+        else
+        {
+            uint32_t tens = (uint32_t)(km * 10.0f + 0.5f);
+            uint32_t whole = tens / 10;
+            uint32_t frac = tens % 10;
+            snprintf(buf, len, "%lu.%luk", (unsigned long)whole, (unsigned long)frac);
+        }
+        return;
+    }
+
+    float mm = distance / 1000000.0f;
+    if (mm >= 100.0f)
+    {
+        snprintf(buf, len, "%luM", (unsigned long)(mm + 0.5f));
+    }
+    else
+    {
+        uint32_t tens = (uint32_t)(mm * 10.0f + 0.5f);
+        uint32_t whole = tens / 10;
+        uint32_t frac = tens % 10;
+        snprintf(buf, len, "%lu.%luM", (unsigned long)whole, (unsigned long)frac);
+    }
+}
+
 static void draw_hud(u8g2_t *u8g2)
 {
     elm_t root = elm_root(u8g2, VEC2_Z);
@@ -828,29 +880,46 @@ static void draw_hud(u8g2_t *u8g2)
     snprintf(buf, sizeof(buf), "%lus", (unsigned long)(state.elapsed_ms / 1000));
     elm_rstr(&root, vec2(128, 7), buf);
 
-    snprintf(buf, sizeof(buf), "%lum", (unsigned long)state.distance);
+    format_distance(buf, sizeof(buf), state.distance);
     elm_rstr(&root, vec2(128, 14), buf);
-    // u8g2_DrawStr(u8g2, 0, 14, buf);
 
     draw_speedometer(u8g2);
 }
 
-static void draw_game_over(u8g2_t *u8g2)
+static void elm_score(elm_t *parent, vec2_t pos, const char *label, const char *value)
 {
+    u8g2_t *u8g2 = parent->u8g2;
+    elm_t child = elm_child(parent, pos);
+
     u8g2_SetDrawColor(u8g2, 1);
-    u8g2_SetFont(u8g2, u8g2_font_6x10_tf);
-    const char *msg = "GAME OVER";
-    uint16_t w = u8g2_GetStrWidth(u8g2, msg);
-    u8g2_DrawStr(u8g2, (DISP_WIDTH - w) / 2, 20, msg);
-
     u8g2_SetFont(u8g2, u8g2_font_5x7_tr);
-    char buf[24];
-    snprintf(buf, sizeof(buf), "Score: %lu", (unsigned long)state.score);
-    u8g2_DrawStr(u8g2, 20, 36, buf);
+    elm_str(&child, vec2(0, 6), label);
+    u8g2_SetFont(u8g2, u8g2_font_7x14_mr);
+    elm_str(&child, vec2(0, 6 + 14), value);
+}
 
-    const char *hint = "Hold both";
-    w = u8g2_GetStrWidth(u8g2, hint);
-    u8g2_DrawStr(u8g2, (DISP_WIDTH - w) / 2, 52, hint);
+static void draw_results(u8g2_t *u8g2)
+{
+    elm_t root = elm_root(u8g2, VEC2_Z);
+
+    u8g2_SetDrawColor(u8g2, 1);
+    u8g2_SetFont(u8g2, u8g2_font_7x14_mr);
+    elm_str(&root, vec2(0, 12), "RESULTS");
+    elm_qrcode(&root, vec2(128 - 5, 5), ELM_ALIGN_TOP_RIGHT, state.qr_code, 2, 1);
+
+    char buf[24];
+    snprintf(buf, sizeof(buf), "%lus", (unsigned long)(state.elapsed_ms / 1000));
+    elm_score(&root, vec2(0, 20), "TIME", buf);
+
+    format_distance(buf, sizeof(buf), state.distance);
+    elm_score(&root, vec2(36, 20), "DIST", buf);
+
+    bool pressed = false;
+    elm_btn(&root, vec2(64, 64), "PLAY AGAIN?", ELM_ALIGN_BOTTOM_CENTER, &pressed);
+    if (pressed)
+    {
+        reset_state();
+    }
 }
 
 static void frame()
@@ -858,15 +927,18 @@ static void frame()
     u8g2_t *u8g2 = display_get_u8g2(&g_engine.display);
     u8g2_SetDrawColor(u8g2, 1);
 
-    draw_starfield(u8g2);
-    draw_trail(u8g2);
-    draw_asteroids(u8g2);
-    draw_ship(u8g2);
-    draw_hud(u8g2);
-
     if (state.game_over)
     {
-        draw_game_over(u8g2);
+
+        draw_results(u8g2);
+    }
+    else
+    {
+        draw_starfield(u8g2);
+        draw_trail(u8g2);
+        draw_asteroids(u8g2);
+        draw_ship(u8g2);
+        draw_hud(u8g2);
     }
 }
 
