@@ -39,11 +39,13 @@ endif()
 
 # --- shared dependencies ---
 add_subdirectory(lib/u8g2)
+add_subdirectory(lib/qrcodegen)
 
 # --- shared lib ---
 set(SHARED_SOURCES
     src/shared/audio/buffer.c
     src/shared/audio/synth.c
+    src/shared/leaderboard/leaderboard.c
     src/shared/anim.c
     src/shared/engine.c
     src/shared/apps/_launcher/app.c
@@ -56,8 +58,11 @@ add_library(shared STATIC ${SHARED_SOURCES})
 target_include_directories(shared PRIVATE ${CMAKE_CURRENT_LIST_DIR}/src)
 target_link_libraries(shared PUBLIC 
     u8g2 
+    qrcodegen
     m 
-    pico_stdlib 
+    pico_stdlib  
+    pico_unique_id
+    pico_rand
     hardware_divider 
     hardware_watchdog
 )

@@ -6,82 +6,97 @@
 #include <shared/utils/vec.h>
 #include <u8g2.h>
 
-typedef struct {
+#include <qrcodegen.h>
+
+typedef struct
+{
   vec2_t pos;
   u8g2_t *u8g2;
 } elm_t;
 
-static inline elm_t elm_root(u8g2_t *u8g2, vec2_t pos) {
+static inline elm_t elm_root(u8g2_t *u8g2, vec2_t pos)
+{
   return (elm_t){.pos = pos, .u8g2 = u8g2};
 }
 
-static inline elm_t elm_child(elm_t *parent, vec2_t pos) {
+static inline elm_t elm_child(elm_t *parent, vec2_t pos)
+{
   return (elm_t){.pos = vec2_add(parent->pos, pos), .u8g2 = parent->u8g2};
 }
 
 static inline elm_t elm_arc(elm_t *parent, vec2_t pos, uint16_t radius,
-                            uint8_t start, uint8_t end) {
+                            uint8_t start, uint8_t end)
+{
   elm_t child = elm_child(parent, pos);
   u8g2_DrawArc(child.u8g2, child.pos.x, child.pos.y, radius, start, end);
   return child;
 }
 
-static inline elm_t elm_pixel(elm_t *parent, vec2_t pos) {
+static inline elm_t elm_pixel(elm_t *parent, vec2_t pos)
+{
   elm_t child = elm_child(parent, pos);
   u8g2_DrawPixel(child.u8g2, child.pos.x, child.pos.y);
   return child;
 }
 
-static inline elm_t elm_line(elm_t *parent, vec2_t p0, vec2_t p1) {
+static inline elm_t elm_line(elm_t *parent, vec2_t p0, vec2_t p1)
+{
   elm_t child = elm_child(parent, p0);
   u8g2_DrawLine(child.u8g2, child.pos.x, child.pos.y,
                 child.pos.x + (p1.x - p0.x), child.pos.y + (p1.y - p0.y));
   return child;
 }
 
-static inline elm_t elm_box(elm_t *parent, vec2_t pos, uint16_t w, uint16_t h) {
+static inline elm_t elm_box(elm_t *parent, vec2_t pos, uint16_t w, uint16_t h)
+{
   elm_t child = elm_child(parent, pos);
   u8g2_DrawBox(child.u8g2, child.pos.x, child.pos.y, w, h);
   return child;
 }
 
 static inline elm_t elm_frame(elm_t *parent, vec2_t pos, uint16_t w,
-                              uint16_t h) {
+                              uint16_t h)
+{
   elm_t child = elm_child(parent, pos);
   u8g2_DrawFrame(child.u8g2, child.pos.x, child.pos.y, w, h);
   return child;
 }
 
 static inline elm_t elm_circle(elm_t *parent, vec2_t pos, uint16_t r,
-                               uint8_t opt) {
+                               uint8_t opt)
+{
   elm_t child = elm_child(parent, pos);
   u8g2_DrawCircle(child.u8g2, child.pos.x, child.pos.y, r, opt);
   return child;
 }
 
 static inline elm_t elm_disc(elm_t *parent, vec2_t pos, uint16_t r,
-                             uint8_t opt) {
+                             uint8_t opt)
+{
   elm_t child = elm_child(parent, pos);
   u8g2_DrawDisc(child.u8g2, child.pos.x, child.pos.y, r, opt);
   return child;
 }
 
 static inline elm_t elm_ellipse(elm_t *parent, vec2_t pos, uint16_t rx,
-                                uint16_t ry, uint8_t opt) {
+                                uint16_t ry, uint8_t opt)
+{
   elm_t child = elm_child(parent, pos);
   u8g2_DrawEllipse(child.u8g2, child.pos.x, child.pos.y, rx, ry, opt);
   return child;
 }
 
 static inline elm_t elm_filled_ellipse(elm_t *parent, vec2_t pos, uint16_t rx,
-                                       uint16_t ry, uint8_t opt) {
+                                       uint16_t ry, uint8_t opt)
+{
   elm_t child = elm_child(parent, pos);
   u8g2_DrawFilledEllipse(child.u8g2, child.pos.x, child.pos.y, rx, ry, opt);
   return child;
 }
 
 static inline elm_t elm_triangle(elm_t *parent, vec2_t p0, vec2_t p1,
-                                 vec2_t p2) {
+                                 vec2_t p2)
+{
   elm_t child = elm_child(parent, p0);
   u8g2_DrawTriangle(child.u8g2, child.pos.x, child.pos.y,
                     child.pos.x + (p1.x - p0.x), child.pos.y + (p1.y - p0.y),
@@ -90,45 +105,74 @@ static inline elm_t elm_triangle(elm_t *parent, vec2_t p0, vec2_t p1,
 }
 
 static inline elm_t elm_rounded_box(elm_t *parent, vec2_t pos, uint16_t w,
-                                    uint16_t h, uint16_t r) {
+                                    uint16_t h, uint16_t r)
+{
   elm_t child = elm_child(parent, pos);
   u8g2_DrawRBox(child.u8g2, child.pos.x, child.pos.y, w, h, r);
   return child;
 }
 
 static inline elm_t elm_rounded_frame(elm_t *parent, vec2_t pos, uint16_t w,
-                                      uint16_t h, uint16_t r) {
+                                      uint16_t h, uint16_t r)
+{
   elm_t child = elm_child(parent, pos);
   u8g2_DrawRFrame(child.u8g2, child.pos.x, child.pos.y, w, h, r);
   return child;
 }
 
-static inline elm_t elm_str(elm_t *parent, vec2_t pos, const char *str) {
+static inline elm_t elm_str(elm_t *parent, vec2_t pos, const char *str)
+{
   elm_t child = elm_child(parent, pos);
   u8g2_DrawStr(child.u8g2, child.pos.x, child.pos.y, str);
   return child;
 }
 
-static inline elm_t elm_utf8(elm_t *parent, vec2_t pos, const char *str) {
+static inline elm_t elm_utf8(elm_t *parent, vec2_t pos, const char *str)
+{
   elm_t child = elm_child(parent, pos);
   u8g2_DrawUTF8(child.u8g2, child.pos.x, child.pos.y, str);
   return child;
 }
-static inline elm_t elm_vline(elm_t *parent, vec2_t pos, uint16_t h) {
+static inline elm_t elm_vline(elm_t *parent, vec2_t pos, uint16_t h)
+{
   elm_t child = elm_child(parent, pos);
   u8g2_DrawVLine(child.u8g2, child.pos.x, child.pos.y, h);
   return child;
 }
 
-static inline elm_t elm_hline(elm_t *parent, vec2_t pos, uint16_t w) {
+static inline elm_t elm_hline(elm_t *parent, vec2_t pos, uint16_t w)
+{
   elm_t child = elm_child(parent, pos);
   u8g2_DrawHLine(child.u8g2, child.pos.x, child.pos.y, w);
   return child;
 }
 
 static inline elm_t elm_xbm(elm_t *parent, vec2_t pos, uint16_t w, uint16_t h,
-                            const uint8_t *bitmap) {
+                            const uint8_t *bitmap)
+{
   elm_t child = elm_child(parent, pos);
   u8g2_DrawXBM(child.u8g2, child.pos.x, child.pos.y, w, h, bitmap);
+  return child;
+}
+
+static inline elm_t elm_qrcode(elm_t *parent, vec2_t pos, const uint8_t *qrcode, uint8_t border, uint8_t pixel_size)
+{
+  elm_t child = elm_child(parent, pos);
+  int size = qrcodegen_getSize(qrcode);
+
+  u8g2_SetDrawColor(child.u8g2, 1);
+  u8g2_DrawBox(child.u8g2, child.pos.x, child.pos.y,
+               (size * pixel_size) + (2 * border), (size * pixel_size) + (2 * border));
+
+  for (uint8_t y = 0; y < size; y++)
+  {
+    for (uint8_t x = 0; x < size; x++)
+    {
+      bool filled = qrcodegen_getModule(qrcode, x, y);
+      u8g2_SetDrawColor(child.u8g2, filled ? 0 : 1);
+      u8g2_DrawBox(child.u8g2, border + child.pos.x + (x * pixel_size), border + child.pos.y + (y * pixel_size),
+                   pixel_size, pixel_size);
+    }
+  }
   return child;
 }

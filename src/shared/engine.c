@@ -10,7 +10,6 @@
 #include "anim.h"
 #include "apps/apps.h"
 #include "engine.h"
-
 // #define DEBUG_FPS
 
 // global engine instance
@@ -533,6 +532,7 @@ void engine_set_app(app_t *app)
   // reset audio synth
   audio_synth_panic(&g_engine.synth);
   audio_synth_reset_voices(&g_engine.synth);
+
   // seed based on time
   srand(to_ms_since_boot(get_absolute_time()));
 

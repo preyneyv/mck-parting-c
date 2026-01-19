@@ -4,6 +4,7 @@
 #include <shared/apps/apps.h>
 #include <shared/utils/elm.h>
 #include <shared/engine.h>
+#include <shared/leaderboard/leaderboard.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -158,8 +159,8 @@ static void _start_game()
 
   state->last_edge_tick = g_engine.tick;
   state->input_len = 0;
-  state->started = false;
-  state->finished = false;
+  state->started = true;
+  state->finished = true;
 
   // pick words
   for (uint32_t i = 0; i < WORD_LOOKAHEAD - 1; i++)
@@ -186,7 +187,7 @@ static void enter()
   _start_game();
 }
 
-static void tick()
+static void tick_game()
 {
   uint32_t dt = g_engine.tick - state->last_edge_tick;
   if (BUTTON_KEYDOWN(BUTTON_LEFT))
@@ -302,6 +303,37 @@ static void tick()
   }
 }
 
+static void tick_results()
+{
+}
+
+static void tick()
+{
+  if (state->finished)
+  {
+    tick_results();
+  }
+  else
+  {
+    tick_game();
+
+    // check for time up
+    uint32_t elapsed_ms = absolute_time_diff_us(state->started_at, get_absolute_time()) / 1000;
+    if (state->started && elapsed_ms >= DURATION_MS)
+    {
+      state->finished = true;
+      audio_synth_enqueue(
+          &g_engine.synth,
+          &(audio_synth_message_t){
+              .type = AUDIO_SYNTH_MESSAGE_NOTE_OFF,
+              .data.note_off = {
+                  .voice = 0,
+              },
+          });
+    }
+  }
+}
+
 static void _frame_words(u8g2_t *u8g2, elm_t *root)
 {
   // draw first word
@@ -412,7 +444,17 @@ static void _frame_current_input(u8g2_t *u8g2, elm_t *root)
   elm_str(root, vec2(128 - 15, 9), "dah");
 }
 
-static void _frame_stats(u8g2_t *u8g2, elm_t *root)
+typedef struct
+{
+  uint32_t remaining_s;
+
+  uint32_t letters;
+  uint32_t errors;
+  uint32_t cpm;
+  uint32_t accuracy;
+} stats_t;
+
+static stats_t get_stats()
 {
   uint32_t elapsed_ms = absolute_time_diff_us(state->started_at, get_absolute_time()) / 1000;
   uint32_t remaining_ms = DURATION_MS > elapsed_ms ? DURATION_MS - elapsed_ms : 0;
@@ -421,17 +463,30 @@ static void _frame_stats(u8g2_t *u8g2, elm_t *root)
   uint32_t letters = state->stats.letters;
   uint32_t errors = state->stats.errors;
 
-  uint32_t wpm = (letters * 60000) / (elapsed_ms);
+  uint32_t cpm = (letters * 60000) / (elapsed_ms);
   uint32_t accuracy = (letters + errors) > 0
                           ? (letters * 100) / (letters + errors)
                           : 100;
 
   if (!state->started)
   {
-    wpm = 0;
+    cpm = 0;
     accuracy = 100;
     remaining_s = DURATION_MS / 1000;
   }
+
+  return (stats_t){
+      .remaining_s = remaining_s,
+      .letters = letters,
+      .errors = errors,
+      .cpm = cpm,
+      .accuracy = accuracy,
+  };
+}
+
+static void _frame_stats(u8g2_t *u8g2, elm_t *root)
+{
+  stats_t stats = get_stats();
 
   u8g2_SetDrawColor(u8g2, 1);
   u8g2_SetFont(u8g2, u8g2_font_7x14_mr);
@@ -439,16 +494,16 @@ static void _frame_stats(u8g2_t *u8g2, elm_t *root)
   char stats_buffer[64];
 
   elm_t ctx = elm_child(root, vec2(0, 0));
-  snprintf(stats_buffer, sizeof(stats_buffer), "%d", wpm);
+  snprintf(stats_buffer, sizeof(stats_buffer), "%d", stats.cpm / 5);
   elm_str(&ctx, vec2(0, 0), stats_buffer);
 
-  snprintf(stats_buffer, sizeof(stats_buffer), "%d", errors);
+  snprintf(stats_buffer, sizeof(stats_buffer), "%d", stats.errors);
   elm_str(&ctx, vec2(28 + 5, 0), stats_buffer);
 
-  snprintf(stats_buffer, sizeof(stats_buffer), "%3d%%", accuracy);
+  snprintf(stats_buffer, sizeof(stats_buffer), "%3d%%", stats.accuracy);
   elm_str(&ctx, vec2(100 - 28 - 8, 0), stats_buffer);
 
-  snprintf(stats_buffer, sizeof(stats_buffer), "%3ds", remaining_s);
+  snprintf(stats_buffer, sizeof(stats_buffer), "%3ds", stats.remaining_s);
   elm_str(&ctx, vec2(100, 0), stats_buffer);
 
   u8g2_SetFont(u8g2, u8g2_font_5x7_tr);
@@ -459,7 +514,7 @@ static void _frame_stats(u8g2_t *u8g2, elm_t *root)
   elm_str(&ctx, vec2(128 - 20, 0), "TIME");
 }
 
-static void frame()
+static void frame_game()
 {
   u8g2_t *u8g2 = display_get_u8g2(&g_engine.display);
   elm_t root = elm_root(u8g2, VEC2_Z);
@@ -479,6 +534,58 @@ static void frame()
 
   ctx = elm_child(&root, vec2(0, 64 - 8));
   _frame_stats(u8g2, &ctx);
+}
+
+static void frame_results()
+{
+  u8g2_t *u8g2 = display_get_u8g2(&g_engine.display);
+  elm_t root = elm_root(u8g2, VEC2_Z);
+
+  u8g2_SetDrawColor(u8g2, 1);
+  u8g2_SetFont(u8g2, u8g2_font_7x14_mr);
+
+  char results_buffer[64];
+  stats_t stats = get_stats();
+
+  // const char *text = "HTTPS://PRISM.PREYNEYV.DEV/S/E46488D8E72C0F2E/1/";
+
+  // uint8_t qr[qrcodegen_BUFFER_LEN_FOR_VERSION(11)];
+  // uint8_t temp[qrcodegen_BUFFER_LEN_FOR_VERSION(11)];
+  // bool ok = qrcodegen_encodeText(
+  //     text,
+  //     temp,
+  //     qr,
+  //     qrcodegen_Ecc_LOW,
+  //     11,
+  //     11,
+  //     qrcodegen_Mask_AUTO,
+  //     true);
+
+  // if (!ok)
+  // {
+  //   elm_str(&root, vec2(0, 0), "QR generation failed");
+  //   return;
+  // }
+
+  uint8_t *qr = leaderboard_get_qrcode(
+      1,
+      &stats,
+      sizeof(stats));
+
+  // draw QR code
+  elm_qrcode(&root, vec2(0, 0), qr, 2, 1);
+}
+
+static void frame()
+{
+  if (state->finished)
+  {
+    frame_results();
+  }
+  else
+  {
+    frame_game();
+  }
 
   leds_set_all(&g_engine.leds, (color_t){.hex = 0x00ff00});
 }

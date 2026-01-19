@@ -21,6 +21,7 @@
 #include <pico/multicore.h>
 #include <pico/runtime_init.h>
 #include <pico/stdlib.h>
+#include <pico/rand.h>
 
 #include <shared/engine.h>
 #include <shared/utils/timing.h>
@@ -28,14 +29,16 @@
 #include "audio.h"
 #include "config.h"
 
-void core1_main() {
+void core1_main()
+{
   audio_playback_init();
   audio_playback_run_forever(&g_engine.synth);
 }
 
 void core0_main() { engine_run_forever(); }
 
-void engine_buttons_init() {
+void engine_buttons_init()
+{
   gpio_init(BUTTON_PIN_L);
   gpio_set_dir(BUTTON_PIN_L, GPIO_IN);
   gpio_pull_up(BUTTON_PIN_L);
@@ -49,9 +52,11 @@ void engine_buttons_init() {
   gpio_pull_up(BUTTON_PIN_M);
 }
 
-bool engine_button_read(button_id_t button_id) {
+bool engine_button_read(button_id_t button_id)
+{
   uint gpio;
-  switch (button_id) {
+  switch (button_id)
+  {
   case BUTTON_LEFT:
     gpio = BUTTON_PIN_L;
     break;
@@ -65,7 +70,8 @@ bool engine_button_read(button_id_t button_id) {
   return 1 - gpio_get(gpio); // active low
 }
 
-void measure_freqs(void) {
+void measure_freqs(void)
+{
   uint f_pll_sys =
       frequency_count_khz(CLOCKS_FC0_SRC_VALUE_PLL_SYS_CLKSRC_PRIMARY);
   uint f_pll_usb =
@@ -95,14 +101,16 @@ void measure_freqs(void) {
 
 static critical_section_t sleep_critical_section;
 
-inline static void rosc_write(io_rw_32 *addr, uint32_t value) {
+inline static void rosc_write(io_rw_32 *addr, uint32_t value)
+{
   hw_clear_bits(&rosc_hw->status, ROSC_STATUS_BADWRITE_BITS);
   assert(!(rosc_hw->status & ROSC_STATUS_BADWRITE_BITS));
   *addr = value;
   assert(!(rosc_hw->status & ROSC_STATUS_BADWRITE_BITS));
 }
 
-void engine_sleep_until_interrupt() {
+void engine_sleep_until_interrupt()
+{
   critical_section_enter_blocking(&sleep_critical_section);
   sleep_ms(10);
 
@@ -113,10 +121,13 @@ void engine_sleep_until_interrupt() {
   uint src_hz;
   uint clk_ref_src;
 
-  if (use_xosc) {
+  if (use_xosc)
+  {
     src_hz = XOSC_HZ;
     clk_ref_src = CLOCKS_CLK_REF_CTRL_SRC_VALUE_XOSC_CLKSRC;
-  } else {
+  }
+  else
+  {
     src_hz = 6500 * KHZ;
     clk_ref_src = CLOCKS_CLK_REF_CTRL_SRC_VALUE_ROSC_CLKSRC_PH;
   }
@@ -135,7 +146,8 @@ void engine_sleep_until_interrupt() {
   pll_deinit(pll_usb);
 
   // kill the unused oscillator
-  if (use_xosc) {
+  if (use_xosc)
+  {
     // disable rosc
     uint32_t tmp = rosc_hw->ctrl;
     tmp &= (~ROSC_CTRL_ENABLE_BITS);
@@ -144,7 +156,9 @@ void engine_sleep_until_interrupt() {
     // Wait for stable to go away
     while (rosc_hw->status & ROSC_STATUS_STABLE_BITS)
       ;
-  } else {
+  }
+  else
+  {
 
     xosc_disable();
   }
@@ -156,9 +170,12 @@ void engine_sleep_until_interrupt() {
   gpio_set_dormant_irq_enabled(BUTTON_PIN_R, event, true);
   gpio_set_dormant_irq_enabled(BUTTON_PIN_M, event, true);
 
-  if (use_xosc) {
+  if (use_xosc)
+  {
     xosc_dormant();
-  } else {
+  }
+  else
+  {
     rosc_write(&rosc_hw->dormant, ROSC_DORMANT_VALUE_DORMANT);
     while (!(rosc_hw->status & ROSC_STATUS_STABLE_BITS))
       ;
@@ -187,7 +204,8 @@ void engine_sleep_until_interrupt() {
   critical_section_exit(&sleep_critical_section);
 }
 
-int main() {
+int main()
+{
   // hack to limit power draw until after usb stack is initialized
   // since macos doesn't like it when the usb device draws too much power
   // immediately.
@@ -200,6 +218,9 @@ int main() {
   // set clock for audio and LED timing reasons
   set_sys_clock_hz(SYS_CLOCK_HZ, true);
   stdio_init_all();
+
+  // initialize rng
+  get_rand_32();
 
   printf("prism v1\n");
   critical_section_init(&sleep_critical_section);
