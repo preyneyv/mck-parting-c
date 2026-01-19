@@ -1,3 +1,5 @@
+// todo: pause / resume for timer
+
 #include <ctype.h>
 #include <shared/apps/apps.h>
 #include <shared/utils/elm.h>
@@ -376,31 +378,38 @@ static void _frame_target_morse(u8g2_t *u8g2, elm_t *root)
 static void _frame_current_input(u8g2_t *u8g2, elm_t *root)
 {
   u8g2_SetDrawColor(u8g2, 1);
+  u8g2_SetFont(u8g2, u8g2_font_5x7_tr);
+
+  elm_t ctx = elm_child(root, vec2(33, 0));
 
   uint32_t dt = g_engine.tick - state->last_edge_tick;
   bool pressed = BUTTON_PRESSED(BUTTON_RIGHT);
 
   char draft = dt > 2 * state->T ? '-' : '.';
-  elm_frame(root, vec2(0, 7), 61, 4);
+  // elm_frame(&ctx, vec2(0, 4), 61, 4);
+  elm_hline(&ctx, vec2(0, 6), 61);
   if (pressed)
   {
     uint32_t width = (dt * 61) / (3 * state->T);
     if (width > 61)
       width = 61;
-    elm_box(root, vec2(0, 7), width, 4);
+    elm_box(&ctx, vec2(0, 5), width, 3);
   }
 
-  elm_triangle(root, vec2(28, 3), vec2(30, 6), vec2(33, 3));
+  elm_triangle(&ctx, vec2(28, 2), vec2(30, 5), vec2(33, 2));
 
   if (pressed && draft == '.')
-    elm_disc(root, vec2(2, 2), 2, U8G2_DRAW_ALL);
+    elm_disc(&ctx, vec2(-10, 6), 2, U8G2_DRAW_ALL);
   else
-    elm_circle(root, vec2(2, 2), 2, U8G2_DRAW_ALL);
+    elm_circle(&ctx, vec2(-10, 6), 2, U8G2_DRAW_ALL);
 
   if (pressed && draft == '-')
-    elm_rounded_box(root, vec2(49, 0), 12, 5, 1);
+    elm_rounded_box(&ctx, vec2(61 + 4, 4), 12, 5, 1);
   else
-    elm_rounded_frame(root, vec2(49, 0), 12, 5, 1);
+    elm_rounded_frame(&ctx, vec2(61 + 4, 4), 12, 5, 1);
+
+  elm_str(root, vec2(0, 9), "dit");
+  elm_str(root, vec2(128 - 15, 9), "dah");
 }
 
 static void _frame_stats(u8g2_t *u8g2, elm_t *root)
@@ -463,7 +472,7 @@ static void frame()
 
   elm_hline(&root, vec2(0, 27), 128);
 
-  ctx = elm_child(&root, vec2(33, 30));
+  ctx = elm_child(&root, vec2(0, 29));
   _frame_current_input(u8g2, &ctx);
 
   elm_hline(&root, vec2(0, 43), 128);
