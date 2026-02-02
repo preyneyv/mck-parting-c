@@ -40,7 +40,7 @@ static const uint32_t TRAIL_INTERVAL_MS = 60;
 static const float TRAIL_START_SPEED = 80.0f; // px/s
 static const float TRAIL_FULL_SPEED = 200.0f; // px/s
 static const uint32_t TRAIL_TTL_MS = 700;
-static const float TRAIL_DRIFT_SCALE = 0.25f;     // fraction of ship speed
+static const float TRAIL_DRIFT_SCALE = 0.f;       // fraction of ship speed
 static const float PATH_SPAWN_START = 140.0f;     // px/s
 static const float PATH_SPAWN_FULL = 200.0f;      // px/s
 static const float PATH_SPAWN_ANGLE = 0.55f;      // rad half-angle cone
@@ -62,10 +62,6 @@ static const uint32_t ASTEROID_TTL_MAX_MS = 12000;
 static const uint32_t SPAWN_INTERVAL_BASE_MS = 1600;
 static const uint32_t SPAWN_INTERVAL_MIN_MS = 400;
 static const uint32_t SPAWN_INTERVAL_DECAY_PER_SEC = 30; // interval reduction each second
-
-#ifndef M_PI
-#define M_PI 3.14159265358979323846
-#endif
 
 typedef struct
 {

@@ -608,6 +608,7 @@ static void frame_results()
   elm_btn(&root, vec2(64, 64), "NEW GAME?", ELM_ALIGN_BOTTOM_CENTER, &pressed);
   if (pressed)
   {
+    engine_buttons_reset();
     _start_game();
   }
 }
