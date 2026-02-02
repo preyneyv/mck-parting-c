@@ -22,6 +22,8 @@
 #include <pico/runtime_init.h>
 #include <pico/stdlib.h>
 #include <pico/rand.h>
+#include <bsp/board_api.h>
+#include <tusb.h>
 
 #include <shared/engine.h>
 #include <shared/utils/timing.h>
@@ -204,7 +206,7 @@ void engine_sleep_until_interrupt()
   critical_section_exit(&sleep_critical_section);
 }
 
-int main()
+int main_real()
 {
   // hack to limit power draw until after usb stack is initialized
   // since macos doesn't like it when the usb device draws too much power
@@ -233,4 +235,14 @@ int main()
   // start main core
   core0_main();
   return 0;
+}
+
+int main()
+{
+  stdio_init_all();
+  while (1)
+  {
+    printf("hello world\n");
+    sleep_ms(1000);
+  }
 }

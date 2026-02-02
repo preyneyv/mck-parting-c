@@ -136,7 +136,16 @@ else()
         src/rp2/audio.c
         src/rp2/peripheral.c
         src/rp2/leds.c
+        src/rp2/usb_descriptors.c
     )
+
+    target_compile_definitions(mck-parting-c PUBLIC
+        PICO_STDIO_USB_ENABLE_RESET_VIA_VENDOR_INTERFACE=1
+        PICO_STDIO_USB_ENABLE_RESET_VIA_BAUD_RATE=1
+        PICO_STDIO_USB_ENABLE_IRQ_BACKGROUND_TASK=1
+        PICO_STDIO_USB_ENABLE_TINYUSB_INIT=1
+    )
+
     target_link_libraries(mck-parting-c PRIVATE
         shared
         hardware_adc
@@ -150,8 +159,11 @@ else()
         hardware_sync
         pico_multicore
         pico_stdlib
+        tinyusb_device
+        tinyusb_board
     )
     target_include_directories(mck-parting-c PRIVATE ${CMAKE_CURRENT_LIST_DIR}/src)
+
     pico_generate_pio_header(mck-parting-c ${CMAKE_CURRENT_LIST_DIR}/src/rp2/audio.pio)    
     pico_generate_pio_header(mck-parting-c ${CMAKE_CURRENT_LIST_DIR}/src/rp2/leds.pio)    
 
