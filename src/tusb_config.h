@@ -56,4 +56,13 @@
 #define CFG_TUD_VENDOR_TX_BUFSIZE (256)
 #endif
 
+// Add a MIDI interface
+#define CFG_TUD_MIDI (1)
+#ifndef CFG_TUD_MIDI_RX_BUFSIZE
+#define CFG_TUD_MIDI_RX_BUFSIZE (TUD_OPT_HIGH_SPEED ? 512 : 64)
+#endif
+#ifndef CFG_TUD_MIDI_TX_BUFSIZE
+#define CFG_TUD_MIDI_TX_BUFSIZE (TUD_OPT_HIGH_SPEED ? 512 : 64)
+#endif
+
 #endif

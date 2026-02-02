@@ -43,10 +43,11 @@
 #endif
 
 #define TUD_RPI_RESET_DESC_LEN 9
+
 #if !PICO_STDIO_USB_ENABLE_RESET_VIA_VENDOR_INTERFACE
-#define USBD_DESC_LEN (TUD_CONFIG_DESC_LEN + TUD_CDC_DESC_LEN)
+#define USBD_DESC_LEN (TUD_CONFIG_DESC_LEN + TUD_CDC_DESC_LEN + TUD_MIDI_DESC_LEN)
 #else
-#define USBD_DESC_LEN (TUD_CONFIG_DESC_LEN + TUD_CDC_DESC_LEN + TUD_RPI_RESET_DESC_LEN)
+#define USBD_DESC_LEN (TUD_CONFIG_DESC_LEN + TUD_CDC_DESC_LEN + TUD_MIDI_DESC_LEN + TUD_RPI_RESET_DESC_LEN)
 #endif
 #if !PICO_STDIO_USB_DEVICE_SELF_POWERED
 #define USBD_CONFIGURATION_DESCRIPTOR_ATTRIBUTE (0)
@@ -56,12 +57,14 @@
 #define USBD_MAX_POWER_MA (1)
 #endif
 
-#define USBD_ITF_CDC (0) // needs 2 interfaces
+#define USBD_ITF_CDC (0) // cdc uses: 0, 1
 #if !PICO_STDIO_USB_ENABLE_RESET_VIA_VENDOR_INTERFACE
-#define USBD_ITF_MAX (2)
+#define USBD_ITF_MIDI (2) // midi uses: 2, 3
+#define USBD_ITF_MAX (4)
 #else
 #define USBD_ITF_RPI_RESET (2)
-#define USBD_ITF_MAX (3)
+#define USBD_ITF_MIDI (3) // midi uses: 3, 4
+#define USBD_ITF_MAX (5)
 #endif
 
 #define USBD_CDC_EP_CMD (0x81)
@@ -70,12 +73,17 @@
 #define USBD_CDC_CMD_MAX_SIZE (8)
 #define USBD_CDC_IN_OUT_MAX_SIZE (64)
 
+#define USBD_MIDI_EP_OUT (0x03)
+#define USBD_MIDI_EP_IN (0x83)
+#define USBD_MIDI_EP_SIZE (64)
+
 #define USBD_STR_0 (0x00)
 #define USBD_STR_MANUF (0x01)
 #define USBD_STR_PRODUCT (0x02)
 #define USBD_STR_SERIAL (0x03)
 #define USBD_STR_CDC (0x04)
-#define USBD_STR_RPI_RESET (0x05)
+#define USBD_STR_MIDI (0x05)
+#define USBD_STR_RPI_RESET (0x06)
 
 // Note: descriptors returned from callbacks must exist long enough for transfer to complete
 
@@ -118,6 +126,8 @@ static const uint8_t usbd_desc_cfg[USBD_DESC_LEN] = {
 #if PICO_STDIO_USB_ENABLE_RESET_VIA_VENDOR_INTERFACE
     TUD_RPI_RESET_DESCRIPTOR(USBD_ITF_RPI_RESET, USBD_STR_RPI_RESET)
 #endif
+
+        TUD_MIDI_DESCRIPTOR(USBD_ITF_MIDI, USBD_STR_MIDI, USBD_MIDI_EP_OUT, USBD_MIDI_EP_IN, USBD_MIDI_EP_SIZE),
 };
 
 static char usbd_serial_str[PICO_UNIQUE_BOARD_ID_SIZE_BYTES * 2 + 1];
@@ -127,6 +137,7 @@ static const char *const usbd_desc_str[] = {
     [USBD_STR_PRODUCT] = USBD_PRODUCT,
     [USBD_STR_SERIAL] = usbd_serial_str,
     [USBD_STR_CDC] = "Board CDC",
+    [USBD_STR_MIDI] = "prism MIDI",
 #if PICO_STDIO_USB_ENABLE_RESET_VIA_VENDOR_INTERFACE
     [USBD_STR_RPI_RESET] = "Reset",
 #endif

@@ -215,11 +215,12 @@ int main_real()
   gpio_init(PERIPH_BAT_CHG_EN_N);
   gpio_set_dir(PERIPH_BAT_CHG_EN_N, GPIO_OUT);
   gpio_put(PERIPH_BAT_CHG_EN_N, 1);
-  sleep_ms(1000);
 
   // set clock for audio and LED timing reasons
   set_sys_clock_hz(SYS_CLOCK_HZ, true);
   stdio_init_all();
+
+  sleep_ms(1000);
 
   // initialize rng
   get_rand_32();
@@ -237,12 +238,91 @@ int main_real()
   return 0;
 }
 
+static void handle_sysex(uint8_t *data, int len)
+{
+  printf("SysEx (%d): ", len);
+  for (int i = 0; i < len; i++)
+    printf("%02X ", data[i]);
+  printf("\n");
+}
+
+static void handle_midi(uint8_t status, uint8_t d1, uint8_t d2)
+{
+  uint8_t type = status & 0xF0;
+  uint8_t ch = status & 0x0F;
+
+  switch (type)
+  {
+  case 0x90: // note on
+    if (d2 == 0)
+      printf("Note OFF  ch=%d note=%d\n", ch + 1, d1);
+    else
+      printf("Note ON   ch=%d note=%d vel=%d\n", ch + 1, d1, d2);
+    break;
+
+  case 0x80: // note off
+    printf("Note OFF  ch=%d note=%d vel=%d\n", ch + 1, d1, d2);
+    break;
+
+  case 0xB0: // control change
+    if (d1 == 123)
+      printf("PANIC (All Notes Off) ch=%d\n", ch + 1);
+    else if (d1 == 120)
+      printf("PANIC (All Sound Off) ch=%d\n", ch + 1);
+    break;
+
+  default:
+    break;
+  }
+}
+
+#define SYSEX_MAX 1024
+
+static uint8_t sysex_buf[SYSEX_MAX];
+static int sysex_len = 0;
+
+static void midi_task(void)
+{
+  uint8_t packet[4];
+
+  while (tud_midi_available())
+  {
+    tud_midi_packet_read(packet);
+
+    uint8_t cin = packet[0] & 0x0F;
+    uint8_t status = packet[1];
+
+    // ---------- SysEx ----------
+    if (cin >= 0x4 && cin <= 0x7)
+    {
+      int bytes = 3;
+      if (cin == 0x5)
+        bytes = 1;
+      if (cin == 0x6)
+        bytes = 2;
+
+      for (int i = 0; i < bytes && sysex_len < SYSEX_MAX; i++)
+        sysex_buf[sysex_len++] = packet[1 + i];
+
+      if (cin != 0x4) // end of sysex
+      {
+        handle_sysex(sysex_buf, sysex_len);
+        sysex_len = 0;
+      }
+
+      continue;
+    }
+
+    // ---------- regular midi ----------
+    handle_midi(status, packet[2], packet[3]);
+  }
+}
+
 int main()
 {
   stdio_init_all();
   while (1)
   {
-    printf("hello world\n");
-    sleep_ms(1000);
+    midi_task();
   }
 }
