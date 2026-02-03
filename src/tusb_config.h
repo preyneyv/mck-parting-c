@@ -59,7 +59,7 @@
 // Add a MIDI interface
 #define CFG_TUD_MIDI (1)
 #ifndef CFG_TUD_MIDI_RX_BUFSIZE
-#define CFG_TUD_MIDI_RX_BUFSIZE 2048
+#define CFG_TUD_MIDI_RX_BUFSIZE 4096
 #endif
 #ifndef CFG_TUD_MIDI_TX_BUFSIZE
 #define CFG_TUD_MIDI_TX_BUFSIZE 64

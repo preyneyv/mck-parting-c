@@ -49,6 +49,9 @@ typedef struct
 
 typedef struct
 {
+  void (*on_frame_cb)(void);
+  void (*on_tick_cb)(void);
+
   audio_synth_t synth;
   display_t display;
   leds_t leds;

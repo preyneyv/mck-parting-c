@@ -37,7 +37,18 @@ void core1_main()
   audio_playback_run_forever(&g_engine.synth);
 }
 
-void core0_main() { engine_run_forever(); }
+void midi_task();
+
+void on_frame_cb()
+{
+  midi_task();
+}
+
+void core0_main()
+{
+  g_engine.on_frame_cb = on_frame_cb;
+  engine_run_forever();
+}
 
 void engine_buttons_init()
 {
@@ -206,7 +217,7 @@ void engine_sleep_until_interrupt()
   critical_section_exit(&sleep_critical_section);
 }
 
-int main_real()
+int main()
 {
   // hack to limit power draw until after usb stack is initialized
   // since macos doesn't like it when the usb device draws too much power
@@ -238,90 +249,8 @@ int main_real()
   return 0;
 }
 
-static void handle_sysex(uint8_t *data, int len)
+int mai2()
 {
-  printf("SysEx (%d): ", len);
-  for (int i = 0; i < len; i++)
-    printf("%02X ", data[i]);
-  printf("\n");
-}
-
-static void handle_midi(uint8_t status, uint8_t d1, uint8_t d2)
-{
-  uint8_t type = status & 0xF0;
-  uint8_t ch = status & 0x0F;
-
-  switch (type)
-  {
-  case 0x90: // note on
-    if (d2 == 0)
-      printf("Note OFF  ch=%d note=%d\n", ch + 1, d1);
-    else
-      printf("Note ON   ch=%d note=%d vel=%d\n", ch + 1, d1, d2);
-    break;
-
-  case 0x80: // note off
-    printf("Note OFF  ch=%d note=%d vel=%d\n", ch + 1, d1, d2);
-    break;
-
-  case 0xB0: // control change
-    if (d1 == 123)
-      printf("PANIC (All Notes Off) ch=%d\n", ch + 1);
-    else if (d1 == 120)
-      printf("PANIC (All Sound Off) ch=%d\n", ch + 1);
-    break;
-
-  default:
-    break;
-  }
-}
-
-#define SYSEX_MAX 1024
-
-static uint8_t sysex_buf[SYSEX_MAX];
-static int sysex_len = 0;
-
-static void midi_task(void)
-{
-  uint8_t packet[4];
-
-  while (tud_midi_available())
-  {
-    tud_midi_packet_read(packet);
-
-    uint8_t cin = packet[0] & 0x0F;
-    uint8_t status = packet[1];
-
-    // ---------- SysEx ----------
-    if (cin >= 0x4 && cin <= 0x7)
-    {
-      int bytes = 3;
-      if (cin == 0x5)
-        bytes = 1;
-      if (cin == 0x6)
-        bytes = 2;
-
-      for (int i = 0; i < bytes && sysex_len < SYSEX_MAX; i++)
-        sysex_buf[sysex_len++] = packet[1 + i];
-
-      if (cin != 0x4) // end of sysex
-      {
-        handle_sysex(sysex_buf, sysex_len);
-        sysex_len = 0;
-      }
-
-      continue;
-    }
-
-    // ---------- regular midi ----------
-    handle_midi(status, packet[2], packet[3]);
-  }
-}
-
-int main()
-{
-  main_real();
-  return 0;
   stdio_init_all();
   while (1)
   {

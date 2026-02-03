@@ -45,6 +45,7 @@ add_subdirectory(lib/qrcodegen)
 set(SHARED_SOURCES
     src/shared/audio/buffer.c
     src/shared/audio/synth.c
+    src/shared/audio/midi.c
     src/shared/leaderboard/leaderboard.c
     src/shared/anim.c
     src/shared/engine.c
@@ -132,6 +133,7 @@ else()
     # --- rp2 build ---
     add_executable(mck-parting-c
         src/rp2/main.c
+        src/rp2/midi.c
         src/rp2/display.c
         src/rp2/audio.c
         src/rp2/peripheral.c

@@ -71,9 +71,9 @@ typedef struct audio_synth_message_t
 typedef enum
 {
   // add operator to previous output
-  AUDIO_SYNTH_OP_MODE_ADDITIVE,
+  AUDIO_SYNTH_OP_MODE_ADDITIVE = 0,
   // use previous output as freq mod input
-  AUDIO_SYNTH_OP_MODE_FREQ_MOD
+  AUDIO_SYNTH_OP_MODE_FREQ_MOD = 1,
 } audio_synth_operator_mode_t;
 
 typedef enum

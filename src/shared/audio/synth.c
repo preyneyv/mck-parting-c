@@ -193,7 +193,6 @@ static void audio_synth_operator_note_off(audio_synth_operator_t *op)
 void audio_synth_voice_note_off(audio_synth_voice_t *voice)
 {
   voice->note_number = -1;
-  voice->on_at = nil_time;
 
   for (int op_idx = 0; op_idx < AUDIO_SYNTH_OPERATOR_COUNT; op_idx++)
   {
@@ -404,40 +403,55 @@ void audio_synth_note_on(audio_synth_t *synth, audio_synth_message_note_on_t msg
 {
   // find a free voice
   // priority: free voice > oldest note of same patch > oldest note
-  audio_synth_voice_t *selected_voice = NULL;
-  absolute_time_t oldest_same_patch = nil_time;
-  absolute_time_t oldest_any = nil_time;
+  audio_synth_voice_t *oldest_free_voice = NULL;
+  audio_synth_voice_t *oldest_same_patch_voice = NULL;
+  audio_synth_voice_t *oldest_any_voice = NULL;
+  absolute_time_t oldest_free = at_the_end_of_time;
+  absolute_time_t oldest_same_patch = at_the_end_of_time;
+  absolute_time_t oldest_any = at_the_end_of_time;
   for (int voice_idx = 0; voice_idx < AUDIO_SYNTH_VOICE_COUNT; voice_idx++)
   {
     audio_synth_voice_t *voice = &synth->voices[voice_idx];
     if (voice->note_number == -1)
     {
       // free voice found
-      selected_voice = voice;
-      break;
+      if (absolute_time_diff_us(voice->on_at, oldest_free) > 0)
+      {
+        oldest_free = voice->on_at;
+        oldest_free_voice = voice;
+      }
     }
-    else
+    // occupied voice
+    if (voice->patch_idx == msg.patch_idx)
     {
-      // occupied voice
-      if (voice->patch_idx == msg.patch_idx)
+      // same patch
+      if (absolute_time_diff_us(voice->on_at, oldest_same_patch) > 0)
       {
-        // same patch
-        if (is_nil_time(oldest_same_patch) ||
-            absolute_time_diff_us(voice->on_at, oldest_same_patch) > 0)
-        {
-          oldest_same_patch = voice->on_at;
-          selected_voice = voice;
-        }
-      }
-      // check for oldest any
-      if (is_nil_time(oldest_any) ||
-          absolute_time_diff_us(voice->on_at, oldest_any) > 0)
-      {
-        oldest_any = voice->on_at;
-        if (selected_voice == NULL)
-          selected_voice = voice;
+        oldest_same_patch = voice->on_at;
+        oldest_same_patch_voice = voice;
       }
     }
+    // check for oldest any
+    if (absolute_time_diff_us(voice->on_at, oldest_any) > 0)
+    {
+      oldest_any = voice->on_at;
+      if (oldest_any_voice == NULL)
+        oldest_any_voice = voice;
+    }
+  }
+
+  audio_synth_voice_t *selected_voice = NULL;
+  if (oldest_free_voice != NULL)
+  {
+    selected_voice = oldest_free_voice;
+  }
+  else if (oldest_same_patch_voice != NULL)
+  {
+    selected_voice = oldest_same_patch_voice;
+  }
+  else
+  {
+    selected_voice = oldest_any_voice;
   }
 
   if (selected_voice == NULL)

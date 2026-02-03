@@ -32,7 +32,7 @@ void engine_init()
   g_engine.buttons.menu.id = BUTTON_MENU;
   engine_buttons_init(&g_engine.buttons);
 
-  engine_set_app(&app_asteroids);
+  engine_set_app(NULL);
   engine_set_volume(4); // todo: save/restore from flash (somehow)
 }
 
@@ -458,6 +458,11 @@ void engine_run_forever()
         g_engine.tick++; // todo: this should technically be part of the app,
                          // not the engine
       }
+
+      if (g_engine.on_tick_cb != NULL)
+      {
+        g_engine.on_tick_cb();
+      }
     }
 
     leds_set_all(&g_engine.leds, (color_t){.hex = 0x000000});
@@ -483,6 +488,11 @@ void engine_run_forever()
     leds_show(&g_engine.leds);
     ti_stop(&ti_show);
 
+    if (g_engine.on_frame_cb != NULL)
+    {
+      g_engine.on_frame_cb();
+    }
+
     // log fps and frame limit
     last_log_frames++;
     if (absolute_time_diff_us(last_log_us, now) > 1000000)
@@ -491,14 +501,14 @@ void engine_run_forever()
       float ti_tick_avg = ti_get_average_ms(&ti_tick, true);
       float ti_show_avg = ti_get_average_ms(&ti_show, true);
       float ti_frame_avg = ti_tick_avg + ti_show_avg;
-      printf(
-          "fps: %d | frame: %.2f / %.2f ms | tick: %.2f ms | show: %.2f ms\n",
-          fps, ti_frame_avg, TARGET_FRAME_INTERVAL_US / 1000.0f, ti_tick_avg,
-          ti_show_avg);
+      // printf(
+      //     "fps: %d | frame: %.2f / %.2f ms | tick: %.2f ms | show: %.2f ms\n",
+      //     fps, ti_frame_avg, TARGET_FRAME_INTERVAL_US / 1000.0f, ti_tick_avg,
+      //     ti_show_avg);
 
-      extern char __StackLimit;
-      char *heap = sbrk(0);
-      printf("ram free: %.2f kb", ((float)(&__StackLimit - heap)) / 1024.0f);
+      // extern char __StackLimit;
+      // char *heap = sbrk(0);
+      // printf("ram free: %.2f kb", ((float)(&__StackLimit - heap)) / 1024.0f);
 
       last_log_us = now;
       last_log_frames = 0;
