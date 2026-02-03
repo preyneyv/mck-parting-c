@@ -90,40 +90,6 @@ if(PICO_PLATFORM STREQUAL "host")
 
     find_package(Threads REQUIRED)
     find_package(SDL2 REQUIRED)
-
-    if(DEFINED ENV{VCPKG_ROOT})
-        set(VCPKG_ROOT $ENV{VCPKG_ROOT})
-    endif()
-    if(NOT DEFINED VCPKG_TARGET_TRIPLET)
-        if(WIN32)
-            set(VCPKG_TARGET_TRIPLET "x64-windows")
-        elseif(APPLE)
-            set(VCPKG_TARGET_TRIPLET "x64-osx")
-        else()
-            set(VCPKG_TARGET_TRIPLET "x64-linux")
-        endif()
-    endif()
-
-    find_package(SoundIo CONFIG QUIET)
-    if(NOT SoundIo_FOUND)
-        find_path(SOUNDIO_INCLUDE_DIR
-            NAMES soundio/soundio.h
-            PATHS
-                /opt/homebrew/include
-                /usr/local/include
-                ${VCPKG_ROOT}/installed/${VCPKG_TARGET_TRIPLET}/include
-        )
-        find_library(SOUNDIO_LIBRARY
-            NAMES soundio soundio_static
-            PATHS
-                /opt/homebrew/lib
-                /usr/local/lib
-                ${VCPKG_ROOT}/installed/${VCPKG_TARGET_TRIPLET}/lib
-        )
-        if(NOT SOUNDIO_INCLUDE_DIR OR NOT SOUNDIO_LIBRARY)
-            message(FATAL_ERROR "libsoundio not found. Install libsoundio or provide VCPKG_ROOT/VCPKG_TARGET_TRIPLET.")
-        endif()
-    endif()
     
     if(TARGET SDL2::SDL2)
         set(SDL2_LIBRARIES_TARGET SDL2::SDL2)
@@ -135,18 +101,10 @@ if(PICO_PLATFORM STREQUAL "host")
         target_include_directories(mck-parting-c PRIVATE ${SDL2_INCLUDE_DIRS})
     endif()
 
-    if(TARGET SoundIo::SoundIo)
-        set(SOUNDIO_LIBRARIES_TARGET SoundIo::SoundIo)
-    else()
-        set(SOUNDIO_LIBRARIES_TARGET ${SOUNDIO_LIBRARY})
-        target_include_directories(mck-parting-c PRIVATE ${SOUNDIO_INCLUDE_DIR})
-    endif()
-
     target_link_libraries(mck-parting-c PRIVATE
         shared
         ${SDL2_LIBRARIES_TARGET}
         Threads::Threads
-        ${SOUNDIO_LIBRARIES_TARGET}
     )
 
 

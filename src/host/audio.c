@@ -1,8 +1,7 @@
 #include <stdbool.h>
 #include <stdio.h>
 
-#include <pthread.h>
-#include <soundio/soundio.h>
+#include <SDL.h>
 
 #include <shared/audio/buffer.h>
 #include <shared/audio/playback.h>
@@ -13,184 +12,72 @@
 #include "config.h"
 
 static audio_buffer_pool_t pool;
+static SDL_AudioDeviceID audio_device = 0;
 static bool playback_enabled = true;
 
-static inline void _write_frames_from_buffer(struct SoundIoChannelArea **areas,
-                                             int frame_count,
-                                             uint32_t *buffer) {
-  for (int index = 0; index < frame_count; index++) {
-    uint32_t frame = buffer[index];
-    int16_t left = ((frame >> 16) & 0xFFFF);
-    int16_t right = (frame & 0xFFFF);
-
-    int16_t *buf = (int16_t *)((*areas)[0].ptr);
-    *buf = left;
-    (*areas)[0].ptr += (*areas)[0].step;
-
-    buf = (int16_t *)((*areas)[1].ptr);
-    *buf = right;
-    (*areas)[1].ptr += (*areas)[1].step;
-  }
-}
-
-static void audio_playback_write_callback(struct SoundIoOutStream *outstream,
-                                          int frame_count_min,
-                                          int frame_count_max) {
-  int err;
+static void audio_playback_write_callback(void *userdata, uint8_t *stream,
+                                          int len) {
+  (void)userdata;
+  int frames_to_write = len / (int)sizeof(uint32_t);
+  uint32_t *out = (uint32_t *)stream;
   static uint32_t *buffer = NULL;
-  static uint32_t unconsumed_frames = 0;
+  static uint32_t buffer_offset = 0;
+  int frames_written = 0;
 
-  uint32_t filled_frames = pool.count * pool.buffer_size;
-  if (unconsumed_frames) {
-    // we have leftover frames from the previous write.
-    // replace one buffer_count with the unconsumed frames.
-    filled_frames += unconsumed_frames;
-    filled_frames -= pool.buffer_size;
-  }
-
-  struct SoundIoChannelArea *areas;
-  // how many total frames we want to write in this callback
-  int frames_left = filled_frames;
-
-  if (frames_left < frame_count_min) {
-    // not enough frames to write, lets just wait for more frames
-    printf("audio underflow\n");
-    return;
-  }
-  if (frames_left > frame_count_max) {
-    // we have more frames than we can write in this callback, lets just
-    // write as many as we can.
-    frames_left = frame_count_max;
-  }
-
-  while (frames_left > 0) {
-    // how many frames we can write in this iteration
-    int frame_count = frames_left;
-
-    if ((err =
-             soundio_outstream_begin_write(outstream, &areas, &frame_count))) {
-      panic("unrecoverable stream error when write: %s", soundio_strerror(err));
-    }
-    if (!frame_count)
-      break;
-
-    frames_left -= frame_count;
-
-    if (buffer != NULL) {
-      // printf("using leftover\n");
-      // write as many as we can from the previous buffer.
-      int frames_to_write = MIN(frame_count, unconsumed_frames);
-      _write_frames_from_buffer(&areas, frames_to_write, buffer);
-      frame_count -= frames_to_write;
-      unconsumed_frames -= frames_to_write;
-      if (unconsumed_frames == 0) {
-        // we have consumed all frames from the previous buffer.
-        audio_buffer_pool_commit_read(&pool);
-        buffer = NULL;
-      } else {
-        // store partial buffer for next iteration
-        buffer += frames_to_write;
-      }
-    }
-
-    while (frame_count > 0) {
-      // acquire a new buffer from the pool
+  while (frames_written < frames_to_write) {
+    if (!buffer) {
       buffer = audio_buffer_pool_acquire_read(&pool, false);
-      if (buffer == NULL) {
-        panic("no audio buffer available, this should not happen");
-      }
-
-      // we have a new buffer, write as many frames as we can
-      int frames_to_write = MIN(frame_count, pool.buffer_size);
-      _write_frames_from_buffer(&areas, frames_to_write, buffer);
-      frame_count -= frames_to_write;
-      unconsumed_frames = pool.buffer_size - frames_to_write;
-      if (unconsumed_frames == 0) {
-        // we have consumed all frames from the new buffer.
-        audio_buffer_pool_commit_read(&pool);
-        buffer = NULL;
-      } else {
-        // store partial buffer for next iteration
-        buffer += frames_to_write;
-      }
+      buffer_offset = 0;
     }
-
-    if ((err = soundio_outstream_end_write(outstream))) {
-      panic("unrecoverable stream error when end: %s", soundio_strerror(err));
+    if (!buffer) {
+      memset(out + frames_written, 0,
+             (frames_to_write - frames_written) * sizeof(uint32_t));
+      return;
+    }
+    int remaining = frames_to_write - frames_written;
+    int available = (int)pool.buffer_size - (int)buffer_offset;
+    int frames = remaining < available ? remaining : available;
+    memcpy(out + frames_written, buffer + buffer_offset,
+           frames * sizeof(uint32_t));
+    frames_written += frames;
+    buffer_offset += (uint32_t)frames;
+    if (buffer_offset >= pool.buffer_size) {
+      audio_buffer_pool_commit_read(&pool);
+      buffer = NULL;
+      buffer_offset = 0;
     }
   }
-}
-
-static void
-audio_playback_underflow_callback(struct SoundIoOutStream *outstream) {
-  fprintf(stderr, "Audio underflow occurred\n");
-}
-
-// this will be handled by DMA + PIO on device.
-static void audio_playback_main() {
-  int err;
-  struct SoundIo *soundio = soundio_create();
-  if (!soundio) {
-    fprintf(stderr, "Error creating SoundIo instance\n");
-    return;
-  }
-
-  if ((err = soundio_connect(soundio))) {
-    fprintf(stderr, "Unable to connect to backend: %s\n",
-            soundio_strerror(err));
-    return;
-  }
-  fprintf(stderr, "Backend: %s\n",
-          soundio_backend_name(soundio->current_backend));
-  soundio_flush_events(soundio);
-
-  int device_index = soundio_default_output_device_index(soundio);
-  struct SoundIoDevice *device =
-      soundio_get_output_device(soundio, device_index);
-  if (device->probe_error) {
-    fprintf(stderr, "Cannot probe device: %s\n",
-            soundio_strerror(device->probe_error));
-    return;
-  }
-  printf("out %s\n", device->name);
-
-  struct SoundIoOutStream *outstream = soundio_outstream_create(device);
-  outstream->format = SoundIoFormatS16NE;
-  outstream->sample_rate = AUDIO_SAMPLE_RATE;
-  // outstream->layout = *soundio_channel_layout_get_default(1);
-
-  outstream->name = PROJECT_NAME;
-  outstream->write_callback = audio_playback_write_callback;
-  outstream->underflow_callback = audio_playback_underflow_callback;
-  outstream->software_latency = 0.0;
-
-  if ((err = soundio_outstream_open(outstream))) {
-    fprintf(stderr, "unable to open device: %s", soundio_strerror(err));
-    return;
-  }
-
-  if ((err = soundio_outstream_start(outstream))) {
-    fprintf(stderr, "unable to start device: %s", soundio_strerror(err));
-    return;
-  }
-
-  while (true) {
-    soundio_wait_events(soundio);
-  }
-
-  soundio_outstream_destroy(outstream);
-  soundio_device_unref(device);
-  soundio_destroy(soundio);
 }
 
 // this will be called on core1 on device.
-void audio_playback_set_enabled(bool enabled) { playback_enabled = enabled; }
+void audio_playback_set_enabled(bool enabled) {
+  playback_enabled = enabled;
+  if (audio_device != 0) {
+    SDL_PauseAudioDevice(audio_device, enabled ? 0 : 1);
+  }
+}
 
 void audio_init(audio_synth_t *synth) {
+  if (SDL_InitSubSystem(SDL_INIT_AUDIO) != 0) {
+    fprintf(stderr, "SDL audio init failed: %s\n", SDL_GetError());
+    return;
+  }
+
   audio_buffer_pool_init(&pool, AUDIO_BUFFER_POOL_SIZE, AUDIO_BUFFER_SIZE);
 
-  pthread_t audio_playback;
-  pthread_create(&audio_playback, NULL, (void *)audio_playback_main, NULL);
+  SDL_AudioSpec desired = {0};
+  SDL_AudioSpec obtained = {0};
+  desired.freq = AUDIO_SAMPLE_RATE;
+  desired.format = AUDIO_S16SYS;
+  desired.channels = 2;
+  desired.samples = AUDIO_BUFFER_SIZE;
+  desired.callback = audio_playback_write_callback;
+  audio_device = SDL_OpenAudioDevice(NULL, 0, &desired, &obtained, 0);
+  if (audio_device == 0) {
+    fprintf(stderr, "SDL_OpenAudioDevice failed: %s\n", SDL_GetError());
+    return;
+  }
+  SDL_PauseAudioDevice(audio_device, 0);
 
   while (true) {
     if (!playback_enabled) {
@@ -202,5 +89,8 @@ void audio_init(audio_synth_t *synth) {
     audio_buffer_pool_commit_write(&pool);
   }
 
-  pthread_join(audio_playback, NULL);
+  if (audio_device != 0) {
+    SDL_CloseAudioDevice(audio_device);
+    audio_device = 0;
+  }
 }
