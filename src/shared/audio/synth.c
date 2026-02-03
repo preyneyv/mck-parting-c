@@ -136,7 +136,6 @@ static void audio_synth_operator_note_on(audio_synth_operator_t *op,
 {
   // this *might* be called without a previous note_off
 
-  // op->phase = 0;
   uint32_t lut_phase = op->voice->synth->note_dphase_lut[note_number];
   if (op->config.freq_mult == 0)
     op->d_phase = lut_phase / 2;
@@ -160,7 +159,7 @@ void audio_synth_voice_note_on(audio_synth_voice_t *voice, uint8_t patch_idx, ui
   voice->on_at = get_absolute_time();
   audio_synth_patch_config_t *patch = &voice->synth->patches[patch_idx];
 
-  q1x15 velocity_ratio = q1x15_mag(velocity, 127);
+  q1x15 velocity_ratio = q1x15_mag(velocity, 190); // scale velocity down (actual cap is 127)
 
   for (int op_idx = 0; op_idx < AUDIO_SYNTH_OPERATOR_COUNT; op_idx++)
   {
@@ -316,15 +315,46 @@ static inline void _merge_drafts(q1x15 *out, q1x15 *in, uint32_t buffer_size)
   }
 }
 
-static inline q1x15 soft_limit_q17x15(int32_t x)
+static inline q1x15 soft_limit_q17x15(int32_t x_q17_15)
 {
-  // take a q17.15 sample and apply soft clipping to bring it back to q1x15
-  if (x <= Q1X15_ONE && x >= Q1X15_NEG_ONE)
-    return x;
+  // We treat "1.0" threshold in q17.15 as 0x00008000 (32768).
+  // But q1.15 max representable is 32767, so we clamp output accordingly.
+  const int32_t ONE_Q17_15 = (1 << 15); // 32768
 
-  int64_t abs_x = (x < 0) ? -(int64_t)x : (int64_t)x;
-  int64_t scaled = ((int64_t)x * Q1X15_ONE) / abs_x;
-  return q1x15_clamp_s32((int32_t)scaled);
+  // Fast saturate for huge values (optional but cheap)
+  if (x_q17_15 >= (int32_t)(4 * ONE_Q17_15))
+    return (int16_t)Q1X15_ONE;
+  if (x_q17_15 <= -(int32_t)(4 * ONE_Q17_15))
+    return (int16_t)Q1X15_NEG_ONE;
+
+  int32_t ax = x_q17_15 < 0 ? -x_q17_15 : x_q17_15;
+
+  // Hard saturation beyond |x|>1.0, but *smoothly joined* by the cubic inside.
+  if (ax > ONE_Q17_15)
+  {
+    return (int16_t)(x_q17_15 < 0 ? Q1X15_NEG_ONE : Q1X15_ONE);
+  }
+
+  // Compute y = (3/2) * (x - x^3/3) in fixed point.
+  // All intermediates kept in 64-bit to avoid overflow.
+
+  // x^2 in q17.15: (x*x) is q34.30, >>15 -> q19.15
+  int64_t x = (int64_t)x_q17_15;
+  int64_t x2 = (x * x) >> 15; // q19.15
+  // x^3 in q17.15-ish: (x2*x) is q(19+17).30, >>15 -> q21.15
+  int64_t x3 = (x2 * x) >> 15; // q21.15
+
+  // term = x^3 / 3 (still q21.15)
+  int64_t term = x3 / 3;
+
+  // (x - x^3/3): x is q17.15, term is q21.15 (compatible; both have 15 frac bits)
+  int64_t y = x - term; // q21.15
+
+  // Multiply by 3/2: y = y * 3 / 2
+  y = (y * 3) / 2; // q21.15
+
+  // Now y is in q?.15 but guaranteed within [-1,1] for |x|<=1, due to the shaping.
+  return q1x15_clamp_s32((int32_t)y);
 }
 
 void audio_synth_fill_buffer(audio_synth_t *synth, audio_buffer_t buffer,

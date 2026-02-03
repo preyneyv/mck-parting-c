@@ -103,8 +103,8 @@ function build_sysex_to_gmem(ch0) local(op, base, pos,
   gpush(ch0, pos, $xF0); pos += 1;          // start byte
   gpush(ch0, pos, MFG); pos += 1;           // mfg id
   gpush(ch0, pos, CMD_SET_PATCH); pos += 1; // command 
-  gpush(ch0, pos, ch0 & 15); pos += 1;      // channel
   gpush(ch0, pos, PROTO_VER); pos += 1;     // protocol version
+  gpush(ch0, pos, ch0 & 15); pos += 1;      // channel
 
   op = 0;
   loop(OPS,
