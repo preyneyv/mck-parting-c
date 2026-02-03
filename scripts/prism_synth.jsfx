@@ -1,0 +1,192 @@
+desc:prism patch sender (single-channel, shared gmem slots)
+tags:midi,sysex,synth
+options:gmem=prism_syx
+
+// =========================
+// UI
+// =========================
+slider1:0<0,15,1{Ch 1,Ch 2,Ch 3,Ch 4,Ch 5,Ch 6,Ch 7,Ch 8,Ch 9,Ch 10,Ch 11,Ch 12,Ch 13,Ch 14,Ch 15,Ch 16}> MIDI Channel
+
+// Operator 1
+slider2:1<0,15,1>  Op 1 Freq. Mult
+slider3:0.00<0,1,0.001> Op 1 Level
+slider4:0<0,1,1{ADDITIVE,FREQ_MOD}> Op 1 Mode
+slider5:0<0,5000,1>  Op 1 Env A
+slider6:0<0,5000,1>  Op 1 Env D
+slider7:1.00<0,1,0.001> Op 1 Env S
+slider8:0<0,5000,1>  Op 1 Env R
+
+// Operator 2
+slider9:1<0,15,1>  Op 2 Freq. Mult
+slider10:0.00<0,1,0.001> Op 2 Level
+slider11:0<0,1,1{ADDITIVE,FREQ_MOD}> Op 2 Mode
+slider12:0<0,5000,1>  Op 2 Env A
+slider13:0<0,5000,1>  Op 2 Env D
+slider14:1.00<0,1,0.001> Op 2 Env S
+slider15:0<0,5000,1>  Op 2 Env R
+
+// Operator 3
+slider16:1<0,15,1>  Op 3 Freq. Mult
+slider17:0.00<0,1,0.001> Op 3 Level
+slider18:0<0,1,1{ADDITIVE,FREQ_MOD}> Op 3 Mode
+slider19:0<0,5000,1>  Op 3 Env A
+slider20:0<0,5000,1>  Op 3 Env D
+slider21:1.00<0,1,0.001> Op 3 Env S
+slider22:0<0,5000,1>  Op 3 Env R
+
+// Operator 4
+slider23:1<0,15,1>  Op 4 Freq. Mult
+slider24:0.00<0,1,0.001> Op 4 Level
+slider25:0<0,1,1{ADDITIVE,FREQ_MOD}> Op 4 Mode
+slider26:0<0,5000,1>  Op 4 Env A
+slider27:0<0,5000,1>  Op 4 Env D
+slider28:1.00<0,1,0.001> Op 4 Env S
+slider29:0<0,5000,1>  Op 4 Env R
+
+// =========================
+// Constants
+// =========================
+@init
+MFG = $x7D;
+CMD_SET_PATCH = 1;
+PROTO_VER = 1;
+
+OPS = 4;
+PARAMS_PER_OP = 7;
+CHS = 16;
+
+// Shared gmem layout
+GMEM_STRIDE = 512;
+
+// Scratch buffer for midisend_buf() (per instance, transient)
+SEND_BUF = 200000;
+
+// Transport edge detect
+prev_play = 0;
+
+// Dirty tracking
+dirty = 1;           // force publish on load
+
+function clamp01(x) ( x < 0 ? 0 : (x > 1 ? 1 : x); );
+
+function gslot(ch0) ( ch0 * GMEM_STRIDE; );
+
+function gpush(ch0, pos, b) (
+  gmem[gslot(ch0) + 1 + pos] = b & 255;
+);
+
+// 7-bit safe payload encoders (same as your protocol)
+function enc7_u16_to_gmem(ch0, pos, v) (
+  v = v|0;
+  gpush(ch0, pos+0, (v      ) & 127);
+  gpush(ch0, pos+1, (v >> 7 ) & 127);
+  gpush(ch0, pos+2, (v >> 14) & 127);
+  pos + 3;
+);
+
+function enc7_u32_to_gmem(ch0, pos, v) (
+  v = v|0;
+  gpush(ch0, pos+0, (v      ) & 127);
+  gpush(ch0, pos+1, (v >> 7 ) & 127);
+  gpush(ch0, pos+2, (v >> 14) & 127);
+  gpush(ch0, pos+3, (v >> 21) & 127);
+  gpush(ch0, pos+4, (v >> 28) & 127);
+  pos + 5;
+);
+
+function build_sysex_to_gmem(ch0) local(op, base, pos,
+  freq_mult, mode, a, d, r, lvl, level_q15, s, s_q31) (
+
+  pos = 0;
+
+  // Header
+  gpush(ch0, pos, $xF0); pos += 1;          // start byte
+  gpush(ch0, pos, MFG); pos += 1;           // mfg id
+  gpush(ch0, pos, CMD_SET_PATCH); pos += 1; // command 
+  gpush(ch0, pos, ch0 & 15); pos += 1;      // channel
+  gpush(ch0, pos, PROTO_VER); pos += 1;     // protocol version
+
+  op = 0;
+  loop(OPS,
+    base = 2 + op*7;
+
+    // pull from sliders (single instance = single patch)
+    freq_mult = (slider(base + 0))|0;
+    lvl       = clamp01(slider(base + 1));
+    mode      = (slider(base + 2))|0;
+    a         = (slider(base + 3))|0;
+    d         = (slider(base + 4))|0;
+    s         = clamp01(slider(base + 5));
+    r         = (slider(base + 6))|0;
+
+    level_q15 = floor(lvl * 32767 + 0.5);
+    s_q31     = floor(s   * 2147483647 + 0.5);
+
+    gpush(ch0, pos, freq_mult & 127); pos += 1;
+    pos = enc7_u16_to_gmem(ch0, pos, level_q15);
+    gpush(ch0, pos, mode & 127); pos += 1;
+
+    pos = enc7_u32_to_gmem(ch0, pos, a);
+    pos = enc7_u32_to_gmem(ch0, pos, d);
+    pos = enc7_u32_to_gmem(ch0, pos, s_q31);
+    pos = enc7_u32_to_gmem(ch0, pos, r);
+
+    op += 1;
+  );
+
+  // Trailer
+  gpush(ch0, pos, $xF7); pos += 1;
+
+  // Length
+  gmem[gslot(ch0) + 0] = pos;
+);
+
+function send_sysex_from_gmem(ch0) local(len, i, base) (
+  base = gslot(ch0);
+  len = gmem[base + 0] | 0;
+
+  len <= 0 ? 0 : (
+    i = 0;
+    loop(len,
+      mem[SEND_BUF + i] = gmem[base + 1 + i] & 255;
+      i += 1;
+    );
+    midisend_buf(0, SEND_BUF, len);
+  );
+);
+
+// Build sysex to gmem on load
+ch = (slider1|0);
+ch < 0 ? ch = 0 : (ch > 15 ? ch = 15);
+build_sysex_to_gmem(ch);
+
+// =========================
+// Slider changes
+// =========================
+@slider
+dirty = 1;
+
+// =========================
+// MIDI block
+// =========================
+@block
+// pass-through incoming MIDI
+while (midirecv(offset, msg1, msg2, msg3)) (
+  midisend(offset, msg1, msg2, msg3);
+);
+
+// detect transport start
+play = (play_state & 1);
+(play && !prev_play) ? (
+  dirty = 1;
+);
+prev_play = play;
+
+// Rebuild gmem when dirty (including fresh load), but only for this instance's channel
+dirty ? (
+  ch = (slider1|0);
+  ch < 0 ? ch = 0 : (ch > 15 ? ch = 15);
+  build_sysex_to_gmem(ch);
+  send_sysex_from_gmem(ch);
+  dirty = 0;
+);
