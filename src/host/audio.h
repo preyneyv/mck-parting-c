@@ -1,3 +1,5 @@
 #pragma once
 
-void audio_init();
+#include <shared/audio/synth.h>
+
+void audio_init(audio_synth_t *synth);

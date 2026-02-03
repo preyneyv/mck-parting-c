@@ -1,18 +1,19 @@
+#include <stdbool.h>
 #include <stdio.h>
 
 #include <pthread.h>
 #include <soundio/soundio.h>
 
 #include <shared/audio/buffer.h>
+#include <shared/audio/playback.h>
 #include <shared/audio/synth.h>
-#include <shared/utils/timing.h>
+#include <shared/platform/sleep.h>
 
 #include "audio.h"
 #include "config.h"
-#include "math.h"
-#include "time.h"
 
 static audio_buffer_pool_t pool;
+static bool playback_enabled = true;
 
 static inline void _write_frames_from_buffer(struct SoundIoChannelArea **areas,
                                              int frame_count,
@@ -183,116 +184,22 @@ static void audio_playback_main() {
 }
 
 // this will be called on core1 on device.
-void audio_init() {
+void audio_playback_set_enabled(bool enabled) { playback_enabled = enabled; }
+
+void audio_init(audio_synth_t *synth) {
   audio_buffer_pool_init(&pool, AUDIO_BUFFER_POOL_SIZE, AUDIO_BUFFER_SIZE);
 
   pthread_t audio_playback;
   pthread_create(&audio_playback, NULL, (void *)audio_playback_main, NULL);
 
-  TimingInstrumenter ti_synth;
-
-  audio_synth_t synth;
-  audio_synth_init(&synth, AUDIO_SAMPLE_RATE, 1000);
-  synth.master_level = q1x15_f(0.5f);
-
-  audio_synth_operator_config_t config = audio_synth_operator_config_default;
-  config.env = (audio_synth_env_config_t){
-      .a = 0,
-      .d = 700,
-      .s = q1x31_f(0.f), // sustain level
-      .r = 500,
-  };
-  config.freq_mult = 11;
-  config.level = q1x15_f(0.3f);
-  audio_synth_operator_set_config(&synth.voices[0].ops[0], config);
-
-  config = audio_synth_operator_config_default;
-  config.env = (audio_synth_env_config_t){
-      .a = 0,
-      .d = 1000,
-      .s = q1x31_f(0.f), // sustain level
-      .r = 600,
-  };
-  config.level = Q1X15_ONE;
-  config.mode = AUDIO_SYNTH_OP_MODE_FREQ_MOD;
-  audio_synth_operator_set_config(&synth.voices[0].ops[1], config);
-
-  int i = 0;
   while (true) {
-    if (i == 0) {
-      audio_synth_handle_message(&synth,
-                                 &(audio_synth_message_t){
-                                     .type = AUDIO_SYNTH_MESSAGE_NOTE_ON,
-                                     .data.note_on =
-                                         {
-                                             .voice = 0,
-                                             .note_number = note("C4"),
-                                             .velocity = 127,
-                                         },
-                                 });
-    } else if (i == 10) {
-      audio_synth_handle_message(&synth,
-                                 &(audio_synth_message_t){
-                                     .type = AUDIO_SYNTH_MESSAGE_NOTE_OFF,
-                                     .data.note_off =
-                                         {
-                                             .voice = 0,
-                                         },
-                                 });
-    } else if (i == 20) {
-      audio_synth_handle_message(&synth,
-                                 &(audio_synth_message_t){
-                                     .type = AUDIO_SYNTH_MESSAGE_NOTE_ON,
-                                     .data.note_on =
-                                         {
-                                             .voice = 0,
-                                             .note_number = note("D4"),
-                                             .velocity = 127,
-                                         },
-                                 });
-    } else if (i == 30) {
-      audio_synth_handle_message(&synth,
-                                 &(audio_synth_message_t){
-                                     .type = AUDIO_SYNTH_MESSAGE_NOTE_OFF,
-                                     .data.note_off =
-                                         {
-                                             .voice = 0,
-                                         },
-                                 });
-    } else if (i == 40) {
-      audio_synth_handle_message(&synth,
-                                 &(audio_synth_message_t){
-                                     .type = AUDIO_SYNTH_MESSAGE_NOTE_ON,
-                                     .data.note_on =
-                                         {
-                                             .voice = 0,
-                                             .note_number = note("G4"),
-                                             .velocity = 127,
-                                         },
-                                 });
-    } else if (i == 80) {
-      audio_synth_handle_message(&synth,
-                                 &(audio_synth_message_t){
-                                     .type = AUDIO_SYNTH_MESSAGE_NOTE_OFF,
-                                     .data.note_off =
-                                         {
-                                             .voice = 0,
-                                         },
-                                 });
-    } else if (i == 160) {
-      i = -1;
+    if (!playback_enabled) {
+      platform_sleep_ms(10);
+      continue;
     }
-
     audio_buffer_t buffer = audio_buffer_pool_acquire_write(&pool, true);
-    ti_start(&ti_synth);
-    audio_synth_fill_buffer(&synth, buffer, pool.buffer_size);
-    ti_stop(&ti_synth);
+    audio_synth_fill_buffer(synth, buffer, pool.buffer_size);
     audio_buffer_pool_commit_write(&pool);
-
-    i += 1;
-    if (i % 1000 == 0) {
-      printf("synth: %f ms\n", ti_get_average_ms(&ti_synth, true));
-    }
   }
 
   pthread_join(audio_playback, NULL);

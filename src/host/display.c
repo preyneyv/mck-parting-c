@@ -169,4 +169,10 @@ void display_init(display_t *display) {
   u8g2_SetupSDL_128x64_f(u8g2);
   u8g2_InitDisplay(u8g2);
   u8g2_SetPowerSave(u8g2, 0);
+  display->enabled = true;
+}
+
+void display_set_enabled(display_t *display, bool enabled) {
+  display->enabled = enabled;
+  (void)enabled;
 }

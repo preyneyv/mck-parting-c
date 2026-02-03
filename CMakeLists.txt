@@ -60,16 +60,10 @@ set(SHARED_SOURCES
 )
 add_library(shared STATIC ${SHARED_SOURCES})
 target_include_directories(shared PRIVATE ${CMAKE_CURRENT_LIST_DIR}/src)
-target_link_libraries(shared PUBLIC 
-    u8g2 
-    qrcodegen
-    m 
-    pico_stdlib  
-    pico_unique_id
-    pico_rand
-    hardware_divider 
-    hardware_watchdog
-)
+target_link_libraries(shared PUBLIC u8g2 qrcodegen)
+if(NOT MSVC)
+    target_link_libraries(shared PUBLIC m)
+endif()
 
 if(PICO_PLATFORM STREQUAL "host")
     # --- host build ---
@@ -77,6 +71,8 @@ if(PICO_PLATFORM STREQUAL "host")
         src/host/main.c
         src/host/audio.c
         src/host/display.c
+        src/host/leds.c
+        src/host/peripheral.c
         src/host/platform/time.c
         src/host/platform/sleep.c
         src/host/platform/watchdog.c
@@ -93,30 +89,64 @@ if(PICO_PLATFORM STREQUAL "host")
     # target_compile_options(mck-parting-c PRIVATE -ffast-math)
 
     find_package(Threads REQUIRED)
-    find_package(SDL2 REQUIRED CONFIG REQUIRED COMPONENTS SDL2)
+    find_package(SDL2 REQUIRED)
 
-    # Find libsoundio manually
-    find_path(SOUNDIO_INCLUDE_DIR 
-        NAMES soundio/soundio.h
-        PATHS /opt/homebrew/include /usr/local/include
-    )
-    find_library(SOUNDIO_LIBRARY 
-        NAMES soundio
-        PATHS /opt/homebrew/lib /usr/local/lib
-    )
-    
-    if(NOT SOUNDIO_INCLUDE_DIR OR NOT SOUNDIO_LIBRARY)
-        message(FATAL_ERROR "libsoundio not found. Install with: brew install libsoundio")
+    if(DEFINED ENV{VCPKG_ROOT})
+        set(VCPKG_ROOT $ENV{VCPKG_ROOT})
+    endif()
+    if(NOT DEFINED VCPKG_TARGET_TRIPLET)
+        if(WIN32)
+            set(VCPKG_TARGET_TRIPLET "x64-windows")
+        elseif(APPLE)
+            set(VCPKG_TARGET_TRIPLET "x64-osx")
+        else()
+            set(VCPKG_TARGET_TRIPLET "x64-linux")
+        endif()
+    endif()
+
+    find_package(SoundIo CONFIG QUIET)
+    if(NOT SoundIo_FOUND)
+        find_path(SOUNDIO_INCLUDE_DIR
+            NAMES soundio/soundio.h
+            PATHS
+                /opt/homebrew/include
+                /usr/local/include
+                ${VCPKG_ROOT}/installed/${VCPKG_TARGET_TRIPLET}/include
+        )
+        find_library(SOUNDIO_LIBRARY
+            NAMES soundio soundio_static
+            PATHS
+                /opt/homebrew/lib
+                /usr/local/lib
+                ${VCPKG_ROOT}/installed/${VCPKG_TARGET_TRIPLET}/lib
+        )
+        if(NOT SOUNDIO_INCLUDE_DIR OR NOT SOUNDIO_LIBRARY)
+            message(FATAL_ERROR "libsoundio not found. Install libsoundio or provide VCPKG_ROOT/VCPKG_TARGET_TRIPLET.")
+        endif()
     endif()
     
+    if(TARGET SDL2::SDL2)
+        set(SDL2_LIBRARIES_TARGET SDL2::SDL2)
+        if(TARGET SDL2::SDL2main)
+            list(APPEND SDL2_LIBRARIES_TARGET SDL2::SDL2main)
+        endif()
+    else()
+        set(SDL2_LIBRARIES_TARGET ${SDL2_LIBRARIES})
+        target_include_directories(mck-parting-c PRIVATE ${SDL2_INCLUDE_DIRS})
+    endif()
+
+    if(TARGET SoundIo::SoundIo)
+        set(SOUNDIO_LIBRARIES_TARGET SoundIo::SoundIo)
+    else()
+        set(SOUNDIO_LIBRARIES_TARGET ${SOUNDIO_LIBRARY})
+        target_include_directories(mck-parting-c PRIVATE ${SOUNDIO_INCLUDE_DIR})
+    endif()
+
     target_link_libraries(mck-parting-c PRIVATE
         shared
-        SDL2::SDL2
+        ${SDL2_LIBRARIES_TARGET}
         Threads::Threads
-        ${SOUNDIO_LIBRARY}
-    )
-    target_include_directories(mck-parting-c PRIVATE
-        ${SOUNDIO_INCLUDE_DIR}
+        ${SOUNDIO_LIBRARIES_TARGET}
     )
 
 
@@ -171,6 +201,8 @@ else()
         hardware_pwm
         hardware_spi
         hardware_sync
+        pico_rand
+        pico_unique_id
         pico_multicore
         pico_stdlib
         tinyusb_device
