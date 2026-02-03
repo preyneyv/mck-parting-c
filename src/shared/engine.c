@@ -1,14 +1,14 @@
 #include <stdio.h>
+#include <stdlib.h>
 #include <unistd.h>
-
-#include <hardware/divider.h>
-#include <hardware/watchdog.h>
-#include <hardware/platform_defs.h>
 
 #include <shared/utils/elm.h>
 #include <shared/utils/timing.h>
 #include <shared/utils/vec.h>
 #include <shared/utils/misc.h>
+#include <shared/platform/sleep.h>
+#include <shared/platform/time.h>
+#include <shared/platform/watchdog.h>
 
 #include "anim.h"
 #include "apps/apps.h"
@@ -68,7 +68,7 @@ static void draw_fps(u8g2_t *u8g2, uint32_t fps)
   u8g2_DrawStr(u8g2, 3, 4, fps_str);
 }
 
-static void read_button(button_t *button, absolute_time_t now)
+static void read_button(button_t *button, platform_time_t now)
 {
   button->edge = false;
   bool pressed = engine_button_read(button->id);
@@ -88,7 +88,7 @@ static void read_button(button_t *button, absolute_time_t now)
     {
       // released
       button->pressed = false;
-      button->pressed_at = nil_time;
+      button->pressed_at = platform_time_nil();
       button->edge = true;
     }
   }
@@ -98,12 +98,12 @@ void engine_buttons_reset()
 {
   g_engine.buttons.left.edge = false;
   g_engine.buttons.left.pressed = false;
-  g_engine.buttons.left.pressed_at = nil_time;
+  g_engine.buttons.left.pressed_at = platform_time_nil();
   g_engine.buttons.left.ignore = true;
 
   g_engine.buttons.right.edge = false;
   g_engine.buttons.right.pressed = false;
-  g_engine.buttons.right.pressed_at = nil_time;
+  g_engine.buttons.right.pressed_at = platform_time_nil();
   g_engine.buttons.right.ignore = true;
 }
 
@@ -115,7 +115,7 @@ static void reset_buttons(bool ignore_menu)
   {
     g_engine.buttons.menu.edge = false;
     g_engine.buttons.menu.pressed = false;
-    g_engine.buttons.menu.pressed_at = nil_time;
+    g_engine.buttons.menu.pressed_at = platform_time_nil();
     g_engine.buttons.menu.ignore = true;
   }
 }
@@ -123,13 +123,15 @@ static void reset_buttons(bool ignore_menu)
 static void handle_menu_reset()
 {
   // if the menu button is held down for a while, reset using watchdog
-  watchdog_update();
+  platform_watchdog_update();
   if (g_engine.buttons.menu.pressed)
   {
-    if (time_reached(delayed_by_ms(g_engine.buttons.menu.pressed_at, 5000)))
+    if (platform_time_reached(
+            platform_time_delayed_by_ms(g_engine.buttons.menu.pressed_at,
+                                        5000)))
     {
       // reset the system
-      watchdog_enable(0, 0);
+      platform_watchdog_enable(0, false);
       while (1)
         ;
     }
@@ -139,7 +141,7 @@ static void handle_menu_reset()
 void engine_enter_sleep()
 {
   // TODO: this sometimes causes a hard fault on wakeup, investigate
-  watchdog_disable();
+  platform_watchdog_disable();
   display_set_enabled(&g_engine.display, false);
   peripheral_set_enabled(&g_engine.peripheral, false);
   audio_playback_set_enabled(false);
@@ -158,7 +160,7 @@ void engine_enter_sleep()
   audio_playback_set_enabled(true);
   display_set_enabled(&g_engine.display, true);
   peripheral_set_enabled(&g_engine.peripheral, true);
-  watchdog_enable(200, 1);
+  platform_watchdog_enable(200, true);
 
   reset_buttons(true);
 }
@@ -262,10 +264,11 @@ static void menu_frame()
         // change volume repeatedly when held
         if (held >= .2f)
         {
-          static absolute_time_t last_change = {0};
-          if (time_reached(delayed_by_ms(last_change, 200)))
+          static platform_time_t last_change = 0;
+          if (platform_time_reached(
+                  platform_time_delayed_by_ms(last_change, 200)))
           {
-            last_change = get_absolute_time();
+            last_change = platform_time_now();
             if (button_id == BUTTON_LEFT)
             {
               engine_change_volume(-1);
@@ -403,8 +406,8 @@ void engine_run_forever()
   ti_init(&ti_tick);
   ti_init(&ti_show);
 
-  uint64_t last_frame_us = 0;
-  absolute_time_t last_log_us = get_absolute_time();
+  platform_time_t last_frame_us = 0;
+  platform_time_t last_log_us = platform_time_now();
   uint32_t last_log_frames = 0;
   uint32_t fps = 0;
 
@@ -412,16 +415,15 @@ void engine_run_forever()
 
   uint32_t dt = 0;
   uint32_t peripheral_update_counter = 0;
-  watchdog_enable(200, 1);
-  g_engine.now = get_absolute_time();
+  platform_watchdog_enable(200, true);
+  g_engine.now = platform_time_now();
   g_engine.tick = 0;
   while (1)
   {
-    absolute_time_t now = get_absolute_time();
-    dt = ((uint32_t)absolute_time_diff_us(g_engine.now, now)) + dt;
-    divmod_result_t res = hw_divider_divmod_u32(dt, TICK_INTERVAL_US);
-    uint32_t ticks = to_quotient_u32(res);
-    dt = to_remainder_u32(res);
+    platform_time_t now = platform_time_now();
+    dt = ((uint32_t)platform_time_diff_us(g_engine.now, now)) + dt;
+    uint32_t ticks = dt / TICK_INTERVAL_US;
+    dt = dt % TICK_INTERVAL_US;
     g_engine.now = now;
 
     // update buttons
@@ -495,7 +497,7 @@ void engine_run_forever()
 
     // log fps and frame limit
     last_log_frames++;
-    if (absolute_time_diff_us(last_log_us, now) > 1000000)
+    if (platform_time_diff_us(last_log_us, now) > 1000000)
     {
       fps = last_log_frames;
       float ti_tick_avg = ti_get_average_ms(&ti_tick, true);
@@ -514,12 +516,12 @@ void engine_run_forever()
       last_log_frames = 0;
     }
 
-    now = get_absolute_time(); // update timestamp for frame limit calc
-    uint64_t spent_us = absolute_time_diff_us(last_frame_us, now);
+    now = platform_time_now(); // update timestamp for frame limit calc
+    int64_t spent_us = platform_time_diff_us(last_frame_us, now);
     if (spent_us < TARGET_FRAME_INTERVAL_US)
     {
-      sleep_us(TARGET_FRAME_INTERVAL_US - spent_us);
-      last_frame_us = get_absolute_time();
+      platform_sleep_us(TARGET_FRAME_INTERVAL_US - spent_us);
+      last_frame_us = platform_time_now();
     }
     else
     {
@@ -551,7 +553,7 @@ void engine_set_app(app_t *app)
   audio_synth_reset_voices(&g_engine.synth);
 
   // seed based on time
-  srand(to_ms_since_boot(get_absolute_time()));
+  srand((unsigned)(platform_time_now() / 1000));
 
   if (g_engine.app != NULL && g_engine.app->enter != NULL)
   {

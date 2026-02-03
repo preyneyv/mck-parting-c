@@ -7,6 +7,7 @@
 
 #include <shared/audio/synth.h>
 #include <shared/config.h>
+#include <shared/platform/time.h>
 #include <shared/utils/timing.h>
 
 #include "audio.h"
@@ -43,8 +44,8 @@ int main() {
   TimingInstrumenter ti_tick;
   TimingInstrumenter ti_show;
 
-  uint64_t last_frame_us = 0;
-  uint64_t last_log_us = 0;
+  platform_time_t last_frame_us = 0;
+  platform_time_t last_log_us = 0;
   uint32_t last_log_frames = 0;
   uint32_t fps = 0;
 
@@ -74,8 +75,8 @@ int main() {
     ti_stop(&ti_show);
 
     last_log_frames++;
-    absolute_time_t now = get_absolute_time();
-    if (absolute_time_diff_us(last_log_us, now) > 1000000) {
+    platform_time_t now = platform_time_now();
+    if (platform_time_diff_us(last_log_us, now) > 1000000) {
       fps = last_log_frames;
       float ti_tick_avg = ti_get_average_ms(&ti_tick, true);
       float ti_show_avg = ti_get_average_ms(&ti_show, true);
@@ -86,10 +87,10 @@ int main() {
       last_log_frames = 0;
     }
 
-    uint64_t spent_us = absolute_time_diff_us(last_frame_us, now);
+    int64_t spent_us = platform_time_diff_us(last_frame_us, now);
     if (spent_us < TARGET_FRAME_INTERVAL_US) {
       sleep_us(TARGET_FRAME_INTERVAL_US - spent_us);
-      last_frame_us = get_absolute_time();
+      last_frame_us = platform_time_now();
     } else {
       last_frame_us = now;
     }

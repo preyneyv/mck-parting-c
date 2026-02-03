@@ -77,6 +77,12 @@ if(PICO_PLATFORM STREQUAL "host")
         src/host/main.c
         src/host/audio.c
         src/host/display.c
+        src/host/platform/time.c
+        src/host/platform/sleep.c
+        src/host/platform/watchdog.c
+        src/host/platform/sync.c
+        src/host/platform/random.c
+        src/host/platform/unique_id.c
     )
 
     # force-include the host compatibility header
@@ -139,6 +145,12 @@ else()
         src/rp2/peripheral.c
         src/rp2/leds.c
         src/rp2/usb_descriptors.c
+        src/rp2/platform/time.c
+        src/rp2/platform/sleep.c
+        src/rp2/platform/watchdog.c
+        src/rp2/platform/sync.c
+        src/rp2/platform/random.c
+        src/rp2/platform/unique_id.c
     )
 
     target_compile_definitions(mck-parting-c PUBLIC

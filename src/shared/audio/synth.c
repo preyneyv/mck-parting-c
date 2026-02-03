@@ -4,9 +4,10 @@
 #include <stdio.h>
 #include <string.h>
 
-#include <pico/util/queue.h>
 #include <shared/utils/q1x15.h>
 #include <shared/utils/q1x31.h>
+#include <shared/platform/sync.h>
+#include <shared/platform/time.h>
 
 #include "buffer.h"
 #include "synth.h"
@@ -63,7 +64,7 @@ void audio_synth_init(audio_synth_t *synth, float sample_rate,
     voice->synth = synth;
     voice->note_number = -1;
     voice->patch_idx = 0;
-    voice->on_at = nil_time;
+    voice->on_at = platform_time_nil();
 
     for (int op_idx = 0; op_idx < AUDIO_SYNTH_OPERATOR_COUNT; op_idx++)
     {
@@ -88,9 +89,9 @@ void audio_synth_init(audio_synth_t *synth, float sample_rate,
     }
   }
 
-  queue_init(&synth->msg_queue, sizeof(audio_synth_message_t),
-             AUDIO_SYNTH_MESSAGE_QUEUE_SIZE);
-  mutex_init(&synth->mutex);
+  platform_queue_init(&synth->msg_queue, sizeof(audio_synth_message_t),
+                      AUDIO_SYNTH_MESSAGE_QUEUE_SIZE);
+  platform_mutex_init(&synth->mutex);
 }
 
 static void make_env_stage_from_cfg(audio_synth_env_state_stage_t *stage,
@@ -157,7 +158,7 @@ void audio_synth_voice_note_on(audio_synth_voice_t *voice, uint8_t patch_idx, ui
 {
   voice->note_number = note_number;
   voice->patch_idx = patch_idx;
-  voice->on_at = get_absolute_time();
+  voice->on_at = platform_time_now();
   audio_synth_patch_config_t *patch = &voice->synth->patches[patch_idx];
 
   q1x15 velocity_ratio = q1x15_mag(velocity, 127);
@@ -331,10 +332,10 @@ void audio_synth_fill_buffer(audio_synth_t *synth, audio_buffer_t buffer,
                              uint32_t buffer_size)
 {
   // lock the config
-  mutex_enter_blocking(&synth->mutex);
+  platform_mutex_lock(&synth->mutex);
   // handle queued messages
   audio_synth_message_t msg;
-  while (queue_try_remove(&synth->msg_queue, &msg))
+  while (platform_queue_try_remove(&synth->msg_queue, &msg))
   {
     audio_synth_handle_message(synth, &msg);
   }
@@ -381,14 +382,14 @@ void audio_synth_fill_buffer(audio_synth_t *synth, audio_buffer_t buffer,
     buffer[i] = audio_buffer_frame_from_mono((int16_t)sample);
   }
 
-  mutex_exit(&synth->mutex);
+  platform_mutex_unlock(&synth->mutex);
 }
 
 void audio_synth_panic(audio_synth_t *synth)
 {
   // remove all pending messages from the queue
   audio_synth_message_t msg;
-  while (queue_try_remove(&synth->msg_queue, &msg))
+  while (platform_queue_try_remove(&synth->msg_queue, &msg))
   {
     // do nothing, just dequeue
   }
@@ -406,16 +407,16 @@ void audio_synth_note_on(audio_synth_t *synth, audio_synth_message_note_on_t msg
   audio_synth_voice_t *oldest_free_voice = NULL;
   audio_synth_voice_t *oldest_same_patch_voice = NULL;
   audio_synth_voice_t *oldest_any_voice = NULL;
-  absolute_time_t oldest_free = at_the_end_of_time;
-  absolute_time_t oldest_same_patch = at_the_end_of_time;
-  absolute_time_t oldest_any = at_the_end_of_time;
+  platform_time_t oldest_free = platform_time_at_end();
+  platform_time_t oldest_same_patch = platform_time_at_end();
+  platform_time_t oldest_any = platform_time_at_end();
   for (int voice_idx = 0; voice_idx < AUDIO_SYNTH_VOICE_COUNT; voice_idx++)
   {
     audio_synth_voice_t *voice = &synth->voices[voice_idx];
     if (voice->note_number == -1)
     {
       // free voice found
-      if (absolute_time_diff_us(voice->on_at, oldest_free) > 0)
+      if (platform_time_diff_us(voice->on_at, oldest_free) > 0)
       {
         oldest_free = voice->on_at;
         oldest_free_voice = voice;
@@ -425,14 +426,14 @@ void audio_synth_note_on(audio_synth_t *synth, audio_synth_message_note_on_t msg
     if (voice->patch_idx == msg.patch_idx)
     {
       // same patch
-      if (absolute_time_diff_us(voice->on_at, oldest_same_patch) > 0)
+      if (platform_time_diff_us(voice->on_at, oldest_same_patch) > 0)
       {
         oldest_same_patch = voice->on_at;
         oldest_same_patch_voice = voice;
       }
     }
     // check for oldest any
-    if (absolute_time_diff_us(voice->on_at, oldest_any) > 0)
+    if (platform_time_diff_us(voice->on_at, oldest_any) > 0)
     {
       oldest_any = voice->on_at;
       if (oldest_any_voice == NULL)
@@ -506,7 +507,7 @@ void audio_synth_handle_message(audio_synth_t *synth,
 
 void audio_synth_enqueue(audio_synth_t *synth, audio_synth_message_t *msg)
 {
-  queue_try_add(&synth->msg_queue, msg);
+  platform_queue_try_add(&synth->msg_queue, msg);
 }
 
 void audio_synth_reset_voices(audio_synth_t *synth)
@@ -526,7 +527,7 @@ void audio_synth_patch_config_set(audio_synth_t *synth, uint8_t patch_idx,
                                   audio_synth_patch_config_t config)
 {
   assert(patch_idx < AUDIO_SYNTH_PATCH_COUNT);
-  mutex_enter_blocking(&synth->mutex);
+  platform_mutex_lock(&synth->mutex);
   synth->patches[patch_idx] = config;
-  mutex_exit(&synth->mutex);
+  platform_mutex_unlock(&synth->mutex);
 }
