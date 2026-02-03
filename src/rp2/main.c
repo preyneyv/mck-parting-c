@@ -320,6 +320,8 @@ static void midi_task(void)
 
 int main()
 {
+  main_real();
+  return 0;
   stdio_init_all();
   while (1)
   {

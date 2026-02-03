@@ -1,7 +1,9 @@
 #include <stdio.h>
+#include <unistd.h>
 
 #include <hardware/divider.h>
 #include <hardware/watchdog.h>
+#include <hardware/platform_defs.h>
 
 #include <shared/utils/elm.h>
 #include <shared/utils/timing.h>
@@ -493,6 +495,11 @@ void engine_run_forever()
           "fps: %d | frame: %.2f / %.2f ms | tick: %.2f ms | show: %.2f ms\n",
           fps, ti_frame_avg, TARGET_FRAME_INTERVAL_US / 1000.0f, ti_tick_avg,
           ti_show_avg);
+
+      extern char __StackLimit;
+      char *heap = sbrk(0);
+      printf("ram free: %.2f kb", ((float)(&__StackLimit - heap)) / 1024.0f);
+
       last_log_us = now;
       last_log_frames = 0;
     }

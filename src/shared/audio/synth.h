@@ -2,9 +2,11 @@
 // Supports additive and frequency modulation synthesis.
 // Uses fixed-point arithmetic for audio processing to be fast on MCUs.
 
-// todo: synth -> [instrument] -> voice -> operator
-//                   |- add this layer for polyphony.
-//                   |- voices/ops on an instrument have the same parameters.
+// synth -> voice -> operator
+//       -> patch -> op cfg
+
+// each voice maps to a patch when a note is played
+// voice stealing priority: oldest note of same patch > oldest note
 
 #pragma once
 
@@ -25,6 +27,7 @@
 #define AUDIO_SYNTH_LUT_RES 10
 #define AUDIO_SYNTH_LUT_SIZE (1 << AUDIO_SYNTH_LUT_RES)
 #define AUDIO_SYNTH_MESSAGE_QUEUE_SIZE 32
+#define AUDIO_SYNTH_PATCH_COUNT 32
 
 typedef struct audio_synth_t audio_synth_t;
 typedef struct audio_synth_voice_t audio_synth_voice_t;
@@ -38,20 +41,22 @@ typedef enum
 
 typedef struct audio_synth_message_note_on_t
 {
-  uint8_t voice;        // voice index (0-3)
-  uint16_t note_number; // MIDI note number (0-127)
-  uint8_t velocity;     // velocity (0-127)
+  uint8_t patch_idx;   // patch index (0-15)
+  uint8_t note_number; // MIDI note number (0-127)
+  uint8_t velocity;    // velocity (0-127)
 } audio_synth_message_note_on_t;
 
 typedef struct audio_synth_message_note_off_t
 {
-  uint8_t voice; // voice index (0-3)
+  uint8_t patch_idx;  // patch index (0-15)
+  int8_t note_number; // MIDI note number (0-127) (-1 = all notes)
 } audio_synth_message_note_off_t;
 
 typedef struct audio_synth_message_panic_t
 {
   // no data for panic
 } audio_synth_message_panic_t;
+
 typedef struct audio_synth_message_t
 {
   audio_synth_message_type_t type;
@@ -93,6 +98,11 @@ typedef struct audio_synth_operator_config_t
   // todo: waveform
 } audio_synth_operator_config_t;
 
+typedef struct audio_synth_patch_config_t
+{
+  audio_synth_operator_config_t ops[AUDIO_SYNTH_OPERATOR_COUNT];
+} audio_synth_patch_config_t;
+
 static const audio_synth_operator_config_t audio_synth_operator_config_default =
     {.freq_mult = 1,
      .level = Q1X15_ZERO,
@@ -102,6 +112,14 @@ static const audio_synth_operator_config_t audio_synth_operator_config_default =
          .d = 0,
          .s = Q1X31_ONE,
          .r = 0,
+     }};
+
+static const audio_synth_patch_config_t audio_synth_patch_config_default =
+    {.ops = {
+         audio_synth_operator_config_default,
+         audio_synth_operator_config_default,
+         audio_synth_operator_config_default,
+         audio_synth_operator_config_default,
      }};
 
 typedef struct audio_synth_env_state_stage_t
@@ -140,6 +158,11 @@ typedef struct audio_synth_operator_t
 typedef struct audio_synth_voice_t
 {
   audio_synth_operator_t ops[AUDIO_SYNTH_OPERATOR_COUNT];
+
+  int8_t note_number;    // active midi note. -1 = none
+  absolute_time_t on_at; // time when note was turned on
+  uint8_t patch_idx;     // current patch index
+
   audio_synth_t *synth;
 } audio_synth_voice_t;
 
@@ -152,6 +175,7 @@ typedef struct audio_synth_t
   q1x15 master_level;
 
   audio_synth_voice_t voices[AUDIO_SYNTH_VOICE_COUNT];
+  audio_synth_patch_config_t patches[AUDIO_SYNTH_PATCH_COUNT];
 
   queue_t msg_queue; // message queue for thread-safe operation
   mutex_t mutex;     // mutex for any thread-safe operations
@@ -162,7 +186,7 @@ void audio_synth_operator_set_config(audio_synth_operator_t *op,
                                      audio_synth_operator_config_t config);
 
 // turn on a note for a voice
-void audio_synth_voice_note_on(audio_synth_voice_t *voice, uint16_t note_number,
+void audio_synth_voice_note_on(audio_synth_voice_t *voice, uint8_t patch_idx, uint8_t note_number,
                                uint8_t velocity);
 // turn off a note for a voice
 void audio_synth_voice_note_off(audio_synth_voice_t *voice);
@@ -195,6 +219,9 @@ void audio_synth_enqueue(audio_synth_t *synth, audio_synth_message_t *msg);
 // fill a buffer with samples from the synthesizer
 void audio_synth_fill_buffer(audio_synth_t *synth, audio_buffer_t buffer,
                              uint32_t buffer_size);
+// set a patch configuration
+void audio_synth_patch_config_set(audio_synth_t *synth, uint8_t patch_idx,
+                                  audio_synth_patch_config_t config);
 
 // convert a note name (e.g. "C4", "A#3") to a MIDI note number
 static inline uint16_t note(char *name)

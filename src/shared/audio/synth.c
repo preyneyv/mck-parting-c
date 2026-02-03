@@ -16,8 +16,8 @@ static inline uint32_t lut_key(uint32_t phase)
   return (phase >> (32 - AUDIO_SYNTH_LUT_RES));
 }
 
-// todo: pre-bake into a header file?
-static q1x15 LUT_SINE[AUDIO_SYNTH_LUT_SIZE];
+// put the sine LUT in Y scratch for core 1 prio
+__attribute__((section(".scratch_y"))) static q1x15 LUT_SINE[AUDIO_SYNTH_LUT_SIZE];
 static void _fill_sine_lut()
 {
   for (int i = 0; i < AUDIO_SYNTH_LUT_SIZE; i++)
@@ -61,6 +61,9 @@ void audio_synth_init(audio_synth_t *synth, float sample_rate,
   {
     audio_synth_voice_t *voice = &synth->voices[voice_idx];
     voice->synth = synth;
+    voice->note_number = -1;
+    voice->patch_idx = 0;
+    voice->on_at = nil_time;
 
     for (int op_idx = 0; op_idx < AUDIO_SYNTH_OPERATOR_COUNT; op_idx++)
     {
@@ -73,6 +76,15 @@ void audio_synth_init(audio_synth_t *synth, float sample_rate,
       op->phase = 0;
       op->d_phase = 0;
       op->level = Q1X15_ZERO;
+    }
+  }
+
+  for (int patch_idx = 0; patch_idx < AUDIO_SYNTH_PATCH_COUNT; patch_idx++)
+  {
+    audio_synth_patch_config_t *patch = &synth->patches[patch_idx];
+    for (int op_idx = 0; op_idx < AUDIO_SYNTH_OPERATOR_COUNT; op_idx++)
+    {
+      patch->ops[op_idx] = audio_synth_operator_config_default;
     }
   }
 
@@ -105,8 +117,6 @@ static void make_env_stage_from_cfg(audio_synth_env_state_stage_t *stage,
 void audio_synth_operator_set_config(audio_synth_operator_t *op,
                                      audio_synth_operator_config_t config)
 {
-  mutex_t *mutex = &op->voice->synth->mutex;
-  mutex_enter_blocking(mutex);
   op->config = config;
 
   // update envelope timing
@@ -119,12 +129,10 @@ void audio_synth_operator_set_config(audio_synth_operator_t *op,
                           config.env.s);
   make_env_stage_from_cfg(&op->env.stages[3], d_timebase, config.env.r,
                           config.env.s, Q1X31_ZERO);
-
-  mutex_exit(mutex);
 }
 
 static void audio_synth_operator_note_on(audio_synth_operator_t *op,
-                                         uint16_t note_number, q1x15 velocity)
+                                         uint8_t note_number, q1x15 velocity)
 {
   // this *might* be called without a previous note_off
 
@@ -144,14 +152,20 @@ static void audio_synth_operator_note_on(audio_synth_operator_t *op,
   op->active = true;
 }
 
-void audio_synth_voice_note_on(audio_synth_voice_t *voice, uint16_t note_number,
+void audio_synth_voice_note_on(audio_synth_voice_t *voice, uint8_t patch_idx, uint8_t note_number,
                                uint8_t velocity)
 {
+  voice->note_number = note_number;
+  voice->patch_idx = patch_idx;
+  voice->on_at = get_absolute_time();
+  audio_synth_patch_config_t *patch = &voice->synth->patches[patch_idx];
+
   q1x15 velocity_ratio = q1x15_mag(velocity, 127);
 
   for (int op_idx = 0; op_idx < AUDIO_SYNTH_OPERATOR_COUNT; op_idx++)
   {
     audio_synth_operator_t *op = &voice->ops[op_idx];
+    audio_synth_operator_set_config(op, patch->ops[op_idx]);
     audio_synth_operator_note_on(op, note_number, velocity_ratio);
   }
 }
@@ -178,6 +192,9 @@ static void audio_synth_operator_note_off(audio_synth_operator_t *op)
 
 void audio_synth_voice_note_off(audio_synth_voice_t *voice)
 {
+  voice->note_number = -1;
+  voice->on_at = nil_time;
+
   for (int op_idx = 0; op_idx < AUDIO_SYNTH_OPERATOR_COUNT; op_idx++)
   {
     audio_synth_operator_t *op = &voice->ops[op_idx];
@@ -383,6 +400,71 @@ void audio_synth_panic(audio_synth_t *synth)
   }
 }
 
+void audio_synth_note_on(audio_synth_t *synth, audio_synth_message_note_on_t msg)
+{
+  // find a free voice
+  // priority: free voice > oldest note of same patch > oldest note
+  audio_synth_voice_t *selected_voice = NULL;
+  absolute_time_t oldest_same_patch = nil_time;
+  absolute_time_t oldest_any = nil_time;
+  for (int voice_idx = 0; voice_idx < AUDIO_SYNTH_VOICE_COUNT; voice_idx++)
+  {
+    audio_synth_voice_t *voice = &synth->voices[voice_idx];
+    if (voice->note_number == -1)
+    {
+      // free voice found
+      selected_voice = voice;
+      break;
+    }
+    else
+    {
+      // occupied voice
+      if (voice->patch_idx == msg.patch_idx)
+      {
+        // same patch
+        if (is_nil_time(oldest_same_patch) ||
+            absolute_time_diff_us(voice->on_at, oldest_same_patch) > 0)
+        {
+          oldest_same_patch = voice->on_at;
+          selected_voice = voice;
+        }
+      }
+      // check for oldest any
+      if (is_nil_time(oldest_any) ||
+          absolute_time_diff_us(voice->on_at, oldest_any) > 0)
+      {
+        oldest_any = voice->on_at;
+        if (selected_voice == NULL)
+          selected_voice = voice;
+      }
+    }
+  }
+
+  if (selected_voice == NULL)
+  {
+    printf("audio_synth_note_on: [ERR] no voice available!\n");
+    selected_voice = &synth->voices[0];
+  }
+  audio_synth_voice_note_on(selected_voice, msg.patch_idx, msg.note_number,
+                            msg.velocity);
+}
+
+void audio_synth_note_off(audio_synth_t *synth, audio_synth_message_note_off_t msg)
+{
+  // find the voice playing this note
+  for (int voice_idx = 0; voice_idx < AUDIO_SYNTH_VOICE_COUNT; voice_idx++)
+  {
+    audio_synth_voice_t *voice = &synth->voices[voice_idx];
+    if ((msg.note_number == -1 || voice->note_number == msg.note_number) &&
+        voice->patch_idx == msg.patch_idx)
+    {
+      // kill it
+      audio_synth_voice_note_off(voice);
+      break;
+    }
+  }
+}
+
 void audio_synth_handle_message(audio_synth_t *synth,
                                 audio_synth_message_t *msg)
 {
@@ -390,16 +472,14 @@ void audio_synth_handle_message(audio_synth_t *synth,
   {
   case AUDIO_SYNTH_MESSAGE_NOTE_ON:
   {
-    assert(msg->data.note_on.voice < AUDIO_SYNTH_VOICE_COUNT);
-    audio_synth_voice_note_on(&synth->voices[msg->data.note_on.voice],
-                              msg->data.note_on.note_number,
-                              msg->data.note_on.velocity);
+    assert(msg->data.note_on.patch_idx < AUDIO_SYNTH_PATCH_COUNT);
+    audio_synth_note_on(synth, msg->data.note_on);
     break;
   }
   case AUDIO_SYNTH_MESSAGE_NOTE_OFF:
   {
-    assert(msg->data.note_off.voice < AUDIO_SYNTH_VOICE_COUNT);
-    audio_synth_voice_note_off(&synth->voices[msg->data.note_off.voice]);
+    assert(msg->data.note_off.patch_idx < AUDIO_SYNTH_PATCH_COUNT);
+    audio_synth_note_off(synth, msg->data.note_off);
     break;
   }
   case AUDIO_SYNTH_MESSAGE_PANIC:
@@ -426,4 +506,13 @@ void audio_synth_reset_voices(audio_synth_t *synth)
                                       audio_synth_operator_config_default);
     }
   }
+}
+
+void audio_synth_patch_config_set(audio_synth_t *synth, uint8_t patch_idx,
+                                  audio_synth_patch_config_t config)
+{
+  assert(patch_idx < AUDIO_SYNTH_PATCH_COUNT);
+  mutex_enter_blocking(&synth->mutex);
+  synth->patches[patch_idx] = config;
+  mutex_exit(&synth->mutex);
 }

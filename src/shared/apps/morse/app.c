@@ -219,15 +219,15 @@ static void _start_game()
 static void enter()
 {
   // setup audio synth
-  audio_synth_operator_config_t config = audio_synth_operator_config_default;
-  config.level = q1x15_f(.5f);
-  config.env = (audio_synth_env_config_t){
+  audio_synth_patch_config_t patch = audio_synth_patch_config_default;
+  patch.ops[0].level = q1x15_f(.5f);
+  patch.ops[0].env = (audio_synth_env_config_t){
       .a = 2,
       .d = 0,
       .s = q1x31_f(1.0f),
       .r = 5,
   };
-  audio_synth_operator_set_config(&g_engine.synth.voices[0].ops[0], config);
+  audio_synth_patch_config_set(&g_engine.synth, 0, patch);
 
   _start_game();
 }
@@ -264,7 +264,7 @@ static void tick_game()
             .type = AUDIO_SYNTH_MESSAGE_NOTE_ON,
             .data.note_on =
                 {
-                    .voice = 0,
+                    .patch_idx = 0,
                     .note_number = note("C5"),
                     .velocity = 100,
                 },
@@ -342,7 +342,8 @@ static void tick_game()
             .type = AUDIO_SYNTH_MESSAGE_NOTE_OFF,
             .data.note_off =
                 {
-                    .voice = 0,
+                    .patch_idx = 0,
+                    .note_number = note("C5"),
                 },
         });
   }
@@ -362,7 +363,8 @@ static void _finish_game()
       &(audio_synth_message_t){
           .type = AUDIO_SYNTH_MESSAGE_NOTE_OFF,
           .data.note_off = {
-              .voice = 0,
+              .patch_idx = 0,
+              .note_number = note("C5"),
           },
       });
 

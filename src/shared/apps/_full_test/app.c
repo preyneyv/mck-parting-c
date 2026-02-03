@@ -92,33 +92,32 @@ static const unsigned char image_Sprite_0001_bits[] = {
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
     0x00, 0x00, 0x00, 0x00};
 
-static void enter() {
-  audio_synth_operator_config_t config = audio_synth_operator_config_default;
-  config.env = (audio_synth_env_config_t){
+static void enter()
+{
+  audio_synth_patch_config_t patch = audio_synth_patch_config_default;
+  patch.ops[0].env = (audio_synth_env_config_t){
       .a = 0,
       .d = 700,
       .s = q1x31_f(.2f), // sustain level
       .r = 200,
   };
-  config.freq_mult = 11;
-  config.level = q1x15_f(0.3f);
-  audio_synth_operator_set_config(&g_engine.synth.voices[0].ops[0], config);
-  audio_synth_operator_set_config(&g_engine.synth.voices[1].ops[0], config);
+  patch.ops[0].freq_mult = 11;
+  patch.ops[0].level = q1x15_f(0.3f);
 
-  config = audio_synth_operator_config_default;
-  config.env = (audio_synth_env_config_t){
+  patch.ops[1].env = (audio_synth_env_config_t){
       .a = 0,
       .d = 1200,
       .s = q1x31_f(0.f), // sustain level
       .r = 300,
   };
-  config.level = q1x15_f(.5f);
-  config.mode = AUDIO_SYNTH_OP_MODE_FREQ_MOD;
-  audio_synth_operator_set_config(&g_engine.synth.voices[0].ops[1], config);
-  audio_synth_operator_set_config(&g_engine.synth.voices[1].ops[1], config);
+  patch.ops[1].level = q1x15_f(.5f);
+  patch.ops[1].mode = AUDIO_SYNTH_OP_MODE_FREQ_MOD;
+
+  audio_synth_patch_config_set(&g_engine.synth, 0, patch);
 }
 
-static void frame() {
+static void frame()
+{
   static uint8_t i = 0;
   u8g2_t *u8g2 = &g_engine.display.u8g2;
 
@@ -130,13 +129,19 @@ static void frame() {
   return;
   u8g2_SetDrawColor(u8g2, 1);
 
-  if (i < 127) {
+  if (i < 127)
+  {
     u8g2_DrawBox(u8g2, 0, 0, u8g2->width, u8g2->height);
-  } else {
+  }
+  else
+  {
     u8g2_SetFont(u8g2, u8g2_font_5x7_tf);
-    if (g_engine.peripheral.plugged_in) {
+    if (g_engine.peripheral.plugged_in)
+    {
       u8g2_DrawStr(u8g2, 0, 30, "USB");
-    } else {
+    }
+    else
+    {
       u8g2_DrawStr(u8g2, 0, 30, "BAT");
     }
     char battery_str[8];
@@ -147,69 +152,83 @@ static void frame() {
   i++;
   leds_set_all(&g_engine.leds, (color_t){.hex = 0xFFFFFFFF});
 
-  if (g_engine.buttons.left.pressed) {
+  if (g_engine.buttons.left.pressed)
+  {
     g_engine.leds.colors[0].r = 0;
   }
-  if (g_engine.buttons.right.pressed) {
+  if (g_engine.buttons.right.pressed)
+  {
     g_engine.leds.colors[1].r = 0;
   }
-  if (g_engine.buttons.menu.pressed) {
+  if (g_engine.buttons.menu.pressed)
+  {
     g_engine.leds.colors[0].b = 0;
     g_engine.leds.colors[1].b = 0;
   }
 
-  if (g_engine.buttons.left.edge) {
+  if (g_engine.buttons.left.edge)
+  {
     printf("l edge\n");
-    if (g_engine.buttons.left.pressed) {
+    if (g_engine.buttons.left.pressed)
+    {
       audio_synth_enqueue(&g_engine.synth,
                           &(audio_synth_message_t){
                               .type = AUDIO_SYNTH_MESSAGE_NOTE_ON,
                               .data.note_on =
                                   {
-                                      .voice = 0,
+                                      .patch_idx = 0,
                                       .note_number = note("C4"),
                                       .velocity = 100,
                                   },
                           });
-    } else {
+    }
+    else
+    {
       audio_synth_enqueue(&g_engine.synth,
                           &(audio_synth_message_t){
                               .type = AUDIO_SYNTH_MESSAGE_NOTE_OFF,
-                              .data.note_off = {.voice = 0},
+                              .data.note_off = {.patch_idx = 0, .note_number = note("C4")},
                           });
     }
   }
-  if (g_engine.buttons.right.edge) {
-    if (g_engine.buttons.right.pressed) {
+  if (g_engine.buttons.right.edge)
+  {
+    if (g_engine.buttons.right.pressed)
+    {
       audio_synth_enqueue(&g_engine.synth,
                           &(audio_synth_message_t){
                               .type = AUDIO_SYNTH_MESSAGE_NOTE_ON,
                               .data.note_on =
                                   {
-                                      .voice = 1,
+                                      .patch_idx = 0,
                                       .note_number = note("G4"),
                                       .velocity = 100,
                                   },
                           });
-    } else {
+    }
+    else
+    {
       audio_synth_enqueue(&g_engine.synth,
                           &(audio_synth_message_t){
                               .type = AUDIO_SYNTH_MESSAGE_NOTE_OFF,
-                              .data.note_off = {.voice = 1},
+                              .data.note_off = {.patch_idx = 0, .note_number = note("G4")},
                           });
     }
   }
 
   if (g_engine.buttons.menu.pressed && g_engine.buttons.left.pressed &&
-      g_engine.buttons.right.pressed) {
+      g_engine.buttons.right.pressed)
+  {
     display_set_enabled(&g_engine.display, false);
     peripheral_set_enabled(&g_engine.peripheral, false);
     audio_playback_set_enabled(false);
     watchdog_disable();
-    while (1) {
+    while (1)
+    {
       // trap until reset from watchdog or machine
       sleep_ms(1000);
-      if (engine_button_read(BUTTON_MENU)) {
+      if (engine_button_read(BUTTON_MENU))
+      {
         watchdog_enable(0, 0);
         while (1)
           ;

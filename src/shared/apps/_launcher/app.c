@@ -10,11 +10,11 @@ static const int16_t APP_MARGIN = 8;
 static const int16_t APP_SCROLL_MARGIN =
     (DISP_WIDTH - (APP_SIZE * 2 + APP_MARGIN)) / 2;
 
-static const uint8_t APP_COUNT = 6;
+static const uint8_t APP_COUNT = 5;
 static app_t *apps[] = {
     &app_bongocat,
     &app_morse,
-    &app_rhythm,
+    // &app_rhythm,
     &app_asteroids,
     &app_dummy,
     &app_bongocat,
