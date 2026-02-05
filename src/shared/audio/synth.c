@@ -177,6 +177,13 @@ static void audio_synth_operator_note_off(audio_synth_operator_t *op)
     return;
   }
   op->active = false;
+
+  // if sustain is zero (pluck) then ignore note_off since attack->decay already
+  // goes to zero.
+  if (op->config.env.s == Q1X31_ZERO && op->env.stage < 2)
+  {
+    return;
+  }
   audio_synth_env_state_t *env = &op->env;
 
   // recompute release envelope from current env level
