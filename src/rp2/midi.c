@@ -21,7 +21,7 @@ static void handle_sysex(uint8_t *data, int len)
     switch (cmd.cmd)
     {
     case AUDIO_SYNTH_SYSEX_CMD_SET_PATCH:
-        printf("  Set Patch SysEx: patch_idx=%d\n", cmd.data.set_patch.patch_idx);
+        // printf("  Set Patch SysEx: patch_idx=%d\n", cmd.data.set_patch.patch_idx);
         audio_synth_patch_config_set(&g_engine.synth,
                                      cmd.data.set_patch.patch_idx,
                                      cmd.data.set_patch.patch);
@@ -50,7 +50,7 @@ static void handle_midi(uint8_t status, uint8_t d1, uint8_t d2)
                                         .patch_idx = ch,
                                         .note_number = d1,
                                     }});
-            printf("Note OFF   ch=%d note=%d vel=%d\n", ch + 1, d1, d2);
+            // printf("Note OFF   ch=%d note=%d vel=%d\n", ch + 1, d1, d2);
         }
         else
         {
@@ -64,7 +64,7 @@ static void handle_midi(uint8_t status, uint8_t d1, uint8_t d2)
                                         .velocity = d2,
                                     }});
 
-            printf("Note ON   ch=%d note=%d vel=%d\n", ch + 1, d1, d2);
+            // printf("Note ON   ch=%d note=%d vel=%d\n", ch + 1, d1, d2);
         }
         break;
 
@@ -78,7 +78,7 @@ static void handle_midi(uint8_t status, uint8_t d1, uint8_t d2)
                                     .patch_idx = ch,
                                     .note_number = d1,
                                 }});
-        printf("Note OFF  ch=%d note=%d vel=%d\n", ch + 1, d1, d2);
+        // printf("Note OFF  ch=%d note=%d vel=%d\n", ch + 1, d1, d2);
         break;
     }
 
@@ -93,7 +93,7 @@ static void handle_midi(uint8_t status, uint8_t d1, uint8_t d2)
                                         .patch_idx = ch,
                                         .note_number = -1,
                                     }});
-            printf("All Notes Off ch=%d\n", ch + 1);
+            // printf("All Notes Off ch=%d\n", ch + 1);
         }
         else if (d1 == 120)
         {
@@ -102,7 +102,7 @@ static void handle_midi(uint8_t status, uint8_t d1, uint8_t d2)
                                 &(audio_synth_message_t){
                                     .type = AUDIO_SYNTH_MESSAGE_PANIC,
                                     .data.panic = {}});
-            printf("PANIC (All Sound Off) ch=%d\n", ch + 1);
+            // printf("PANIC (All Sound Off) ch=%d\n", ch + 1);
         }
         break;
 
@@ -123,6 +123,7 @@ void midi_task(void)
     while (tud_midi_available())
     {
         tud_midi_packet_read(packet);
+        engine_mark_input();
 
         uint8_t cin = packet[0] & 0x0F;
         uint8_t status = packet[1];

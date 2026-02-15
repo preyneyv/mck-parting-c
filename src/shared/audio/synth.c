@@ -511,7 +511,6 @@ void audio_synth_note_off(audio_synth_t *synth, audio_synth_message_note_off_t m
     {
       // kill it
       audio_synth_voice_note_off(voice);
-      break;
     }
   }
 }

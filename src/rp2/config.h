@@ -29,7 +29,7 @@
 #define AUDIO_I2S_EN 21
 #define AUDIO_I2S_PIO pio0
 
-#define AUDIO_BUFFER_SIZE 128
+#define AUDIO_BUFFER_SIZE 256
 #define AUDIO_BUFFER_POOL_SIZE 2
 
 // todo: compute some form of audio budget and warn if exceeded

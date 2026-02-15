@@ -26,7 +26,7 @@
 #define AUDIO_SYNTH_OPERATOR_COUNT 4
 #define AUDIO_SYNTH_LUT_RES 10
 #define AUDIO_SYNTH_LUT_SIZE (1 << AUDIO_SYNTH_LUT_RES)
-#define AUDIO_SYNTH_MESSAGE_QUEUE_SIZE 32
+#define AUDIO_SYNTH_MESSAGE_QUEUE_SIZE 64
 #define AUDIO_SYNTH_PATCH_COUNT 32
 
 typedef struct audio_synth_t audio_synth_t;
@@ -41,14 +41,14 @@ typedef enum
 
 typedef struct audio_synth_message_note_on_t
 {
-  uint8_t patch_idx;   // patch index (0-15)
+  uint8_t patch_idx;   // patch index (0-31)
   uint8_t note_number; // MIDI note number (0-127)
   uint8_t velocity;    // velocity (0-127)
 } audio_synth_message_note_on_t;
 
 typedef struct audio_synth_message_note_off_t
 {
-  uint8_t patch_idx;  // patch index (0-15)
+  uint8_t patch_idx;  // patch index (0-31)
   int8_t note_number; // MIDI note number (0-127) (-1 = all notes)
 } audio_synth_message_note_off_t;
 

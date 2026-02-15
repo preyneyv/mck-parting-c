@@ -143,8 +143,8 @@ void audio_playback_run_forever(audio_synth_t *synth)
     if (i > buf_per_sec)
     {
       i = 0;
-      // printf("synth: %.2f ms / %.2f ms\n", ti_get_average_ms(&ti_synth, true),
-      //        ms_per_buf);
+      printf("synth: %.2f ms / %.2f ms\n", ti_get_average_ms(&ti_synth, true),
+             ms_per_buf);
     }
     i++;
   }
