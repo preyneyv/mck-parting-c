@@ -47,6 +47,12 @@ slider29:0<0,5000,1>  Op 4 Env R
 // Constants
 // =========================
 @init
+// we just use @block to detect transport start
+// this prevents us from sending two sysex dumps if the track contains separate
+// takes when exporting
+ext_noinit = 1; 
+
+
 MFG = $x7D;
 CMD_SET_PATCH = 1;
 PROTO_VER = 1;
@@ -65,7 +71,7 @@ SEND_BUF = 200000;
 prev_play = 0;
 
 // Dirty tracking
-dirty = 1;           // force publish on load
+dirty = 0;
 
 function clamp01(x) ( x < 0 ? 0 : (x > 1 ? 1 : x); );
 
@@ -164,6 +170,8 @@ build_sysex_to_gmem(ch);
 // Slider changes
 // =========================
 @slider
+ch = (slider1|0);
+ch < 0 ? ch = 0 : (ch > 15 ? ch = 15);
 dirty = 1;
 
 // =========================
@@ -172,6 +180,12 @@ dirty = 1;
 @block
 // pass-through incoming MIDI
 while (midirecv(offset, msg1, msg2, msg3)) (
+  // remap to the target channel
+  status = msg1 & 255;
+
+  (status >= $x80 && status <= $xEF) ? (
+    msg1 = (status & $xF0) | (slider1|0);
+  );
   midisend(offset, msg1, msg2, msg3);
 );
 
@@ -184,8 +198,6 @@ prev_play = play;
 
 // Rebuild gmem when dirty (including fresh load), but only for this instance's channel
 dirty ? (
-  ch = (slider1|0);
-  ch < 0 ? ch = 0 : (ch > 15 ? ch = 15);
   build_sysex_to_gmem(ch);
   send_sysex_from_gmem(ch);
   dirty = 0;
