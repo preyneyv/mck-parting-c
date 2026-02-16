@@ -24,3 +24,7 @@ static const uint32_t DISP_PIX = DISP_WIDTH * DISP_HEIGHT;
 // unnecessary.
 #define AUDIO_SAMPLE_RATE 48000
 #define AUDIO_SYNTH_TIMEBASE 1000 // 1 second
+
+//// POWER MANAGEMENT ////
+// Auto-sleep after this many milliseconds of no input.
+#define AUTO_SLEEP_TIMEOUT_MS 30000

@@ -44,6 +44,29 @@ void on_frame_cb()
   midi_task();
 }
 
+static bool sleep_poll_cb()
+{
+  // wake on any usb activity
+
+  tud_task();
+  if (tud_midi_available())
+  {
+    return true;
+  }
+
+  if (tud_cdc_available())
+  {
+    return true;
+  }
+
+  if (tud_vendor_available())
+  {
+    return true;
+  }
+
+  return false;
+}
+
 void core0_main()
 {
   g_engine.on_frame_cb = on_frame_cb;
@@ -182,6 +205,8 @@ void engine_sleep_until_interrupt()
   gpio_set_dormant_irq_enabled(BUTTON_PIN_L, event, true);
   gpio_set_dormant_irq_enabled(BUTTON_PIN_R, event, true);
   gpio_set_dormant_irq_enabled(BUTTON_PIN_M, event, true);
+  // wake on USB power present (active-low PGOOD)
+  gpio_set_dormant_irq_enabled(PERIPH_VSYS_PGOOD_N, event, true);
 
   if (use_xosc)
   {
@@ -197,6 +222,7 @@ void engine_sleep_until_interrupt()
   gpio_acknowledge_irq(BUTTON_PIN_L, event);
   gpio_acknowledge_irq(BUTTON_PIN_R, event);
   gpio_acknowledge_irq(BUTTON_PIN_M, event);
+  gpio_acknowledge_irq(PERIPH_VSYS_PGOOD_N, event);
 
   // wake from sleep
   // - enable rosc
@@ -239,6 +265,7 @@ int main()
   printf("prism v1\n");
   critical_section_init(&sleep_critical_section);
   engine_init();
+  g_engine.on_sleep_poll_cb = sleep_poll_cb;
 
   // start audio core
   multicore_reset_core1();

@@ -147,8 +147,17 @@ static void frame()
   // status bar
   u8g2_SetDrawColor(u8g2, 1);
   u8g2_SetFont(u8g2, u8g2_font_5x7_tr);
-  char chg_str[8] = "CHG\0";
-  if (!g_engine.peripheral.charging)
+
+  char chg_str[8];
+  if (g_engine.peripheral.charging)
+  {
+    snprintf(chg_str, sizeof(chg_str), "CHG");
+  }
+  else if (g_engine.peripheral.plugged_in)
+  {
+    snprintf(chg_str, sizeof(chg_str), "USB");
+  }
+  else
   {
     snprintf(chg_str, sizeof(chg_str), "%d", g_engine.peripheral.battery_level);
   }

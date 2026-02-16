@@ -51,6 +51,9 @@ typedef struct
 {
   void (*on_frame_cb)(void);
   void (*on_tick_cb)(void);
+  // poll during light sleep. Return true to wake.
+  // if usb_power_present is non-null, update it with current USB power state.
+  bool (*on_sleep_poll_cb)(void);
 
   audio_synth_t synth;
   display_t display;
@@ -64,6 +67,7 @@ typedef struct
   } buttons;
 
   absolute_time_t now;
+  absolute_time_t last_input_at;
   uint32_t tick;
 
   bool paused;
@@ -81,10 +85,11 @@ bool engine_button_read(button_id_t button_id);
 void engine_buttons_reset();         // reset button state until next press
 void engine_enter_sleep();           // todo: finalize api
 void engine_sleep_until_interrupt(); // implement
-void engine_pause();
+void engine_pause(bool skip_animation);
 void engine_resume();
 void engine_set_volume(int8_t level);
 void engine_change_volume(int8_t direction);
+void engine_mark_input();
 
 static inline button_t *engine_button_from_id(button_id_t button_id)
 {

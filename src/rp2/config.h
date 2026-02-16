@@ -32,8 +32,6 @@
 #define AUDIO_BUFFER_SIZE 256
 #define AUDIO_BUFFER_POOL_SIZE 2
 
-// todo: compute some form of audio budget and warn if exceeded
-
 //// PERIPHERAL CONFIGURATION ////
 #define PERIPH_PWR_EN 22
 #define PERIPH_BAT_CHG_EN_N 23

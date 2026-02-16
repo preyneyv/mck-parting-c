@@ -5,6 +5,7 @@
 #include <hardware/watchdog.h>
 #include <hardware/platform_defs.h>
 
+#include <shared/config.h>
 #include <shared/utils/elm.h>
 #include <shared/utils/timing.h>
 #include <shared/utils/vec.h>
@@ -34,6 +35,7 @@ void engine_init()
 
   engine_set_app(NULL);
   engine_set_volume(4); // todo: save/restore from flash (somehow)
+  g_engine.last_input_at = get_absolute_time();
 }
 
 void engine_set_volume(int8_t level)
@@ -45,6 +47,11 @@ void engine_set_volume(int8_t level)
 inline void engine_change_volume(int8_t direction)
 {
   engine_set_volume(g_engine.volume + direction);
+}
+
+void engine_mark_input()
+{
+  g_engine.last_input_at = get_absolute_time();
 }
 
 static void draw_fps(u8g2_t *u8g2, uint32_t fps)
@@ -92,6 +99,10 @@ static void read_button(button_t *button, absolute_time_t now)
       button->edge = true;
     }
   }
+  if (button->edge)
+  {
+    engine_mark_input();
+  }
 }
 
 void engine_buttons_reset()
@@ -138,7 +149,6 @@ static void handle_menu_reset()
 
 void engine_enter_sleep()
 {
-  // TODO: this sometimes causes a hard fault on wakeup, investigate
   watchdog_disable();
   display_set_enabled(&g_engine.display, false);
   peripheral_set_enabled(&g_engine.peripheral, false);
@@ -153,14 +163,52 @@ void engine_enter_sleep()
                    !engine_button_read(BUTTON_RIGHT);
   }
 
-  engine_sleep_until_interrupt();
+  bool was_plugged_in = g_engine.peripheral.plugged_in;
+  if (was_plugged_in)
+  {
+    // light sleep: keep clocks alive so USB can wake us.
+    while (1)
+    {
+      // wake on any button press
+      if (engine_button_read(BUTTON_MENU) || engine_button_read(BUTTON_LEFT) ||
+          engine_button_read(BUTTON_RIGHT))
+      {
+        break;
+      }
+
+      // wake if unplugged
+      if (!g_engine.peripheral.plugged_in)
+      {
+        break;
+      }
+
+      if (g_engine.on_sleep_poll_cb)
+      {
+        if (g_engine.on_sleep_poll_cb())
+        {
+          break;
+        }
+      }
+
+      peripheral_read_inputs(&g_engine.peripheral);
+
+      sleep_ms(5);
+    }
+  }
+  else
+  {
+    // deep sleep: wake on GPIO (buttons, USB power attach, etc.)
+    engine_sleep_until_interrupt();
+  }
 
   audio_playback_set_enabled(true);
   display_set_enabled(&g_engine.display, true);
   peripheral_set_enabled(&g_engine.peripheral, true);
   watchdog_enable(200, 1);
 
-  reset_buttons(true);
+  reset_buttons(true);                // ignore any edges from waking up
+  engine_mark_input();                // mark input to avoid auto-sleep right after waking up
+  g_engine.now = get_absolute_time(); // reset time to avoid a huge dt on wake
 }
 
 static const int32_t MENU_CONTAINER_OFFSET_CLOSED = -DISP_HEIGHT - 2;
@@ -219,11 +267,19 @@ static void menu_change_active(int8_t delta)
               NULL, NULL);
 }
 
-static void menu_enter()
+static void menu_enter(bool skip_animation)
 {
   menu_state.anim.held = 0;
-  anim_sys_to(&menu_state.anim.container, 0, 300, ANIM_EASE_OUT_CUBIC, NULL,
-              NULL);
+  if (skip_animation)
+  {
+    // skip animation, jump straight to open
+    menu_state.anim.container = 0;
+  }
+  else
+  {
+    anim_sys_to(&menu_state.anim.container, 0, 300, ANIM_EASE_OUT_CUBIC, NULL,
+                NULL);
+  }
 }
 
 static void menu_exit()
@@ -245,7 +301,7 @@ static void menu_frame()
     else
     {
       // open menu
-      engine_pause();
+      engine_pause(false);
     }
   }
 
@@ -382,8 +438,16 @@ static void menu_frame()
   u8g2_SetFont(u8g2, u8g2_font_5x7_tr);
   elm_str(&root, vec2(0, 6), g_engine.app->name);
 
-  char chg_str[8] = "CHG\0";
-  if (!g_engine.peripheral.charging)
+  char chg_str[8];
+  if (g_engine.peripheral.charging)
+  {
+    snprintf(chg_str, sizeof(chg_str), "CHG");
+  }
+  else if (g_engine.peripheral.plugged_in)
+  {
+    snprintf(chg_str, sizeof(chg_str), "USB");
+  }
+  else
   {
     snprintf(chg_str, sizeof(chg_str), "%d", g_engine.peripheral.battery_level);
   }
@@ -421,6 +485,7 @@ void engine_run_forever()
     dt = ((uint32_t)absolute_time_diff_us(g_engine.now, now)) + dt;
     divmod_result_t res = hw_divider_divmod_u32(dt, TICK_INTERVAL_US);
     uint32_t ticks = to_quotient_u32(res);
+    printf("dt: %d, ticks: %d\n", dt, ticks);
     dt = to_remainder_u32(res);
     g_engine.now = now;
 
@@ -463,6 +528,11 @@ void engine_run_forever()
       {
         g_engine.on_tick_cb();
       }
+      if (ticks % 200 == 0)
+      {
+        // for long updates, keep watchdog happy
+        watchdog_update();
+      }
     }
 
     leds_set_all(&g_engine.leds, (color_t){.hex = 0x000000});
@@ -492,6 +562,16 @@ void engine_run_forever()
     {
       g_engine.on_frame_cb();
     }
+
+#if AUTO_SLEEP_TIMEOUT_MS > 0
+    // enter auto-sleep if idle for too long
+    if (time_reached(
+            delayed_by_ms(g_engine.last_input_at, AUTO_SLEEP_TIMEOUT_MS)))
+    {
+      engine_pause(true);
+      engine_enter_sleep();
+    }
+#endif
 
     // log fps and frame limit
     last_log_frames++;
@@ -559,7 +639,7 @@ void engine_set_app(app_t *app)
   }
 }
 
-void engine_pause()
+void engine_pause(bool skip_animation)
 {
   if (g_engine.paused)
     return;
@@ -570,7 +650,7 @@ void engine_pause()
   {
     g_engine.app->pause();
   }
-  menu_enter();
+  menu_enter(skip_animation);
 }
 
 void engine_resume()
