@@ -3,7 +3,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-#include <shared/platform/time.h>
+#include <platform/time.h>
 
 // Everything stored in microseconds
 typedef struct {

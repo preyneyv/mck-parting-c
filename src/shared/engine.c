@@ -2,11 +2,16 @@
 #include <unistd.h>
 
 #include <shared/config.h>
-#include <shared/platform/system.h>
-#include <shared/platform/time.h>
+#include <platform/display.h>
+#include <platform/input.h>
+#include <platform/peripheral.h>
+#include <platform/platform.h>
+#include <platform/sleep.h>
+#include <platform/system.h>
+#include <platform/time.h>
 #include <shared/utils/elm.h>
-#include <shared/utils/timing.h>
 #include <shared/utils/misc.h>
+#include <shared/utils/timing.h>
 #include <shared/utils/vec.h>
 
 #include "anim.h"
@@ -21,15 +26,14 @@ void engine_init()
 {
   // initialize all subsystems
   audio_synth_init(&g_engine.synth, AUDIO_SAMPLE_RATE, 1000);
-
-  display_init(&g_engine.display);
-  peripheral_init(&g_engine.peripheral);
-  leds_init(&g_engine.leds);
+  for (uint8_t i = 0; i < LED_COUNT; i++)
+  {
+    g_engine.led_colors[i] = (color_t){.hex = 0x000000};
+  }
 
   g_engine.buttons.left.id = BUTTON_LEFT;
   g_engine.buttons.right.id = BUTTON_RIGHT;
   g_engine.buttons.menu.id = BUTTON_MENU;
-  engine_buttons_init(&g_engine.buttons);
 
   engine_set_app(NULL);
   engine_set_volume(4); // todo: save/restore from flash (somehow)
@@ -78,10 +82,9 @@ static void draw_fps(u8g2_t *u8g2, uint32_t fps)
   u8g2_DrawStr(u8g2, 3, 4, fps_str);
 }
 
-static void read_button(button_t *button, platform_time_t now)
+static void read_button(button_t *button, platform_time_t now, bool pressed)
 {
   button->edge = false;
-  bool pressed = engine_button_read(button->id);
   if (pressed)
   {
     if (!button->pressed && !button->ignore)
@@ -154,60 +157,14 @@ static void handle_menu_reset()
 void engine_enter_sleep()
 {
   platform_watchdog_disable();
-  display_set_enabled(&g_engine.display, false);
-  peripheral_set_enabled(&g_engine.peripheral, false);
+  platform_display_set_enabled(false);
+  platform_peripheral_set_enabled(false);
   audio_playback_set_enabled(false);
-
-  // wait until all buttons are released.
-  bool all_released = false;
-  while (!all_released)
-  {
-    all_released = !engine_button_read(BUTTON_MENU) &&
-                   !engine_button_read(BUTTON_LEFT) &&
-                   !engine_button_read(BUTTON_RIGHT);
-  }
-
-  bool was_plugged_in = g_engine.peripheral.plugged_in;
-  if (was_plugged_in)
-  {
-    // light sleep: keep clocks alive so USB can wake us.
-    while (1)
-    {
-      // wake on any button press
-      if (engine_button_read(BUTTON_MENU) || engine_button_read(BUTTON_LEFT) ||
-          engine_button_read(BUTTON_RIGHT))
-      {
-        break;
-      }
-
-      // wake if unplugged
-      if (!g_engine.peripheral.plugged_in)
-      {
-        break;
-      }
-
-      if (g_engine.on_sleep_poll_cb)
-      {
-        if (g_engine.on_sleep_poll_cb())
-        {
-          break;
-        }
-      }
-
-      peripheral_read_inputs(&g_engine.peripheral);
-
-      platform_sleep_ms(5);
-    }
-  }
-  else
-  {
-    // deep sleep: wake on GPIO (buttons, USB power attach, etc.)
-    engine_sleep_until_interrupt();
-  }
+  platform_sleep_enter();
 
   audio_playback_set_enabled(true);
-  display_set_enabled(&g_engine.display, true);
-  peripheral_set_enabled(&g_engine.peripheral, true);
+  platform_display_set_enabled(true);
+  platform_peripheral_set_enabled(true);
   platform_watchdog_enable(200);
 
   reset_buttons(true);                // ignore any edges from waking up
@@ -384,7 +341,7 @@ static void menu_frame()
     return;
   }
 
-  u8g2_t *u8g2 = display_get_u8g2(&g_engine.display);
+  u8g2_t *u8g2 = platform_display_get_u8g2();
   vec2_t pos = vec2(0, menu_state.anim.container);
 
   elm_t root = elm_root(u8g2, pos);
@@ -443,17 +400,18 @@ static void menu_frame()
   elm_str(&root, vec2(0, 6), g_engine.app->name);
 
   char chg_str[8];
-  if (g_engine.peripheral.charging)
+  platform_power_state_t power_state = platform_peripheral_get_power_state();
+  if (power_state.charging)
   {
     snprintf(chg_str, sizeof(chg_str), "CHG");
   }
-  else if (g_engine.peripheral.plugged_in)
+  else if (power_state.plugged_in)
   {
     snprintf(chg_str, sizeof(chg_str), "USB");
   }
   else
   {
-    snprintf(chg_str, sizeof(chg_str), "%d", g_engine.peripheral.battery_level);
+    snprintf(chg_str, sizeof(chg_str), "%d", power_state.battery_level);
   }
   elm_str(&root, vec2(DISP_WIDTH - u8g2_GetStrWidth(u8g2, chg_str), 6),
           chg_str);
@@ -461,10 +419,9 @@ static void menu_frame()
 
 void engine_run_forever()
 {
-  const uint32_t UPDATE_PERIPHERAL_EVERY = 120; // frames
-  display_set_enabled(&g_engine.display, true);
-  peripheral_set_enabled(&g_engine.peripheral, true);
-  peripheral_read_inputs(&g_engine.peripheral);
+  platform_display_set_enabled(true);
+  platform_peripheral_set_enabled(true);
+  platform_task();
 
   TimingInstrumenter ti_tick;
   TimingInstrumenter ti_show;
@@ -476,15 +433,15 @@ void engine_run_forever()
   uint32_t last_log_frames = 0;
   uint32_t fps = 0;
 
-  u8g2_t *u8g2 = display_get_u8g2(&g_engine.display);
+  u8g2_t *u8g2 = platform_display_get_u8g2();
 
   uint32_t dt = 0;
-  uint32_t peripheral_update_counter = 0;
   platform_watchdog_enable(200);
   g_engine.now = platform_now_us();
   g_engine.tick = 0;
   while (1)
   {
+    platform_task();
     platform_time_t now = platform_now_us();
     dt = ((uint32_t)platform_time_diff_us(g_engine.now, now)) + dt;
     uint32_t ticks = dt / TICK_INTERVAL_US;
@@ -492,19 +449,12 @@ void engine_run_forever()
     dt = dt % TICK_INTERVAL_US;
     g_engine.now = now;
 
-    // update buttons
-    read_button(&g_engine.buttons.left, now);
-    read_button(&g_engine.buttons.right, now);
-    read_button(&g_engine.buttons.menu, now);
+    platform_input_mask_t input_mask = platform_input_read_mask();
+    read_button(&g_engine.buttons.left, now, (input_mask & PLATFORM_INPUT_LEFT) != 0);
+    read_button(&g_engine.buttons.right, now, (input_mask & PLATFORM_INPUT_RIGHT) != 0);
+    read_button(&g_engine.buttons.menu, now, (input_mask & PLATFORM_INPUT_MENU) != 0);
 
     handle_menu_reset();
-
-    peripheral_update_counter++;
-    if (peripheral_update_counter >= UPDATE_PERIPHERAL_EVERY)
-    {
-      peripheral_read_inputs(&g_engine.peripheral);
-      peripheral_update_counter = 0;
-    }
 
     ti_start(&ti_tick);
 
@@ -538,7 +488,10 @@ void engine_run_forever()
       }
     }
 
-    leds_set_all(&g_engine.leds, (color_t){.hex = 0x000000});
+    for (uint8_t i = 0; i < LED_COUNT; i++)
+    {
+      g_engine.led_colors[i] = (color_t){.hex = 0x000000};
+    }
     if (!g_engine.paused)
     {
       // draw screen buffer
@@ -558,7 +511,7 @@ void engine_run_forever()
     // write display
     u8g2_SendBuffer(u8g2);
     // write LEDs
-    leds_show(&g_engine.leds);
+    platform_leds_show(g_engine.led_colors, LED_COUNT);
     ti_stop(&ti_show);
 
     if (g_engine.on_frame_cb != NULL)

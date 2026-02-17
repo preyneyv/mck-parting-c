@@ -1,8 +1,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-#include <shared/platform/sync.h>
-#include <shared/platform/time.h>
+#include <platform/sync.h>
+#include <platform/time.h>
 
 #include "buffer.h"
 

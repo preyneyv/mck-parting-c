@@ -3,6 +3,7 @@
 
 #include <shared/apps/apps.h>
 #include <shared/engine.h>
+#include <platform/display.h>
 
 static void enter()
 {
@@ -82,7 +83,7 @@ static void tick()
 
 static void frame()
 {
-  u8g2_t *u8g2 = &g_engine.display.u8g2;
+  u8g2_t *u8g2 = platform_display_get_u8g2();
   u8g2_SetDrawColor(u8g2, 1);
   bool left = BUTTON_PRESSED(BUTTON_LEFT);
   bool right = BUTTON_PRESSED(BUTTON_RIGHT);

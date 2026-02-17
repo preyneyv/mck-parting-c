@@ -2,7 +2,10 @@
 
 #include <shared/anim.h>
 #include <shared/apps/apps.h>
+#include <shared/config.h>
 #include <shared/engine.h>
+#include <platform/display.h>
+#include <platform/peripheral.h>
 #include <shared/utils/vec.h>
 
 static const int16_t APP_SIZE = 36;
@@ -104,7 +107,7 @@ static void frame()
       change_active(1);
   }
 
-  u8g2_t *u8g2 = &g_engine.display.u8g2;
+  u8g2_t *u8g2 = platform_display_get_u8g2();
 
   u8g2_SetDrawColor(u8g2, 1);
   for (int i = 0; i < APP_COUNT; i++)
@@ -149,17 +152,18 @@ static void frame()
   u8g2_SetFont(u8g2, u8g2_font_5x7_tr);
 
   char chg_str[8];
-  if (g_engine.peripheral.charging)
+  platform_power_state_t power_state = platform_peripheral_get_power_state();
+  if (power_state.charging)
   {
     snprintf(chg_str, sizeof(chg_str), "CHG");
   }
-  else if (g_engine.peripheral.plugged_in)
+  else if (power_state.plugged_in)
   {
     snprintf(chg_str, sizeof(chg_str), "USB");
   }
   else
   {
-    snprintf(chg_str, sizeof(chg_str), "%d", g_engine.peripheral.battery_level);
+    snprintf(chg_str, sizeof(chg_str), "%d", power_state.battery_level);
   }
   u8g2_DrawStr(u8g2, 128 - u8g2_GetStrWidth(u8g2, chg_str), 6, chg_str);
 

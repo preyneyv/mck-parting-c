@@ -1,14 +1,15 @@
 #pragma once
 
-#include <shared/platform/time.h>
+#include <stdbool.h>
+#include <stdint.h>
+
+#include <platform/leds.h>
+#include <platform/time.h>
 
 #include <shared/utils/q1x15.h>
 
 #include "audio/playback.h"
 #include "audio/synth.h"
-#include "display.h"
-#include "leds.h"
-#include "peripheral.h"
 
 typedef struct
 {
@@ -51,14 +52,9 @@ typedef struct
 {
   void (*on_frame_cb)(void);
   void (*on_tick_cb)(void);
-  // poll during light sleep. Return true to wake.
-  // if usb_power_present is non-null, update it with current USB power state.
-  bool (*on_sleep_poll_cb)(void);
 
   audio_synth_t synth;
-  display_t display;
-  leds_t leds;
-  peripheral_t peripheral;
+  color_t led_colors[LED_COUNT];
   struct
   {
     button_t left;
@@ -80,11 +76,8 @@ extern engine_t g_engine;
 void engine_init();
 void engine_run_forever();
 void engine_set_app(app_t *app);
-void engine_buttons_init();
-bool engine_button_read(button_id_t button_id);
 void engine_buttons_reset(); // reset button state until next press
 void engine_enter_sleep();
-void engine_sleep_until_interrupt(); // implement
 void engine_pause(bool skip_animation);
 void engine_resume();
 void engine_set_volume(int8_t level);

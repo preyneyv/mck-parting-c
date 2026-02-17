@@ -1,5 +1,6 @@
 #pragma once
 
+#include <stddef.h>
 #include <stdint.h>
 
 #define LED_COUNT 2
@@ -20,13 +21,8 @@ typedef union {
   uint32_t hex;
 } color_t;
 
-typedef struct {
-  color_t colors[LED_COUNT];
-} leds_t;
-
-void leds_init(leds_t *leds);
-void leds_show(leds_t *leds);
-void leds_set_all(leds_t *leds, color_t color);
+void platform_leds_init(void);
+void platform_leds_show(const color_t *colors, size_t count);
 
 static inline color_t rgba(uint8_t r, uint8_t g, uint8_t b, uint8_t a) {
   return (color_t){.r = r, .g = g, .b = b, .a = a};

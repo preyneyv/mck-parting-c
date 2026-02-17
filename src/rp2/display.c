@@ -3,9 +3,15 @@
 
 #include <u8g2.h>
 
-#include <shared/display.h>
+#include <platform/display.h>
 
 #include "config.h"
+
+static struct
+{
+  u8g2_t u8g2;
+  bool enabled;
+} g_display;
 
 static uint8_t _byte_cb(u8x8_t *u8x8, uint8_t msg, uint8_t arg_int,
                         void *arg_ptr) {
@@ -84,10 +90,10 @@ static uint8_t _gpio_and_delay_cb(u8x8_t *u8x8, uint8_t msg, uint8_t arg_int,
   return 1;
 }
 
-void display_init(display_t *display) {
-  display->enabled = false;
+void platform_display_init(void) {
+  g_display.enabled = false;
 
-  u8g2_t *u8g2 = display_get_u8g2(display);
+  u8g2_t *u8g2 = &g_display.u8g2;
   u8g2_Setup_sh1107_64x128_f(u8g2, U8G2_R1, _byte_cb, _gpio_and_delay_cb);
   u8g2_InitDisplay(u8g2);
 
@@ -96,20 +102,24 @@ void display_init(display_t *display) {
   gpio_put(DISP_REG_EN, 0); // keep display off until needed.
 }
 
-static void display_on(display_t *display) {
+u8g2_t *platform_display_get_u8g2(void) {
+  return &g_display.u8g2;
+}
+
+static void display_on(void) {
   // enable regulator
   gpio_put(DISP_REG_EN, 1);
   sleep_ms(50); // wait for regulator to stabilize
 
-  u8g2_t *u8g2 = display_get_u8g2(display);
+  u8g2_t *u8g2 = &g_display.u8g2;
   u8g2_ClearBuffer(u8g2);
   u8g2_SendBuffer(u8g2);
   u8g2_SetPowerSave(u8g2, 0);
   u8g2_SetContrast(u8g2, 255);
 }
 
-static void display_off(display_t *display) {
-  u8g2_t *u8g2 = display_get_u8g2(display);
+static void display_off(void) {
+  u8g2_t *u8g2 = &g_display.u8g2;
   u8g2_SetPowerSave(u8g2, 1);
 
   sleep_ms(50); // wait for disp off flush
@@ -117,15 +127,15 @@ static void display_off(display_t *display) {
   gpio_put(DISP_REG_EN, 0);
 }
 
-void display_set_enabled(display_t *display, bool enabled) {
-  if (display->enabled == enabled) {
+void platform_display_set_enabled(bool enabled) {
+  if (g_display.enabled == enabled) {
     return;
   }
-  display->enabled = enabled;
+  g_display.enabled = enabled;
 
   if (enabled) {
-    display_on(display);
+    display_on();
   } else {
-    display_off(display);
+    display_off();
   }
 }

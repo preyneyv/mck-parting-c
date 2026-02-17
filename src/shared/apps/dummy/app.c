@@ -1,6 +1,7 @@
 #include <stdio.h>
 
 #include <shared/apps/apps.h>
+#include <platform/display.h>
 
 static void frame() {
   static uint8_t i = 0;
@@ -8,7 +9,7 @@ static void frame() {
     // enter sleep
     engine_enter_sleep();
   }
-  u8g2_t *u8g2 = &g_engine.display.u8g2;
+  u8g2_t *u8g2 = platform_display_get_u8g2();
   u8g2_SetFont(u8g2, u8g2_font_5x7_tf);
   u8g2_SetDrawColor(u8g2, 1);
 

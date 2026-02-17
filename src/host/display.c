@@ -1,12 +1,12 @@
 #include <assert.h>
 
-#include <pico/stdlib.h>
-
 #include <SDL.h>
 #include <u8g2.h>
 
+#include <platform/display.h>
+#include <platform/time.h>
+
 #include "config.h"
-#include "display.h"
 
 const uint8_t RES_MULT = 3;
 
@@ -17,6 +17,7 @@ static uint16_t render_height;
 static SDL_Window *window;
 static SDL_Renderer *renderer;
 static SDL_Texture *texture;
+static u8g2_t g_u8g2;
 
 static const u8x8_display_info_t u8x8_sdl_128x64_info = {
     /* chip_enable_level = */ 0,
@@ -133,16 +134,16 @@ static uint8_t _gpio_and_delay_cb(u8x8_t *u8x8, uint8_t msg, uint8_t arg_int,
                                   void *arg_ptr) {
   switch (msg) {
   case U8X8_MSG_DELAY_NANO: // delay arg_int * 1 nano second
-    sleep_us((999 + arg_int) / 1000);
+      platform_sleep_us((999 + arg_int) / 1000);
     break;
   case U8X8_MSG_DELAY_100NANO: // delay arg_int * 100 nano seconds
-    sleep_us((9 + arg_int) / 10);
+    platform_sleep_us((9 + arg_int) / 10);
     break;
   case U8X8_MSG_DELAY_10MICRO: // delay arg_int * 10 micro seconds
-    sleep_us(arg_int * 10);
+    platform_sleep_us(arg_int * 10);
     break;
   case U8X8_MSG_DELAY_MILLI: // delay arg_int * 1 milli second
-    sleep_ms(arg_int);
+    platform_sleep_ms(arg_int);
     break;
   default:
     u8x8_SetGPIOResult(u8x8, 1); // default return value
@@ -164,9 +165,17 @@ static void u8g2_SetupSDL_128x64_f(u8g2_t *u8g2) {
                    U8G2_R0);
 }
 
-void display_init(display_t *display) {
-  u8g2_t *u8g2 = display_get_u8g2(display);
+void platform_display_init(void) {
+  u8g2_t *u8g2 = &g_u8g2;
   u8g2_SetupSDL_128x64_f(u8g2);
   u8g2_InitDisplay(u8g2);
   u8g2_SetPowerSave(u8g2, 0);
+}
+
+void platform_display_set_enabled(bool enabled) {
+  (void)enabled;
+}
+
+u8g2_t *platform_display_get_u8g2(void) {
+  return &g_u8g2;
 }

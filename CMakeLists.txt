@@ -80,7 +80,14 @@ if(PICO_PLATFORM STREQUAL "host")
         src/host/audio.c
         src/host/display.c
         src/host/platform.c
-        src/host/platform_sync.c
+        src/host/input.c
+        src/host/leds.c
+        src/host/time.c
+        src/host/system.c
+        src/host/identity.c
+        src/host/peripheral.c
+        src/host/sleep.c
+        src/host/sync.c
     )
 
     # force-include the host compatibility header
@@ -139,12 +146,17 @@ else()
     add_executable(mck-parting-c
         src/rp2/main.c
         src/rp2/midi.c
+        src/rp2/platform.c
+        src/rp2/input.c
+        src/rp2/sleep.c
+        src/rp2/time.c
+        src/rp2/system.c
+        src/rp2/identity.c
         src/rp2/display.c
         src/rp2/audio.c
         src/rp2/peripheral.c
         src/rp2/leds.c
-        src/rp2/platform.c
-        src/rp2/platform_sync.c
+        src/rp2/sync.c
         src/rp2/usb_descriptors.c
     )
 

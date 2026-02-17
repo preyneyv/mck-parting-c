@@ -7,12 +7,13 @@
 
 #include <shared/audio/synth.h>
 #include <shared/config.h>
+#include <platform/display.h>
+#include <platform/platform.h>
+#include <platform/time.h>
 #include <shared/utils/timing.h>
 
 #include "audio.h"
-#include "display.h"
 
-display_t display;
 audio_synth_t synth;
 
 void *audio_thread_main() {
@@ -38,7 +39,7 @@ int main() {
   pthread_t audio_thread;
   pthread_create(&audio_thread, NULL, audio_thread_main, NULL);
 
-  display_init(&display);
+  platform_init();
 
   TimingInstrumenter ti_tick;
   TimingInstrumenter ti_show;
@@ -50,7 +51,7 @@ int main() {
 
   uint32_t i = 0;
 
-  u8g2_t *u8g2 = display_get_u8g2(&display);
+  u8g2_t *u8g2 = platform_display_get_u8g2();
   while (1) {
     handle_sdl_events();
     ti_start(&ti_tick);
@@ -74,8 +75,8 @@ int main() {
     ti_stop(&ti_show);
 
     last_log_frames++;
-    absolute_time_t now = get_absolute_time();
-    if (absolute_time_diff_us(last_log_us, now) > 1000000) {
+    uint64_t now = platform_now_us();
+    if (platform_time_diff_us(last_log_us, now) > 1000000) {
       fps = last_log_frames;
       float ti_tick_avg = ti_get_average_ms(&ti_tick, true);
       float ti_show_avg = ti_get_average_ms(&ti_show, true);
@@ -86,10 +87,10 @@ int main() {
       last_log_frames = 0;
     }
 
-    uint64_t spent_us = absolute_time_diff_us(last_frame_us, now);
+    uint64_t spent_us = (uint64_t)platform_time_diff_us(last_frame_us, now);
     if (spent_us < TARGET_FRAME_INTERVAL_US) {
-      sleep_us(TARGET_FRAME_INTERVAL_US - spent_us);
-      last_frame_us = get_absolute_time();
+      platform_sleep_us(TARGET_FRAME_INTERVAL_US - spent_us);
+      last_frame_us = platform_now_us();
     } else {
       last_frame_us = now;
     }

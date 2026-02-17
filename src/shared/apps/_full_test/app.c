@@ -1,8 +1,11 @@
 #include <stdio.h>
 
 #include <shared/apps/apps.h>
-#include <shared/platform/system.h>
-#include <shared/platform/time.h>
+#include <platform/display.h>
+#include <platform/input.h>
+#include <platform/peripheral.h>
+#include <platform/system.h>
+#include <platform/time.h>
 
 static const unsigned char image_Sprite_0001_bits[] = {
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
@@ -119,12 +122,12 @@ static void enter()
 static void frame()
 {
   static uint8_t i = 0;
-  u8g2_t *u8g2 = &g_engine.display.u8g2;
+  u8g2_t *u8g2 = platform_display_get_u8g2();
 
   u8g2_SetBitmapMode(u8g2, 1);
   u8g2_DrawXBM(u8g2, 0, 0, 128, 64, image_Sprite_0001_bits);
-  g_engine.leds.colors[0].hex = 0x00d9ff;
-  g_engine.leds.colors[1].hex = 0xff7700;
+  g_engine.led_colors[0].hex = 0x00d9ff;
+  g_engine.led_colors[1].hex = 0xff7700;
 
   return;
   u8g2_SetDrawColor(u8g2, 1);
@@ -136,7 +139,7 @@ static void frame()
   else
   {
     u8g2_SetFont(u8g2, u8g2_font_5x7_tf);
-    if (g_engine.peripheral.plugged_in)
+    if (platform_peripheral_get_power_state().plugged_in)
     {
       u8g2_DrawStr(u8g2, 0, 30, "USB");
     }
@@ -146,24 +149,27 @@ static void frame()
     }
     char battery_str[8];
     snprintf(battery_str, sizeof(battery_str), "%d",
-             g_engine.peripheral.battery_level);
+             platform_peripheral_get_power_state().battery_level);
     u8g2_DrawStr(u8g2, 0, 40, battery_str);
   }
   i++;
-  leds_set_all(&g_engine.leds, (color_t){.hex = 0xFFFFFFFF});
+  for (uint8_t i = 0; i < LED_COUNT; i++)
+  {
+    g_engine.led_colors[i] = (color_t){.hex = 0xFFFFFFFF};
+  }
 
   if (g_engine.buttons.left.pressed)
   {
-    g_engine.leds.colors[0].r = 0;
+    g_engine.led_colors[0].r = 0;
   }
   if (g_engine.buttons.right.pressed)
   {
-    g_engine.leds.colors[1].r = 0;
+    g_engine.led_colors[1].r = 0;
   }
   if (g_engine.buttons.menu.pressed)
   {
-    g_engine.leds.colors[0].b = 0;
-    g_engine.leds.colors[1].b = 0;
+    g_engine.led_colors[0].b = 0;
+    g_engine.led_colors[1].b = 0;
   }
 
   if (g_engine.buttons.left.edge)
@@ -219,15 +225,15 @@ static void frame()
   if (g_engine.buttons.menu.pressed && g_engine.buttons.left.pressed &&
       g_engine.buttons.right.pressed)
   {
-    display_set_enabled(&g_engine.display, false);
-    peripheral_set_enabled(&g_engine.peripheral, false);
+    platform_display_set_enabled(false);
+    platform_peripheral_set_enabled(false);
     audio_playback_set_enabled(false);
     platform_watchdog_disable();
     while (1)
     {
       // trap until reset from watchdog or machine
       platform_sleep_ms(1000);
-      if (engine_button_read(BUTTON_MENU))
+      if (platform_input_read_mask() & PLATFORM_INPUT_MENU)
       {
         platform_system_reset();
         while (1)

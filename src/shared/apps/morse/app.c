@@ -5,6 +5,7 @@
 #include <shared/utils/elm.h>
 #include <shared/engine.h>
 #include <shared/leaderboard/leaderboard.h>
+#include <platform/display.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -546,7 +547,7 @@ static void _frame_stats(u8g2_t *u8g2, elm_t *root)
 
 static void frame_game()
 {
-  u8g2_t *u8g2 = display_get_u8g2(&g_engine.display);
+  u8g2_t *u8g2 = platform_display_get_u8g2();
   elm_t root = elm_root(u8g2, VEC2_Z);
 
   elm_t ctx = elm_child(&root, vec2(0, 0));
@@ -580,7 +581,7 @@ static void elm_score(elm_t *parent, vec2_t pos, const char *label, const char *
 
 static void frame_results()
 {
-  u8g2_t *u8g2 = display_get_u8g2(&g_engine.display);
+  u8g2_t *u8g2 = platform_display_get_u8g2();
   elm_t root = elm_root(u8g2, VEC2_Z);
 
   u8g2_SetDrawColor(u8g2, 1);
@@ -626,7 +627,10 @@ static void frame()
     frame_game();
   }
 
-  leds_set_all(&g_engine.leds, (color_t){.hex = 0x00ff00});
+  for (uint8_t i = 0; i < LED_COUNT; i++)
+  {
+    g_engine.led_colors[i] = (color_t){.hex = 0x00ff00};
+  }
 }
 
 static void leave()

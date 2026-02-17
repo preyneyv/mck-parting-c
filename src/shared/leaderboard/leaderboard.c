@@ -1,7 +1,7 @@
 #include <qrcodegen.h>
 #include <stdio.h>
 
-#include <shared/platform/identity.h>
+#include <platform/identity.h>
 
 #include "leaderboard.h"
 #include "encoding.h"

@@ -3,6 +3,7 @@
 
 #include <shared/apps/apps.h>
 #include <shared/engine.h>
+#include <platform/display.h>
 #include <shared/utils/elm.h>
 #include <shared/utils/q1x31.h>
 
@@ -401,7 +402,7 @@ static void draw_feedback(u8g2_t *u8g2)
 
 static void frame_game()
 {
-    u8g2_t *u8g2 = display_get_u8g2(&g_engine.display);
+    u8g2_t *u8g2 = platform_display_get_u8g2();
     uint32_t current_ms = now_ms();
 
     draw_lanes(u8g2);
@@ -411,21 +412,21 @@ static void frame_game()
 
     if (state.last_result > 0)
     {
-        leds_set_all(&g_engine.leds, (color_t){.hex = 0x00ff00});
+        for (uint8_t i = 0; i < LED_COUNT; i++) g_engine.led_colors[i] = (color_t){.hex = 0x00ff00};
     }
     else if (state.last_result < 0)
     {
-        leds_set_all(&g_engine.leds, (color_t){.hex = 0xff0000});
+        for (uint8_t i = 0; i < LED_COUNT; i++) g_engine.led_colors[i] = (color_t){.hex = 0xff0000};
     }
     else
     {
-        leds_set_all(&g_engine.leds, (color_t){.hex = 0x000000});
+        for (uint8_t i = 0; i < LED_COUNT; i++) g_engine.led_colors[i] = (color_t){.hex = 0x000000};
     }
 }
 
 static void frame_results()
 {
-    u8g2_t *u8g2 = display_get_u8g2(&g_engine.display);
+    u8g2_t *u8g2 = platform_display_get_u8g2();
     elm_t root = elm_root(u8g2, VEC2_Z);
 
     u8g2_SetDrawColor(u8g2, 1);
@@ -450,7 +451,7 @@ static void frame_results()
         reset_state();
     }
 
-    leds_set_all(&g_engine.leds, (color_t){.hex = 0x0000ff});
+    for (uint8_t i = 0; i < LED_COUNT; i++) g_engine.led_colors[i] = (color_t){.hex = 0x0000ff};
 }
 
 static void frame()

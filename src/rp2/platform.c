@@ -1,36 +1,38 @@
-#include <hardware/watchdog.h>
+#include <hardware/clocks.h>
+#include <hardware/gpio.h>
 #include <pico/rand.h>
 #include <pico/stdlib.h>
-#include <pico/unique_id.h>
+#include <stdio.h>
+#include <tusb.h>
 
-#include <shared/platform/identity.h>
-#include <shared/platform/system.h>
-#include <shared/platform/time.h>
+#include <platform/display.h>
+#include <platform/input.h>
+#include <platform/leds.h>
+#include <platform/peripheral.h>
+#include <platform/platform.h>
 
-platform_time_t platform_now_us(void) { return to_us_since_boot(get_absolute_time()); }
+#include "config.h"
 
-void platform_sleep_us(uint32_t us) { sleep_us(us); }
+void platform_init(void) {
+  // limit power draw until usb stack is initialized.
+  gpio_init(PERIPH_BAT_CHG_EN_N);
+  gpio_set_dir(PERIPH_BAT_CHG_EN_N, GPIO_OUT);
+  gpio_put(PERIPH_BAT_CHG_EN_N, 1);
 
-void platform_sleep_ms(uint32_t ms) { sleep_ms(ms); }
+  set_sys_clock_hz(SYS_CLOCK_HZ, true);
+  stdio_init_all();
+  sleep_ms(1000);
 
-void platform_watchdog_enable(uint32_t timeout_ms) { watchdog_enable(timeout_ms, 1); }
+  // initialize rng
+  get_rand_32();
 
-void platform_watchdog_disable(void) { watchdog_disable(); }
-
-void platform_watchdog_update(void) { watchdog_update(); }
-
-void platform_system_reset(void) {
-  watchdog_enable(0, 0);
-  while (1) {
-  }
+  platform_input_init();
+  platform_peripheral_init();
+  platform_display_init();
+  platform_leds_init();
 }
 
-void platform_device_id(uint8_t out[8]) {
-  pico_unique_board_id_t board_id;
-  pico_get_unique_board_id(&board_id);
-  for (int i = 0; i < 8; i++) {
-    out[i] = board_id.id[i];
-  }
+void platform_task(void) {
+  tud_task();
+  platform_peripheral_read_inputs();
 }
-
-uint32_t platform_rand_u32(void) { return get_rand_32(); }

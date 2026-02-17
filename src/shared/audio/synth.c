@@ -4,8 +4,8 @@
 #include <stdio.h>
 #include <string.h>
 
-#include <shared/platform/sync.h>
-#include <shared/platform/time.h>
+#include <platform/sync.h>
+#include <platform/time.h>
 #include <shared/utils/q1x15.h>
 #include <shared/utils/q1x31.h>
 

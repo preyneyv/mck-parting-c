@@ -11,6 +11,7 @@
 #include <shared/config.h>
 #include <shared/engine.h>
 #include <shared/leaderboard/leaderboard.h>
+#include <platform/display.h>
 #include <shared/utils/vec.h>
 
 #include "sounds/bgm.h"
@@ -922,7 +923,7 @@ static void draw_results(u8g2_t *u8g2)
 
 static void frame()
 {
-    u8g2_t *u8g2 = display_get_u8g2(&g_engine.display);
+    u8g2_t *u8g2 = platform_display_get_u8g2();
     u8g2_SetDrawColor(u8g2, 1);
 
     if (state.game_over)
