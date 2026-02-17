@@ -71,6 +71,8 @@ target_link_libraries(shared PUBLIC
     hardware_watchdog
 )
 
+include(${CMAKE_CURRENT_LIST_DIR}/cmake/assets.cmake)
+
 if(PICO_PLATFORM STREQUAL "host")
     # --- host build ---
     add_executable(mck-parting-c

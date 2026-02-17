@@ -82,8 +82,8 @@ void engine_run_forever();
 void engine_set_app(app_t *app);
 void engine_buttons_init();
 bool engine_button_read(button_id_t button_id);
-void engine_buttons_reset();         // reset button state until next press
-void engine_enter_sleep();           // todo: finalize api
+void engine_buttons_reset(); // reset button state until next press
+void engine_enter_sleep();
 void engine_sleep_until_interrupt(); // implement
 void engine_pause(bool skip_animation);
 void engine_resume();

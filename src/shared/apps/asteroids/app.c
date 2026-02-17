@@ -13,6 +13,8 @@
 #include <shared/leaderboard/leaderboard.h>
 #include <shared/utils/vec.h>
 
+#include "sounds/bgm.h"
+
 // --- Tunables ---
 static const float SHIP_RADIUS = 4.0f;
 static const float DRIFT_ACCEL = 4.0f;            // px/s^2 (always applied)

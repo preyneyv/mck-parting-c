@@ -1,4 +1,4 @@
-<REAPER_PROJECT 0.1 "7.36/win64" 1771196701
+<REAPER_PROJECT 0.1 "7.36/win64" 1771294450
   <NOTES 0 2
   >
   RIPPLE 0 0
@@ -18,7 +18,7 @@
   VIDEO_CONFIG 0 0 65792
   PANMODE 3
   PANLAWFLAGS 3
-  CURSOR 0
+  CURSOR 3
   ZOOM 35.85960413809067 0 0
   VZOOMEX 6 0
   USE_REC_CFG 0
@@ -168,7 +168,7 @@
     <ITEM
       POSITION 0
       SNAPOFFS 0
-      LENGTH 10
+      LENGTH 8
       LOOP 1
       ALLTAKES 0
       FADEIN 1 0 0 1 0 0 0
@@ -346,7 +346,7 @@
     BUSCOMP 0 0 0 0 0
     SHOWINMIX 1 0.6667 0.5 1 0.5 0 0 0
     FIXEDLANES 9 0 0 0 0
-    SEL 0
+    SEL 1
     REC 0 5088 1 0 0 0 0 0
     VU 64
     TRACKHEIGHT 0 0 0 0 0 0 0
@@ -371,57 +371,15 @@
       WAK 0 0
     >
     <ITEM
-      POSITION 2
+      POSITION 0
       SNAPOFFS 0
-      LENGTH 2
+      LENGTH 6
       LOOP 1
       ALLTAKES 0
       FADEIN 1 0 0 1 0 0 0
       FADEOUT 1 0 0 1 0 0 0
       MUTE 0 0
-      SEL 0
-      IGUID {5F55ED7D-0071-47C5-91E7-959A970E62FD}
-      IID 2
-      NAME "03-prism patch sender MIDI 2-MIDI"
-      VOLPAN 1 0 1 -1
-      SOFFS 0 0
-      PLAYRATE 1 1 0 -1 0 0.0025
-      CHANMODE 0
-      GUID {681F0037-BF33-44EC-82BD-2F25FC73D684}
-      <SOURCE MIDI
-        HASDATA 1 960 QN
-        CCINTERP 32
-        POOLEDEVTS {E4A7596A-EA42-4FBA-A6F4-1960933C2D90}
-        e 960 90 3e 5d
-        e 240 80 3e 00
-        e 1680 90 3e 5e
-        e 240 80 3e 00
-        E 720 b0 7b 00
-        CCINTERP 32
-        CHASE_CC_TAKEOFFS 1
-        GUID {73C39B40-C6E6-4DE1-B88D-6E5A02EB3B32}
-        IGNTEMPO 0 120 4 4
-        SRCCOLOR 1
-        VELLANE -1 100 0 0 1
-        VELLANE 65 100 0 0 1
-        VELLANE 64 100 0 0 1
-        CFGEDITVIEW -2108.045438 0.039262 48 28 0 -1 0 0 0 0.5
-        KEYSNAP 1
-        TRACKSEL 252
-        EVTFILTER 0 -1 -1 -1 -1 0 0 0 0 -1 -1 -1 -1 0 -1 0 -1 -1
-        CFGEDIT 1 1 0 1 2 8 1 1 1 1 1 0.125 1273 0 2567 1399 0 0 0 0 0 0 0 0 0 0.5 0 0 1 64
-      >
-    >
-    <ITEM
-      POSITION 6
-      SNAPOFFS 0
-      LENGTH 4
-      LOOP 1
-      ALLTAKES 0
-      FADEIN 1 0 0 1 0 0 0
-      FADEOUT 1 0 0 1 0 0 0
-      MUTE 0 0
-      SEL 0
+      SEL 1
       IGUID {D43DB9BB-1428-4815-BFF6-8224BDE68F62}
       IID 2
       NAME "03-prism patch sender MIDI 2-MIDI"
@@ -701,7 +659,7 @@
     <ITEM
       POSITION 0
       SNAPOFFS 0
-      LENGTH 10
+      LENGTH 8
       LOOP 1
       ALLTAKES 0
       FADEIN 1 0 0 1 0 0 0
