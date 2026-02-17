@@ -14,9 +14,8 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include <pico/sync.h>
-#include <pico/util/queue.h>
-
+#include <shared/platform/sync.h>
+#include <shared/platform/time.h>
 #include <shared/utils/q1x15.h>
 #include <shared/utils/q1x31.h>
 
@@ -160,7 +159,7 @@ typedef struct audio_synth_voice_t
   audio_synth_operator_t ops[AUDIO_SYNTH_OPERATOR_COUNT];
 
   int8_t note_number;    // active midi note. -1 = none
-  absolute_time_t on_at; // time when note was turned on
+  platform_time_t on_at; // time when note was turned on
   uint8_t patch_idx;     // current patch index
 
   audio_synth_t *synth;
@@ -177,8 +176,8 @@ typedef struct audio_synth_t
   audio_synth_voice_t voices[AUDIO_SYNTH_VOICE_COUNT];
   audio_synth_patch_config_t patches[AUDIO_SYNTH_PATCH_COUNT];
 
-  queue_t msg_queue; // message queue for thread-safe operation
-  mutex_t mutex;     // mutex for any thread-safe operations
+  platform_queue_t *msg_queue;
+  platform_mutex_t *mutex; // mutex for thread-safe operations
 } audio_synth_t;
 
 // thread-safe update operator values based on active config

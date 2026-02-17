@@ -1,15 +1,13 @@
 #include <stdio.h>
 #include <unistd.h>
 
-#include <hardware/divider.h>
-#include <hardware/watchdog.h>
-#include <hardware/platform_defs.h>
-
 #include <shared/config.h>
+#include <shared/platform/system.h>
+#include <shared/platform/time.h>
 #include <shared/utils/elm.h>
 #include <shared/utils/timing.h>
-#include <shared/utils/vec.h>
 #include <shared/utils/misc.h>
+#include <shared/utils/vec.h>
 
 #include "anim.h"
 #include "apps/apps.h"
@@ -35,12 +33,17 @@ void engine_init()
 
   engine_set_app(NULL);
   engine_set_volume(4); // todo: save/restore from flash (somehow)
-  g_engine.last_input_at = get_absolute_time();
+  g_engine.last_input_at = platform_now_us();
 }
 
 void engine_set_volume(int8_t level)
 {
-  g_engine.volume = (uint8_t)MAX(MIN((int)level, 8), 0);
+  int clamped = level;
+  if (clamped < 0)
+    clamped = 0;
+  if (clamped > 8)
+    clamped = 8;
+  g_engine.volume = (uint8_t)clamped;
   g_engine.synth.master_level = q1x15_f(g_engine.volume / 8.0f);
 }
 
@@ -51,7 +54,7 @@ inline void engine_change_volume(int8_t direction)
 
 void engine_mark_input()
 {
-  g_engine.last_input_at = get_absolute_time();
+  g_engine.last_input_at = platform_now_us();
 }
 
 static void draw_fps(u8g2_t *u8g2, uint32_t fps)
@@ -75,7 +78,7 @@ static void draw_fps(u8g2_t *u8g2, uint32_t fps)
   u8g2_DrawStr(u8g2, 3, 4, fps_str);
 }
 
-static void read_button(button_t *button, absolute_time_t now)
+static void read_button(button_t *button, platform_time_t now)
 {
   button->edge = false;
   bool pressed = engine_button_read(button->id);
@@ -95,7 +98,7 @@ static void read_button(button_t *button, absolute_time_t now)
     {
       // released
       button->pressed = false;
-      button->pressed_at = nil_time;
+      button->pressed_at = PLATFORM_TIME_ZERO;
       button->edge = true;
     }
   }
@@ -109,12 +112,12 @@ void engine_buttons_reset()
 {
   g_engine.buttons.left.edge = false;
   g_engine.buttons.left.pressed = false;
-  g_engine.buttons.left.pressed_at = nil_time;
+  g_engine.buttons.left.pressed_at = PLATFORM_TIME_ZERO;
   g_engine.buttons.left.ignore = true;
 
   g_engine.buttons.right.edge = false;
   g_engine.buttons.right.pressed = false;
-  g_engine.buttons.right.pressed_at = nil_time;
+  g_engine.buttons.right.pressed_at = PLATFORM_TIME_ZERO;
   g_engine.buttons.right.ignore = true;
 }
 
@@ -126,7 +129,7 @@ static void reset_buttons(bool ignore_menu)
   {
     g_engine.buttons.menu.edge = false;
     g_engine.buttons.menu.pressed = false;
-    g_engine.buttons.menu.pressed_at = nil_time;
+    g_engine.buttons.menu.pressed_at = PLATFORM_TIME_ZERO;
     g_engine.buttons.menu.ignore = true;
   }
 }
@@ -134,13 +137,14 @@ static void reset_buttons(bool ignore_menu)
 static void handle_menu_reset()
 {
   // if the menu button is held down for a while, reset using watchdog
-  watchdog_update();
+  platform_watchdog_update();
   if (g_engine.buttons.menu.pressed)
   {
-    if (time_reached(delayed_by_ms(g_engine.buttons.menu.pressed_at, 5000)))
+    if (platform_time_reached(
+            platform_time_add_ms(g_engine.buttons.menu.pressed_at, 5000)))
     {
       // reset the system
-      watchdog_enable(0, 0);
+      platform_system_reset();
       while (1)
         ;
     }
@@ -149,7 +153,7 @@ static void handle_menu_reset()
 
 void engine_enter_sleep()
 {
-  watchdog_disable();
+  platform_watchdog_disable();
   display_set_enabled(&g_engine.display, false);
   peripheral_set_enabled(&g_engine.peripheral, false);
   audio_playback_set_enabled(false);
@@ -192,7 +196,7 @@ void engine_enter_sleep()
 
       peripheral_read_inputs(&g_engine.peripheral);
 
-      sleep_ms(5);
+      platform_sleep_ms(5);
     }
   }
   else
@@ -204,11 +208,11 @@ void engine_enter_sleep()
   audio_playback_set_enabled(true);
   display_set_enabled(&g_engine.display, true);
   peripheral_set_enabled(&g_engine.peripheral, true);
-  watchdog_enable(200, 1);
+  platform_watchdog_enable(200);
 
   reset_buttons(true);                // ignore any edges from waking up
   engine_mark_input();                // mark input to avoid auto-sleep right after waking up
-  g_engine.now = get_absolute_time(); // reset time to avoid a huge dt on wake
+  g_engine.now = platform_now_us(); // reset time to avoid a huge dt on wake
 }
 
 static const int32_t MENU_CONTAINER_OFFSET_CLOSED = -DISP_HEIGHT - 2;
@@ -318,10 +322,10 @@ static void menu_frame()
         // change volume repeatedly when held
         if (held >= .2f)
         {
-          static absolute_time_t last_change = {0};
-          if (time_reached(delayed_by_ms(last_change, 200)))
+          static platform_time_t last_change = 0;
+          if (platform_time_reached(platform_time_add_ms(last_change, 200)))
           {
-            last_change = get_absolute_time();
+            last_change = platform_now_us();
             if (button_id == BUTTON_LEFT)
             {
               engine_change_volume(-1);
@@ -468,7 +472,7 @@ void engine_run_forever()
   ti_init(&ti_show);
 
   uint64_t last_frame_us = 0;
-  absolute_time_t last_log_us = get_absolute_time();
+  platform_time_t last_log_us = platform_now_us();
   uint32_t last_log_frames = 0;
   uint32_t fps = 0;
 
@@ -476,17 +480,16 @@ void engine_run_forever()
 
   uint32_t dt = 0;
   uint32_t peripheral_update_counter = 0;
-  watchdog_enable(200, 1);
-  g_engine.now = get_absolute_time();
+  platform_watchdog_enable(200);
+  g_engine.now = platform_now_us();
   g_engine.tick = 0;
   while (1)
   {
-    absolute_time_t now = get_absolute_time();
-    dt = ((uint32_t)absolute_time_diff_us(g_engine.now, now)) + dt;
-    divmod_result_t res = hw_divider_divmod_u32(dt, TICK_INTERVAL_US);
-    uint32_t ticks = to_quotient_u32(res);
+    platform_time_t now = platform_now_us();
+    dt = ((uint32_t)platform_time_diff_us(g_engine.now, now)) + dt;
+    uint32_t ticks = dt / TICK_INTERVAL_US;
     printf("dt: %d, ticks: %d\n", dt, ticks);
-    dt = to_remainder_u32(res);
+    dt = dt % TICK_INTERVAL_US;
     g_engine.now = now;
 
     // update buttons
@@ -531,7 +534,7 @@ void engine_run_forever()
       if (ticks % 200 == 0)
       {
         // for long updates, keep watchdog happy
-        watchdog_update();
+        platform_watchdog_update();
       }
     }
 
@@ -565,8 +568,8 @@ void engine_run_forever()
 
 #if AUTO_SLEEP_TIMEOUT_MS > 0
     // enter auto-sleep if idle for too long
-    if (time_reached(
-            delayed_by_ms(g_engine.last_input_at, AUTO_SLEEP_TIMEOUT_MS)))
+    if (platform_time_reached(
+            platform_time_add_ms(g_engine.last_input_at, AUTO_SLEEP_TIMEOUT_MS)))
     {
       engine_pause(true);
       engine_enter_sleep();
@@ -575,7 +578,7 @@ void engine_run_forever()
 
     // log fps and frame limit
     last_log_frames++;
-    if (absolute_time_diff_us(last_log_us, now) > 1000000)
+    if (platform_time_diff_us(last_log_us, now) > 1000000)
     {
       fps = last_log_frames;
       float ti_tick_avg = ti_get_average_ms(&ti_tick, true);
@@ -594,12 +597,12 @@ void engine_run_forever()
       last_log_frames = 0;
     }
 
-    now = get_absolute_time(); // update timestamp for frame limit calc
-    uint64_t spent_us = absolute_time_diff_us(last_frame_us, now);
+    now = platform_now_us(); // update timestamp for frame limit calc
+    uint64_t spent_us = (uint64_t)platform_time_diff_us(last_frame_us, now);
     if (spent_us < TARGET_FRAME_INTERVAL_US)
     {
-      sleep_us(TARGET_FRAME_INTERVAL_US - spent_us);
-      last_frame_us = get_absolute_time();
+      platform_sleep_us(TARGET_FRAME_INTERVAL_US - spent_us);
+      last_frame_us = platform_now_us();
     }
     else
     {
@@ -631,7 +634,7 @@ void engine_set_app(app_t *app)
   audio_synth_reset_voices(&g_engine.synth);
 
   // seed based on time
-  srand(to_ms_since_boot(get_absolute_time()));
+  srand((unsigned int)platform_now_us());
 
   if (g_engine.app != NULL && g_engine.app->enter != NULL)
   {

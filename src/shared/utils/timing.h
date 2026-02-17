@@ -3,12 +3,12 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-#include <pico/time.h>
+#include <shared/platform/time.h>
 
 // Everything stored in microseconds
 typedef struct {
-  absolute_time_t start_time;
-  absolute_time_t end_time;
+  platform_time_t start_time;
+  platform_time_t end_time;
   uint64_t aggregate_time;
   uint32_t count;
 } TimingInstrumenter;
@@ -23,19 +23,19 @@ static inline void ti_init(TimingInstrumenter *ti) {
 
 // Record current timestamp
 static inline void ti_start(TimingInstrumenter *ti) {
-  ti->start_time = get_absolute_time();
+  ti->start_time = platform_now_us();
 }
 
 // Stop and accumulate
 static inline void ti_stop(TimingInstrumenter *ti) {
-  ti->end_time = get_absolute_time();
-  ti->aggregate_time += absolute_time_diff_us(ti->start_time, ti->end_time);
+  ti->end_time = platform_now_us();
+  ti->aggregate_time += (uint64_t)platform_time_diff_us(ti->start_time, ti->end_time);
   ti->count++;
 }
 
 // Last measured interval (µs)
 static inline uint64_t ti_get_elapsed_us(const TimingInstrumenter *ti) {
-  return absolute_time_diff_us(ti->start_time, ti->end_time);
+  return (uint64_t)platform_time_diff_us(ti->start_time, ti->end_time);
 }
 
 // Average time in milliseconds.

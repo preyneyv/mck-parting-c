@@ -1,8 +1,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-#include <hardware/sync.h>
-#include <pico/stdlib.h>
+#include <shared/platform/sync.h>
+#include <shared/platform/time.h>
 
 #include "buffer.h"
 
@@ -33,12 +33,12 @@ uint32_t *audio_buffer_pool_acquire_write(audio_buffer_pool_t *pool,
                                           bool blocking) {
   while (true) {
     // did we flow into unread buffers?
-    __dmb();
+    platform_memory_barrier();
     if (pool->count == pool->size) {
       if (!blocking)
         return NULL;
       // wait for read head to catch up
-      sleep_us(100);
+      platform_sleep_us(100);
       continue;
     }
 
@@ -49,7 +49,7 @@ uint32_t *audio_buffer_pool_acquire_write(audio_buffer_pool_t *pool,
 
 void audio_buffer_pool_commit_write(audio_buffer_pool_t *pool) {
   pool->write_head = (pool->write_head + 1) % pool->size;
-  __dmb();
+  platform_memory_barrier();
   pool->count++;
 }
 
@@ -63,12 +63,12 @@ uint32_t *audio_buffer_pool_acquire_read(audio_buffer_pool_t *pool,
                                          bool blocking) {
   while (true) {
     // did we flow into written buffers?
-    __dmb();
+    platform_memory_barrier();
     if (pool->count == 0) {
       if (!blocking)
         return NULL;
       // wait for write head to catch up
-      sleep_us(100);
+      platform_sleep_us(100);
       continue;
     }
 
@@ -80,6 +80,6 @@ uint32_t *audio_buffer_pool_acquire_read(audio_buffer_pool_t *pool,
 
 void audio_buffer_pool_commit_read(audio_buffer_pool_t *pool) {
   pool->read_head = (pool->read_head + 1) % pool->size;
-  __dmb();
+  platform_memory_barrier();
   pool->count--;
 }

@@ -1,8 +1,8 @@
 #include <stdio.h>
 
-#include <hardware/watchdog.h>
-
 #include <shared/apps/apps.h>
+#include <shared/platform/system.h>
+#include <shared/platform/time.h>
 
 static const unsigned char image_Sprite_0001_bits[] = {
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
@@ -222,14 +222,14 @@ static void frame()
     display_set_enabled(&g_engine.display, false);
     peripheral_set_enabled(&g_engine.peripheral, false);
     audio_playback_set_enabled(false);
-    watchdog_disable();
+    platform_watchdog_disable();
     while (1)
     {
       // trap until reset from watchdog or machine
-      sleep_ms(1000);
+      platform_sleep_ms(1000);
       if (engine_button_read(BUTTON_MENU))
       {
-        watchdog_enable(0, 0);
+        platform_system_reset();
         while (1)
           ;
       }

@@ -1,6 +1,6 @@
 #pragma once
 
-#include <pico/time.h>
+#include <shared/platform/time.h>
 
 #include <shared/utils/q1x15.h>
 
@@ -40,7 +40,7 @@ typedef enum
 typedef struct
 {
   button_id_t id;
-  absolute_time_t pressed_at;
+  platform_time_t pressed_at;
   bool pressed; // true if button is currently pressed
   bool edge;    // true if button was just transitioned this frame. will
                 // automatically be reset next tick or frame
@@ -66,8 +66,8 @@ typedef struct
     button_t menu;
   } buttons;
 
-  absolute_time_t now;
-  absolute_time_t last_input_at;
+  platform_time_t now;
+  platform_time_t last_input_at;
   uint32_t tick;
 
   bool paused;
@@ -139,7 +139,7 @@ static inline button_id_t engine_button_get_pressed_first()
 {
   if (g_engine.buttons.left.pressed && g_engine.buttons.right.pressed)
   {
-    if (absolute_time_diff_us(g_engine.buttons.left.pressed_at,
+    if (platform_time_diff_us(g_engine.buttons.left.pressed_at,
                               g_engine.buttons.right.pressed_at) < 0)
       return BUTTON_RIGHT;
     else
@@ -161,7 +161,7 @@ static inline float engine_button_held_ratio(button_id_t button_id)
   button_t *button = engine_button_from_id(button_id);
   if (!button->pressed)
     return 0.f;
-  int32_t ms = absolute_time_diff_us(button->pressed_at, g_engine.now) / 1000;
+  int32_t ms = (int32_t)(platform_time_diff_us(button->pressed_at, g_engine.now) / 1000);
   float held =
       (ms - ENGINE_BUTTON_HOLD_MS_TRIGGER) /
       (float)(ENGINE_BUTTON_HOLD_MS_CONFIRM - ENGINE_BUTTON_HOLD_MS_TRIGGER);

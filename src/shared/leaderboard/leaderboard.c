@@ -1,8 +1,7 @@
-#include <pico/unique_id.h>
-#include <pico/rand.h>
-
 #include <qrcodegen.h>
 #include <stdio.h>
+
+#include <shared/platform/identity.h>
 
 #include "leaderboard.h"
 #include "encoding.h"
@@ -14,7 +13,7 @@
 typedef struct
 {
     uint8_t app_id;
-    pico_unique_board_id_t board_id;
+    uint8_t board_id[8];
     uint32_t entry_id;
     uint8_t data_len; // max 255 bytes of data
     uint8_t *data;
@@ -31,9 +30,9 @@ static void _pack_leaderboard_entry(leaderboard_entry_t *entry, uint8_t *out_buf
     out_buf[offset++] = entry->app_id;
 
     // board id [1:9] (8 bytes)
-    for (size_t i = 0; i < sizeof(pico_unique_board_id_t); i++)
+    for (size_t i = 0; i < sizeof(entry->board_id); i++)
     {
-        out_buf[offset++] = entry->board_id.id[i];
+        out_buf[offset++] = entry->board_id[i];
     }
 
     // entry id [9:13] (4 bytes)
@@ -61,16 +60,13 @@ static void _pack_leaderboard_entry(leaderboard_entry_t *entry, uint8_t *out_buf
 
 bool leaderboard_get_qrcode(uint8_t app_id, void *data, size_t data_len, uint8_t *qrcode)
 {
-    pico_unique_board_id_t board_id;
-    pico_get_unique_board_id(&board_id);
-
     leaderboard_entry_t entry = {
         .app_id = app_id,
-        .board_id = board_id,
-        .entry_id = get_rand_32(), // simple random entry ID
+        .entry_id = platform_rand_u32(), // simple random entry ID
         .data = data,
         .data_len = data_len,
     };
+    platform_device_id(entry.board_id);
 
     size_t packed_len = 0;
     // abuse url buffer for packed data

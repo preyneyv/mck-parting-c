@@ -68,11 +68,6 @@ target_link_libraries(shared PUBLIC
     u8g2
     qrcodegen
     m
-    pico_stdlib
-    pico_unique_id
-    pico_rand
-    hardware_divider
-    hardware_watchdog
 )
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake")
@@ -84,6 +79,8 @@ if(PICO_PLATFORM STREQUAL "host")
         src/host/main.c
         src/host/audio.c
         src/host/display.c
+        src/host/platform.c
+        src/host/platform_sync.c
     )
 
     # force-include the host compatibility header
@@ -115,6 +112,7 @@ if(PICO_PLATFORM STREQUAL "host")
         SDL2::SDL2
         Threads::Threads
         ${SOUNDIO_LIBRARY}
+        pico_stdlib
     )
     target_include_directories(mck-parting-c PRIVATE
         ${SOUNDIO_INCLUDE_DIR}
@@ -145,6 +143,8 @@ else()
         src/rp2/audio.c
         src/rp2/peripheral.c
         src/rp2/leds.c
+        src/rp2/platform.c
+        src/rp2/platform_sync.c
         src/rp2/usb_descriptors.c
     )
 
@@ -166,8 +166,11 @@ else()
         hardware_pwm
         hardware_spi
         hardware_sync
+        hardware_watchdog
         pico_multicore
+        pico_rand
         pico_stdlib
+        pico_unique_id
         tinyusb_device
         tinyusb_board
     )

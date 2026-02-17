@@ -107,7 +107,7 @@ typedef struct
 
   bool started;
   bool finished;
-  absolute_time_t started_at;
+  platform_time_t started_at;
   struct
   {
     uint32_t letters;
@@ -131,7 +131,7 @@ static state_t *state;
 
 static stats_t get_stats()
 {
-  uint32_t elapsed_ms = absolute_time_diff_us(state->started_at, get_absolute_time()) / 1000;
+  uint32_t elapsed_ms = (uint32_t)(platform_time_diff_us(state->started_at, platform_now_us()) / 1000);
   if (state->finished)
     elapsed_ms = DURATION_MS;
 
@@ -246,7 +246,7 @@ static void tick_game()
     {
       state->started = true;
       state->finished = false;
-      state->started_at = get_absolute_time();
+      state->started_at = platform_now_us();
     }
 
     // begin mark (end gap)
@@ -396,7 +396,7 @@ static void tick()
     tick_game();
 
     // check for time up
-    uint32_t elapsed_ms = absolute_time_diff_us(state->started_at, get_absolute_time()) / 1000;
+    uint32_t elapsed_ms = (uint32_t)(platform_time_diff_us(state->started_at, platform_now_us()) / 1000);
     if (state->started && elapsed_ms >= DURATION_MS)
     {
       _finish_game();
