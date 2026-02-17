@@ -40,6 +40,14 @@ On my Windows machine with `pyenv-win`, this becomes:
 cmake -GNinja -DPython3_EXECUTABLE="$(pyenv which python)" ..
 ```
 
+## Asset Generation
+
+Applications have sounds and sprites. Sounds can be authored with REAPER and sprites can be authored with Aseprite. The build system has a build step to automatically generate C header files from these source files.
+
+Sounds live under `src/shared/apps/<app_name>/sounds/*.rpp` and sprites live under `src/shared/apps/<app_name>/sprites/*.aseprite`, both commited to Git.
+
+CMake will try to find REAPER and Aseprite on your machine, and if it succeeds, it will automatically generate corresponding `.h` files in the same directory. I chose to commit these generated files to allow the firmware to be compiled even if neither of these programs are installed, since they're only required if you're modifying those sources.
+
 ## Project Structure
 
 - `src/common/` - Cross-platform code

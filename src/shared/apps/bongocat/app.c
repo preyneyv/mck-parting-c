@@ -1,5 +1,5 @@
-#include "assets/cat.h"
-#include "assets/icon.h"
+#include "sprites/cat.h"
+#include "sprites/icon.h"
 
 #include <shared/apps/apps.h>
 #include <shared/engine.h>

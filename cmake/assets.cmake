@@ -86,7 +86,7 @@ if(Aseprite_FOUND)
     message(STATUS "Aseprite found: ${ASEPRITE_EXECUTABLE}")
 
     file(GLOB_RECURSE APP_ASE_FILES CONFIGURE_DEPENDS
-        "${CMAKE_CURRENT_SOURCE_DIR}/src/shared/apps/*/assets/*.aseprite"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/shared/apps/*/sprites/*.aseprite"
     )
     set(GENERATED_SPRITE_HEADERS "")
 
@@ -96,15 +96,15 @@ if(Aseprite_FOUND)
             "${ASE}"
         )
         string(REPLACE "\\" "/" ASE_REL_APPS "${ASE_REL_APPS}")
-        # should give us <app>/assets/<subdirs>/<name>.aseprite
-        string(REGEX MATCH "^([^/]+)/assets/(.+)\\.aseprite$" _ "${ASE_REL_APPS}")
+        # should give us <app>/sprites/<subdirs>/<name>.aseprite
+        string(REGEX MATCH "^([^/]+)/sprites/(.+)\\.aseprite$" _ "${ASE_REL_APPS}")
         if(NOT CMAKE_MATCH_1)
             message(FATAL_ERROR "Unexpected aseprite path: ${ASE_REL_APPS}")
         endif()
 
         set(APP_NAME "${CMAKE_MATCH_1}")
         set(SPRITE_REL_NOEXT "${CMAKE_MATCH_2}")
-        set(OUT_BASE "${CMAKE_CURRENT_SOURCE_DIR}/src/shared/apps/${APP_NAME}/assets/${SPRITE_REL_NOEXT}")
+        set(OUT_BASE "${CMAKE_CURRENT_SOURCE_DIR}/src/shared/apps/${APP_NAME}/sprites/${SPRITE_REL_NOEXT}")
         set(OUT_HEADER "${OUT_BASE}.h")
 
         add_custom_command(
