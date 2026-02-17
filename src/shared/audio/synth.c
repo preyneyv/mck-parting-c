@@ -455,7 +455,7 @@ void audio_synth_note_on(audio_synth_t *synth, audio_synth_message_note_on_t msg
     if (voice->note_number == -1)
     {
       // free voice found
-      if (platform_time_diff_us(voice->on_at, oldest_free) > 0)
+      if (voice->on_at < oldest_free)
       {
         oldest_free = voice->on_at;
         oldest_free_voice = voice;
@@ -465,14 +465,14 @@ void audio_synth_note_on(audio_synth_t *synth, audio_synth_message_note_on_t msg
     if (voice->patch_idx == msg.patch_idx)
     {
       // same patch
-      if (platform_time_diff_us(voice->on_at, oldest_same_patch) > 0)
+      if (voice->on_at < oldest_same_patch)
       {
         oldest_same_patch = voice->on_at;
         oldest_same_patch_voice = voice;
       }
     }
     // check for oldest any
-    if (platform_time_diff_us(voice->on_at, oldest_any) > 0)
+    if (voice->on_at < oldest_any)
     {
       oldest_any = voice->on_at;
       if (oldest_any_voice == NULL)

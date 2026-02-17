@@ -419,14 +419,6 @@ static void menu_frame()
 
 static inline void engine_do_tick()
 {
-  // read inputs
-  platform_input_mask_t input_mask = platform_input_read_mask();
-  read_button(&g_engine.buttons.left, g_engine.now, (input_mask & PLATFORM_INPUT_LEFT) != 0);
-  read_button(&g_engine.buttons.right, g_engine.now, (input_mask & PLATFORM_INPUT_RIGHT) != 0);
-  read_button(&g_engine.buttons.menu, g_engine.now, (input_mask & PLATFORM_INPUT_MENU) != 0);
-
-  handle_menu_reset();
-
   anim_tick(); // always tick animations
   if (!g_engine.paused)
   {
@@ -509,7 +501,7 @@ void engine_run_forever()
 
   uint32_t dt = 0;
   platform_watchdog_enable(200);
-  g_engine.now = platform_now_us();
+  g_engine.now = PLATFORM_TIME_ZERO;
   g_engine.tick = 0;
 
   g_engine.next_tick_at = platform_now_us();
@@ -518,6 +510,7 @@ void engine_run_forever()
   while (1)
   {
     platform_watchdog_update();
+    platform_task();
 
     // we enter when either a frame or a tick is due.
     // first, fast-forward ticks until we're caught up.
@@ -526,10 +519,25 @@ void engine_run_forever()
     while (now >= g_engine.next_tick_at)
     {
       ti_start(&ti_tick);
+
       // tick!
-      // update engine timestamp
-      g_engine.now = now;
+      g_engine.now = g_engine.next_tick_at;
+
+      if (ticks_processed == 0)
+      {
+        // only do this once per batch of ticks, since inputs cant change between
+        // fast-forwarded ticks.
+        // read inputs
+        platform_input_mask_t input_mask = platform_input_read_mask();
+        read_button(&g_engine.buttons.left, g_engine.now, (input_mask & PLATFORM_INPUT_LEFT) != 0);
+        read_button(&g_engine.buttons.right, g_engine.now, (input_mask & PLATFORM_INPUT_RIGHT) != 0);
+        read_button(&g_engine.buttons.menu, g_engine.now, (input_mask & PLATFORM_INPUT_MENU) != 0);
+
+        handle_menu_reset();
+      }
+
       engine_do_tick();
+
       if (ticks_processed++ % 50 == 0)
       {
         // for long updates, keep watchdog happy
@@ -567,7 +575,7 @@ void engine_run_forever()
       float ti_tick_avg = ti_get_average_ms(&ti_tick, true);
       float ti_frame_avg = ti_get_average_ms(&ti_frame, true);
       printf(
-          "fps: %.0f | tps: %.0f | frame: %.2f / %.2f ms | tick: %.2f / %.2f ms\n", fps, tps,
+          "fps: %d | tps: %d | frame: %.2f / %.2f ms | tick: %.2f / %.2f ms\n", fps, tps,
           ti_frame_avg, TARGET_FRAME_INTERVAL_US / 1000.0f, ti_tick_avg, TICK_INTERVAL_US / 1000.0f);
 
       // extern char __StackLimit;
