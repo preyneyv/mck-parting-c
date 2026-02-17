@@ -55,6 +55,7 @@ typedef struct
 
   audio_synth_t synth;
   color_t led_colors[LED_COUNT];
+
   struct
   {
     button_t left;
@@ -63,6 +64,8 @@ typedef struct
   } buttons;
 
   platform_time_t now;
+  platform_time_t next_tick_at;
+  platform_time_t next_frame_at;
   platform_time_t last_input_at;
   uint32_t tick;
 

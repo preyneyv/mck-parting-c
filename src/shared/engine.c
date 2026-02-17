@@ -84,7 +84,6 @@ static void draw_fps(u8g2_t *u8g2, uint32_t fps)
 
 static void read_button(button_t *button, platform_time_t now, bool pressed)
 {
-  button->edge = false;
   if (pressed)
   {
     if (!button->pressed && !button->ignore)
@@ -167,9 +166,10 @@ void engine_enter_sleep()
   platform_peripheral_set_enabled(true);
   platform_watchdog_enable(200);
 
-  reset_buttons(true);                // ignore any edges from waking up
-  engine_mark_input();                // mark input to avoid auto-sleep right after waking up
-  g_engine.now = platform_now_us(); // reset time to avoid a huge dt on wake
+  reset_buttons(true); // ignore any edges from waking up
+  engine_mark_input(); // mark input to avoid auto-sleep right after waking up
+  g_engine.next_tick_at = platform_now_us();
+  g_engine.next_frame_at = platform_now_us();
 }
 
 static const int32_t MENU_CONTAINER_OFFSET_CLOSED = -DISP_HEIGHT - 2;
@@ -417,6 +417,78 @@ static void menu_frame()
           chg_str);
 }
 
+static inline void engine_do_tick()
+{
+  // read inputs
+  platform_input_mask_t input_mask = platform_input_read_mask();
+  read_button(&g_engine.buttons.left, g_engine.now, (input_mask & PLATFORM_INPUT_LEFT) != 0);
+  read_button(&g_engine.buttons.right, g_engine.now, (input_mask & PLATFORM_INPUT_RIGHT) != 0);
+  read_button(&g_engine.buttons.menu, g_engine.now, (input_mask & PLATFORM_INPUT_MENU) != 0);
+
+  handle_menu_reset();
+
+  anim_tick(); // always tick animations
+  if (!g_engine.paused)
+  {
+    // advance app if not paused
+    if (g_engine.app->tick != NULL)
+    {
+      g_engine.app->tick();
+      // reset button edge. if no tick(), they will instead be reset next
+      // frame
+      g_engine.buttons.left.edge = false;
+      g_engine.buttons.right.edge = false;
+    }
+    g_engine.tick++;
+  }
+
+  if (g_engine.on_tick_cb != NULL)
+  {
+    g_engine.on_tick_cb();
+  }
+}
+
+static inline void engine_do_frame()
+{
+  for (uint8_t i = 0; i < LED_COUNT; i++)
+  {
+    g_engine.led_colors[i] = (color_t){.hex = 0x000000};
+  }
+  if (!g_engine.paused)
+  {
+    // draw screen buffer
+    u8g2_t *u8g2 = platform_display_get_u8g2();
+    u8g2_ClearBuffer(u8g2);
+    if (g_engine.app->frame != NULL)
+      g_engine.app->frame();
+  }
+
+  menu_frame();
+
+  if (g_engine.on_frame_cb != NULL)
+  {
+    g_engine.on_frame_cb();
+  }
+
+  // write display
+  u8g2_SendBuffer(platform_display_get_u8g2());
+  // write LEDs
+  platform_leds_show(g_engine.led_colors, LED_COUNT);
+
+  // reset button edges so they only last for a single frame at most
+  g_engine.buttons.left.edge = false;
+  g_engine.buttons.right.edge = false;
+  g_engine.buttons.menu.edge = false;
+
+  // check for auto sleep
+  if (platform_time_reached(
+          platform_time_add_ms(g_engine.last_input_at, AUTO_SLEEP_TIMEOUT_MS)))
+  {
+    engine_pause(true);
+    engine_enter_sleep();
+  }
+}
+
 void engine_run_forever()
 {
   platform_display_set_enabled(true);
@@ -424,9 +496,9 @@ void engine_run_forever()
   platform_task();
 
   TimingInstrumenter ti_tick;
-  TimingInstrumenter ti_show;
+  TimingInstrumenter ti_frame;
   ti_init(&ti_tick);
-  ti_init(&ti_show);
+  ti_init(&ti_frame);
 
   uint64_t last_frame_us = 0;
   platform_time_t last_log_us = platform_now_us();
@@ -439,128 +511,77 @@ void engine_run_forever()
   platform_watchdog_enable(200);
   g_engine.now = platform_now_us();
   g_engine.tick = 0;
+
+  g_engine.next_tick_at = platform_now_us();
+  g_engine.next_frame_at = platform_now_us();
+
   while (1)
   {
-    platform_task();
+    platform_watchdog_update();
+
+    // we enter when either a frame or a tick is due.
+    // first, fast-forward ticks until we're caught up.
     platform_time_t now = platform_now_us();
-    dt = ((uint32_t)platform_time_diff_us(g_engine.now, now)) + dt;
-    uint32_t ticks = dt / TICK_INTERVAL_US;
-    printf("dt: %d, ticks: %d\n", dt, ticks);
-    dt = dt % TICK_INTERVAL_US;
-    g_engine.now = now;
-
-    platform_input_mask_t input_mask = platform_input_read_mask();
-    read_button(&g_engine.buttons.left, now, (input_mask & PLATFORM_INPUT_LEFT) != 0);
-    read_button(&g_engine.buttons.right, now, (input_mask & PLATFORM_INPUT_RIGHT) != 0);
-    read_button(&g_engine.buttons.menu, now, (input_mask & PLATFORM_INPUT_MENU) != 0);
-
-    handle_menu_reset();
-
-    ti_start(&ti_tick);
-
-    while (ticks--)
+    int ticks_processed = 0;
+    while (now >= g_engine.next_tick_at)
     {
-      anim_tick(); // always tick animations
-
-      if (!g_engine.paused)
-      {
-        // advance app if not paused
-        if (g_engine.app->tick != NULL)
-        {
-          g_engine.app->tick();
-          // reset button edge. if no tick(), they will instead be reset next
-          // frame
-          g_engine.buttons.left.edge = false;
-          g_engine.buttons.right.edge = false;
-        }
-        g_engine.tick++; // todo: this should technically be part of the app,
-                         // not the engine
-      }
-
-      if (g_engine.on_tick_cb != NULL)
-      {
-        g_engine.on_tick_cb();
-      }
-      if (ticks % 200 == 0)
+      ti_start(&ti_tick);
+      // tick!
+      // update engine timestamp
+      g_engine.now = now;
+      engine_do_tick();
+      if (ticks_processed++ % 50 == 0)
       {
         // for long updates, keep watchdog happy
         platform_watchdog_update();
       }
+
+      // advance to next tick.
+      g_engine.next_tick_at += TICK_INTERVAL_US;
+      now = platform_now_us();
+      ti_stop(&ti_tick);
     }
 
-    for (uint8_t i = 0; i < LED_COUNT; i++)
+    // then, if a frame is due, draw it. note that we dont catch-up frames.
+    now = platform_now_us();
+    if (platform_time_reached(g_engine.next_frame_at))
     {
-      g_engine.led_colors[i] = (color_t){.hex = 0x000000};
-    }
-    if (!g_engine.paused)
-    {
-      // draw screen buffer
-      u8g2_ClearBuffer(u8g2);
-      if (g_engine.app->frame != NULL)
-        g_engine.app->frame();
-    }
+      ti_start(&ti_frame);
+      // frame!
+      engine_do_frame();
 
-    menu_frame();
-
-    ti_stop(&ti_tick);
-#ifdef DEBUG_FPS
-    draw_fps(u8g2, fps);
-#endif
-
-    ti_start(&ti_show);
-    // write display
-    u8g2_SendBuffer(u8g2);
-    // write LEDs
-    platform_leds_show(g_engine.led_colors, LED_COUNT);
-    ti_stop(&ti_show);
-
-    if (g_engine.on_frame_cb != NULL)
-    {
-      g_engine.on_frame_cb();
+      // schedule next frame
+      int64_t frame_time = platform_now_us() - now;
+      g_engine.next_frame_at = platform_now_us() + TARGET_FRAME_INTERVAL_US - frame_time;
+      ti_stop(&ti_frame);
     }
 
-#if AUTO_SLEEP_TIMEOUT_MS > 0
-    // enter auto-sleep if idle for too long
-    if (platform_time_reached(
-            platform_time_add_ms(g_engine.last_input_at, AUTO_SLEEP_TIMEOUT_MS)))
+    // log fps
+    now = platform_now_us();
+    int32_t log_time = platform_time_diff_us(last_log_us, now);
+    if (log_time > 1000000)
     {
-      engine_pause(true);
-      engine_enter_sleep();
-    }
-#endif
+      fps = (uint32_t)(ti_frame.count / (log_time / 1000000.0f));
+      uint32_t tps = (uint32_t)(ti_tick.count / (log_time / 1000000.0f));
 
-    // log fps and frame limit
-    last_log_frames++;
-    if (platform_time_diff_us(last_log_us, now) > 1000000)
-    {
-      fps = last_log_frames;
       float ti_tick_avg = ti_get_average_ms(&ti_tick, true);
-      float ti_show_avg = ti_get_average_ms(&ti_show, true);
-      float ti_frame_avg = ti_tick_avg + ti_show_avg;
-      // printf(
-      //     "fps: %d | frame: %.2f / %.2f ms | tick: %.2f ms | show: %.2f ms\n",
-      //     fps, ti_frame_avg, TARGET_FRAME_INTERVAL_US / 1000.0f, ti_tick_avg,
-      //     ti_show_avg);
+      float ti_frame_avg = ti_get_average_ms(&ti_frame, true);
+      printf(
+          "fps: %.0f | tps: %.0f | frame: %.2f / %.2f ms | tick: %.2f / %.2f ms\n", fps, tps,
+          ti_frame_avg, TARGET_FRAME_INTERVAL_US / 1000.0f, ti_tick_avg, TICK_INTERVAL_US / 1000.0f);
 
       // extern char __StackLimit;
       // char *heap = sbrk(0);
       // printf("ram free: %.2f kb", ((float)(&__StackLimit - heap)) / 1024.0f);
 
       last_log_us = now;
-      last_log_frames = 0;
     }
 
-    now = platform_now_us(); // update timestamp for frame limit calc
-    uint64_t spent_us = (uint64_t)platform_time_diff_us(last_frame_us, now);
-    if (spent_us < TARGET_FRAME_INTERVAL_US)
-    {
-      platform_sleep_us(TARGET_FRAME_INTERVAL_US - spent_us);
-      last_frame_us = platform_now_us();
-    }
-    else
-    {
-      last_frame_us = now;
-    }
+    // sleep until the next deadline
+    platform_time_t next_deadline = MIN(g_engine.next_tick_at, g_engine.next_frame_at);
+    int64_t sleep_time = platform_time_diff_us(platform_now_us(), next_deadline);
+    if (sleep_time > 0)
+      platform_sleep_us(sleep_time);
   }
 }
 
