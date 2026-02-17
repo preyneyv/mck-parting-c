@@ -28,6 +28,18 @@ cmake -GNinja -DPICO_PLATFORM=host ..
 ninja
 ```
 
+If you get an error about a Python interpreter, make sure you have Python 3 installed. You can explicitly set the path by running
+
+```sh
+cmake -DPython3_EXECUTABLE=[path/to/python/executable] [other options] ..
+```
+
+On my Windows machine with `pyenv-win`, this becomes:
+
+```powershell
+cmake -GNinja -DPython3_EXECUTABLE="$(pyenv which python)" ..
+```
+
 ## Project Structure
 
 - `src/common/` - Cross-platform code

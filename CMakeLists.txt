@@ -4,29 +4,33 @@ if(NOT CMAKE_GENERATOR STREQUAL "Ninja")
     message(WARNING "Consider using Ninja generator for faster builds: cmake -G Ninja [...]")
 endif()
 
+
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
+
 # == DO NOT EDIT THE FOLLOWING LINES for the Raspberry Pi Pico VS Code Extension to work ==
 if(WIN32)
-    set(USERHOME $ENV{USERPROFILE})
+set(USERHOME $ENV{USERPROFILE})
 else()
-    set(USERHOME $ENV{HOME})
+set(USERHOME $ENV{HOME})
 endif()
 set(sdkVersion 2.2.0)
 set(toolchainVersion 14_2_Rel1)
 set(picotoolVersion 2.2.0)
 set(picoVscode ${USERHOME}/.pico-sdk/cmake/pico-vscode.cmake)
 if (EXISTS ${picoVscode})
-    include(${picoVscode})
+include(${picoVscode})
 endif()
 # ====================================================================================
+
+set(PICO_BOARD board)
+list(APPEND PICO_BOARD_HEADER_DIRS ${CMAKE_CURRENT_LIST_DIR})
 
 include(pico_sdk_import.cmake)
 project(mck-parting-c C CXX ASM)
 
-list(APPEND PICO_CONFIG_HEADER_FILES ${CMAKE_CURRENT_LIST_DIR}/src/rp2/board.h)
 pico_sdk_init()
 
 # super important for u8g2 otherwise we get a 11 MB binary :skull:
