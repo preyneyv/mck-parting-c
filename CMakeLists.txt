@@ -12,16 +12,16 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 # == DO NOT EDIT THE FOLLOWING LINES for the Raspberry Pi Pico VS Code Extension to work ==
 if(WIN32)
-set(USERHOME $ENV{USERPROFILE})
+    set(USERHOME $ENV{USERPROFILE})
 else()
-set(USERHOME $ENV{HOME})
+    set(USERHOME $ENV{HOME})
 endif()
 set(sdkVersion 2.2.0)
 set(toolchainVersion 14_2_Rel1)
 set(picotoolVersion 2.2.0)
 set(picoVscode ${USERHOME}/.pico-sdk/cmake/pico-vscode.cmake)
-if (EXISTS ${picoVscode})
-include(${picoVscode})
+if(EXISTS ${picoVscode})
+    include(${picoVscode})
 endif()
 # ====================================================================================
 
@@ -64,17 +64,18 @@ set(SHARED_SOURCES
 )
 add_library(shared STATIC ${SHARED_SOURCES})
 target_include_directories(shared PRIVATE ${CMAKE_CURRENT_LIST_DIR}/src)
-target_link_libraries(shared PUBLIC 
-    u8g2 
+target_link_libraries(shared PUBLIC
+    u8g2
     qrcodegen
-    m 
-    pico_stdlib  
+    m
+    pico_stdlib
     pico_unique_id
     pico_rand
-    hardware_divider 
+    hardware_divider
     hardware_watchdog
 )
 
+list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake")
 include(${CMAKE_CURRENT_LIST_DIR}/cmake/assets.cmake)
 
 if(PICO_PLATFORM STREQUAL "host")
@@ -88,7 +89,7 @@ if(PICO_PLATFORM STREQUAL "host")
     # force-include the host compatibility header
     target_compile_options(shared PRIVATE -include ${CMAKE_CURRENT_LIST_DIR}/src/host/compat.h)
     target_compile_options(mck-parting-c PRIVATE -include ${CMAKE_CURRENT_LIST_DIR}/src/host/compat.h)
-    
+
     target_include_directories(mck-parting-c PRIVATE ${CMAKE_CURRENT_LIST_DIR}/src)
     # target_compile_options(mck-parting-c PRIVATE -ffast-math)
 
@@ -96,19 +97,19 @@ if(PICO_PLATFORM STREQUAL "host")
     find_package(SDL2 REQUIRED CONFIG REQUIRED COMPONENTS SDL2)
 
     # Find libsoundio manually
-    find_path(SOUNDIO_INCLUDE_DIR 
+    find_path(SOUNDIO_INCLUDE_DIR
         NAMES soundio/soundio.h
         PATHS /opt/homebrew/include /usr/local/include
     )
-    find_library(SOUNDIO_LIBRARY 
+    find_library(SOUNDIO_LIBRARY
         NAMES soundio
         PATHS /opt/homebrew/lib /usr/local/lib
     )
-    
+
     if(NOT SOUNDIO_INCLUDE_DIR OR NOT SOUNDIO_LIBRARY)
         message(FATAL_ERROR "libsoundio not found. Install with: brew install libsoundio")
     endif()
-    
+
     target_link_libraries(mck-parting-c PRIVATE
         shared
         SDL2::SDL2
@@ -172,8 +173,8 @@ else()
     )
     target_include_directories(mck-parting-c PRIVATE ${CMAKE_CURRENT_LIST_DIR}/src)
 
-    pico_generate_pio_header(mck-parting-c ${CMAKE_CURRENT_LIST_DIR}/src/rp2/audio.pio)    
-    pico_generate_pio_header(mck-parting-c ${CMAKE_CURRENT_LIST_DIR}/src/rp2/leds.pio)    
+    pico_generate_pio_header(mck-parting-c ${CMAKE_CURRENT_LIST_DIR}/src/rp2/audio.pio)
+    pico_generate_pio_header(mck-parting-c ${CMAKE_CURRENT_LIST_DIR}/src/rp2/leds.pio)
 
 
     pico_enable_stdio_uart(mck-parting-c 0)

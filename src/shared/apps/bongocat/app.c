@@ -1,4 +1,6 @@
-#include "assets.h"
+#include "assets/cat.h"
+#include "assets/icon.h"
+
 #include <shared/apps/apps.h>
 #include <shared/engine.h>
 

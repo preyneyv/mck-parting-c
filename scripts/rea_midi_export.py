@@ -7,7 +7,6 @@ import time
 from pathlib import Path
 from typing import List
 
-DEFAULT_REAPER_PATH = r"C:\Program Files\REAPER (x64)\reaper.exe"
 REASCRIPT_PATH = Path(__file__).resolve().with_name("rea_midi_export.lua")
 
 subprocs: List[subprocess.Popen] = []
@@ -69,7 +68,6 @@ def build_header_from_midi(
     midi_bytes = midi_path.read_bytes()
     content = emit_midi_header(symbol, rpp_path, midi_bytes)
     write_text_if_changed(header_out, content)
-    print(f"Generated MIDI header: {header_out}")
 
 
 def run_export(rpp_path: Path, midi_out_path: Path, reaper_path: str) -> bool:
@@ -100,7 +98,6 @@ def run_export(rpp_path: Path, midi_out_path: Path, reaper_path: str) -> bool:
                 if m2 == mtime:
                     break
                 mtime = m2
-            print(f"Exported MIDI: {midi_out_path}")
             proc.kill()
             return True
         time.sleep(0.5)
@@ -113,16 +110,13 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Export REAPER RPP to MIDI and optionally generate a C header with raw MIDI bytes"
     )
-    parser.add_argument(
-        "legacy_rpp", nargs="?", help="Backward-compatible positional RPP path"
-    )
-    parser.add_argument("--rpp", help="Input .rpp project file")
+    parser.add_argument("--rpp", required=True, help="Input .rpp project file")
     parser.add_argument("--midi-out", help="Output MIDI file path (.mid)")
     parser.add_argument("--header-out", help="Output C header path (.h)")
     parser.add_argument("--symbol", help="Base C symbol for generated data")
     parser.add_argument(
-        "--reaper-path",
-        default=os.environ.get("REAPER_PATH", DEFAULT_REAPER_PATH),
+        "--reaper-cli",
+        required=True,
         help="Path to REAPER executable",
     )
     return parser.parse_args()
@@ -131,11 +125,9 @@ def parse_args() -> argparse.Namespace:
 def main() -> int:
     args = parse_args()
 
-    rpp_raw = args.rpp or args.legacy_rpp
+    rpp_raw = args.rpp
     if not rpp_raw:
-        print(
-            "Error: provide --rpp <path> (or legacy positional path).", file=sys.stderr
-        )
+        print("Error: provide --rpp <path>.", file=sys.stderr)
         return 2
 
     rpp_path = Path(rpp_raw).resolve()
@@ -147,12 +139,12 @@ def main() -> int:
         Path(args.midi_out).resolve() if args.midi_out else rpp_path.with_suffix(".mid")
     )
 
-    reaper_path = Path(args.reaper_path)
-    if not reaper_path.exists():
-        print(f"Error: REAPER not found at: {args.reaper_path}", file=sys.stderr)
+    reaper_cli = Path(args.reaper_cli)
+    if not reaper_cli.exists():
+        print(f"Error: REAPER not found at: {args.reaper_cli}", file=sys.stderr)
         return 2
 
-    if not run_export(rpp_path, midi_out, args.reaper_path):
+    if not run_export(rpp_path, midi_out, args.reaper_cli):
         return 1
 
     if args.header_out:
