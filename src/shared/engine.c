@@ -22,6 +22,19 @@
 // global engine instance
 engine_t g_engine;
 
+// log-inspired volume curve for more perceptually linear volume steps.
+static const q1x15 ENGINE_VOLUME_CURVE[9] = {
+    Q1X15_ZERO, // mute
+    2195,       // ~0.067
+    5406,       // ~0.165
+    9142,       // ~0.279
+    13311,      // ~0.406
+    17797,      // ~0.543
+    22534,      // ~0.688
+    27557,      // ~0.841
+    Q1X15_ONE,  // full scale
+};
+
 void engine_init()
 {
   // initialize all subsystems
@@ -48,7 +61,7 @@ void engine_set_volume(int8_t level)
   if (clamped > 8)
     clamped = 8;
   g_engine.volume = (uint8_t)clamped;
-  g_engine.synth.master_level = q1x15_f(g_engine.volume / 8.0f);
+  g_engine.synth.master_level = ENGINE_VOLUME_CURVE[g_engine.volume];
 }
 
 inline void engine_change_volume(int8_t direction)

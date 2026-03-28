@@ -48,6 +48,14 @@ static const float PATH_SPAWN_START = 140.0f;     // px/s
 static const float PATH_SPAWN_FULL = 200.0f;      // px/s
 static const float PATH_SPAWN_ANGLE = 0.55f;      // rad half-angle cone
 static const float COLLISION_CHECK_RANGE = 40.0f; // px
+static const float LED_WARNING_RANGE = 70.0f;     // px
+static const uint8_t LED_BRIGHTNESS_CAP = 190;
+static const uint32_t LED_GAME_OVER_ANIM_MS = 1400;
+static const float LED_BOOST_RISE_PER_SEC = 9.0f;
+static const float LED_BOOST_FADE_PER_SEC = 2.8f;
+static const float LED_WARNING_ATTACK_PER_SEC = 14.0f;
+static const float LED_WARNING_RELEASE_PER_SEC = 8.0f;
+static const uint32_t LED_WARNING_SIDE_LOCK_MS = 120;
 
 enum
 {
@@ -110,6 +118,14 @@ typedef struct
     uint32_t last_trail_ms;
 
     asteroid_t ast[ASTEROID_MAX];
+
+    uint8_t led_warning_side;
+    float led_warning_ratio;
+    float led_speed_smooth;
+    float led_boost_level;
+    uint32_t led_last_render_ms;
+    uint32_t led_warning_side_lock_until_ms;
+    uint32_t game_over_at_ms;
 } state_t;
 
 static state_t state;
@@ -132,6 +148,41 @@ static inline float clampf(float v, float lo, float hi)
 static inline float randf()
 {
     return (float)rand() / (float)RAND_MAX;
+}
+
+static inline uint8_t u8_lerp(uint8_t a, uint8_t b, float t)
+{
+    if (t <= 0.0f)
+        return a;
+    if (t >= 1.0f)
+        return b;
+    return (uint8_t)(a + (int16_t)((b - a) * t));
+}
+
+static inline color_t color_lerp(color_t a, color_t b, float t)
+{
+    return rgba(
+        u8_lerp(a.r, b.r, t),
+        u8_lerp(a.g, b.g, t),
+        u8_lerp(a.b, b.b, t),
+        255);
+}
+
+static inline color_t color_scale(color_t c, float scale)
+{
+    scale = clampf(scale, 0.0f, 1.0f);
+    uint8_t r = (uint8_t)clampf(c.r * scale, 0.0f, 255.0f);
+    uint8_t g = (uint8_t)clampf(c.g * scale, 0.0f, 255.0f);
+    uint8_t b = (uint8_t)clampf(c.b * scale, 0.0f, 255.0f);
+    return rgba(r, g, b, 255);
+}
+
+static inline color_t color_cap(color_t c, uint8_t cap)
+{
+    if (cap >= 255)
+        return c;
+    float scale = (float)cap / 255.0f;
+    return color_scale(c, scale);
 }
 
 static inline float wrapf(float v, float max)
@@ -419,6 +470,7 @@ static void finish_game()
     engine_buttons_reset();
     state.game_over = true;
     state.results_ready = true;
+    state.game_over_at_ms = now_ms();
 
     uint8_t stats[8];
     uint32_t elapsed_ms = state.elapsed_ms;
@@ -449,6 +501,12 @@ static void reset_state()
     init_starfield(state.cam_pos);
     state.last_trail_ms = state.last_tick_ms;
     state.results_ready = false;
+    state.led_warning_side = 0;
+    state.led_warning_ratio = 0.0f;
+    state.led_speed_smooth = 0.0f;
+    state.led_boost_level = 0.0f;
+    state.led_last_render_ms = state.last_tick_ms;
+    state.led_warning_side_lock_until_ms = 0;
 }
 
 static void spawn_asteroid(uint32_t current_ms)
@@ -593,6 +651,9 @@ static void update_ship(float dt_s, uint32_t dt_ms)
 
 static void update_asteroids(float dt_s, uint32_t current_ms)
 {
+    float strongest_warning = 0.0f;
+    uint8_t strongest_side = 0;
+
     for (uint8_t i = 0; i < ASTEROID_MAX; i++)
     {
         if (!state.ast[i].active)
@@ -613,6 +674,24 @@ static void update_asteroids(float dt_s, uint32_t current_ms)
 
         a->pos.x += a->vel.x * dt_s;
         a->pos.y += a->vel.y * dt_s;
+
+        float dx_warn = a->pos.x - state.pos.x;
+        float dy_warn = a->pos.y - state.pos.y;
+        float dist_warn = sqrtf(dx_warn * dx_warn + dy_warn * dy_warn);
+        if (dist_warn <= LED_WARNING_RANGE)
+        {
+            float closeness = 1.0f - clampf(dist_warn / LED_WARNING_RANGE, 0.0f, 1.0f);
+            if (closeness > strongest_warning)
+            {
+                strongest_warning = closeness;
+                if (fabsf(dx_warn) < 8.0f)
+                    strongest_side = 3;
+                else if (dx_warn < 0.0f)
+                    strongest_side = 1;
+                else
+                    strongest_side = 2;
+            }
+        }
 
         float dx = a->pos.x - state.pos.x;
         float dy = a->pos.y - state.pos.y;
@@ -642,6 +721,128 @@ static void update_asteroids(float dt_s, uint32_t current_ms)
         spawn_asteroid(current_ms);
         state.next_spawn_at = current_ms + interval;
     }
+
+    float target_warning = strongest_warning;
+    float warning_rate = (target_warning > state.led_warning_ratio)
+                             ? LED_WARNING_ATTACK_PER_SEC
+                             : LED_WARNING_RELEASE_PER_SEC;
+    float warning_blend = clampf(warning_rate * dt_s, 0.0f, 1.0f);
+    state.led_warning_ratio += (target_warning - state.led_warning_ratio) * warning_blend;
+    state.led_warning_ratio = clampf(state.led_warning_ratio, 0.0f, 1.0f);
+
+    uint32_t now = current_ms;
+    if (state.led_warning_ratio < 0.01f || strongest_side == 0)
+    {
+        state.led_warning_side = 0;
+    }
+    else if (state.led_warning_side == 0)
+    {
+        state.led_warning_side = strongest_side;
+        state.led_warning_side_lock_until_ms = now + LED_WARNING_SIDE_LOCK_MS;
+    }
+    else if (strongest_side == state.led_warning_side || strongest_side == 3)
+    {
+        state.led_warning_side = strongest_side;
+    }
+    else if (now >= state.led_warning_side_lock_until_ms)
+    {
+        state.led_warning_side = strongest_side;
+        state.led_warning_side_lock_until_ms = now + LED_WARNING_SIDE_LOCK_MS;
+    }
+}
+
+static void render_leds()
+{
+    uint32_t t_ms = now_ms();
+    uint32_t dt_ms = t_ms - state.led_last_render_ms;
+    if (dt_ms > 200)
+        dt_ms = 200;
+    state.led_last_render_ms = t_ms;
+    float dt_s = dt_ms / 1000.0f;
+
+    color_t left = rgba(0, 0, 0, 255);
+    color_t right = rgba(0, 0, 0, 255);
+
+    // Priority 1: game-over meltdown animation
+    if (state.game_over)
+    {
+        uint32_t elapsed = t_ms - state.game_over_at_ms;
+        if (elapsed >= LED_GAME_OVER_ANIM_MS)
+        {
+            g_engine.led_colors[LED_L] = left;
+            g_engine.led_colors[LED_R] = right;
+            return;
+        }
+
+        float p = (float)elapsed / (float)LED_GAME_OVER_ANIM_MS;
+        color_t c;
+        if (p < 0.45f)
+        {
+            c = color_lerp(rgba(255, 40, 0, 255), rgba(255, 0, 180, 255), p / 0.45f);
+        }
+        else if (p < 0.8f)
+        {
+            c = color_lerp(rgba(255, 0, 180, 255), rgba(20, 80, 255, 255), (p - 0.45f) / 0.35f);
+        }
+        else
+        {
+            c = color_lerp(rgba(20, 80, 255, 255), rgba(0, 0, 0, 255), (p - 0.8f) / 0.2f);
+        }
+        c = color_cap(c, LED_BRIGHTNESS_CAP);
+        g_engine.led_colors[LED_L] = c;
+        g_engine.led_colors[LED_R] = c;
+        return;
+    }
+
+    // Priority 3 base layer: boost white/blue glow with interruptible release fade.
+    bool boosting = BUTTON_PRESSED(BUTTON_LEFT) && BUTTON_PRESSED(BUTTON_RIGHT);
+    float speed = vec2f_len(state.vel);
+    state.led_speed_smooth += (speed - state.led_speed_smooth) * 0.15f;
+    float boost_ratio = clampf(state.led_speed_smooth / BOOST_MAX_SPEED, 0.0f, 1.0f);
+
+    if (boosting)
+    {
+        state.led_boost_level += (boost_ratio - state.led_boost_level) * clampf(LED_BOOST_RISE_PER_SEC * dt_s, 0.0f, 1.0f);
+    }
+    else
+    {
+        state.led_boost_level *= expf(-LED_BOOST_FADE_PER_SEC * dt_s);
+    }
+
+    state.led_boost_level = clampf(state.led_boost_level, 0.0f, 1.0f);
+    if (state.led_boost_level > 0.01f)
+    {
+        color_t tint = color_lerp(rgba(255, 255, 255, 255), rgba(70, 140, 255, 255), state.led_boost_level);
+        float intensity = 0.15f + (0.85f * state.led_boost_level);
+        color_t c = color_cap(color_scale(tint, intensity), LED_BRIGHTNESS_CAP);
+        left = c;
+        right = c;
+    }
+
+    // Priority 2 overlay: imminent collision warning with side-aware proximity ramp.
+    if (state.led_warning_side != 0 && state.led_warning_ratio > 0.01f)
+    {
+        float intensity = state.led_warning_ratio * state.led_warning_ratio;
+        // Dim the boost base so warning remains perceptible even at high boost.
+        float base_dim = 1.0f - (0.55f * intensity);
+        left = color_scale(left, base_dim);
+        right = color_scale(right, base_dim);
+
+        // Blend toward red on the threatened side for explicit directional cue.
+        float blend = 0.25f + (0.75f * intensity);
+        color_t warn_target = color_cap(rgba(255, 0, 0, 255), LED_BRIGHTNESS_CAP);
+        if (state.led_warning_side == 1 || state.led_warning_side == 3)
+        {
+            left = color_lerp(left, warn_target, blend);
+        }
+        if (state.led_warning_side == 2 || state.led_warning_side == 3)
+        {
+            right = color_lerp(right, warn_target, blend);
+        }
+    }
+
+    g_engine.led_colors[LED_L] = left;
+    g_engine.led_colors[LED_R] = right;
 }
 
 static void tick()
@@ -926,6 +1127,8 @@ static void draw_results(u8g2_t *u8g2)
 
 static void frame()
 {
+    render_leds();
+
     u8g2_t *u8g2 = platform_display_get_u8g2();
     u8g2_SetDrawColor(u8g2, 1);
 
