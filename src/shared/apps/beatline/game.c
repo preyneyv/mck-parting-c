@@ -1,5 +1,6 @@
 #include "game.h"
 
+#include <stdlib.h>
 #include <string.h>
 
 #include <shared/config.h>
@@ -7,6 +8,197 @@
 #include <shared/leaderboard/leaderboard.h>
 
 #define BEATLINE_APP_ID 5
+
+#define BEATLINE_NOTE_C3 48
+#define BEATLINE_NOTE_CS3 49
+#define BEATLINE_NOTE_C4 60
+#define BEATLINE_NOTE_CS4 61
+
+static int beatline_note_cmp_hit_tick(const void *a, const void *b)
+{
+    const beatline_note_t *na = (const beatline_note_t *)a;
+    const beatline_note_t *nb = (const beatline_note_t *)b;
+
+    if (na->hit_tick < nb->hit_tick)
+        return -1;
+    if (na->hit_tick > nb->hit_tick)
+        return 1;
+    return (int)na->lane - (int)nb->lane;
+}
+
+static void beatline_generate_notes_from_song(beatline_state_t *st)
+{
+    st->generated_note_count = 0;
+    st->generated_last_note_tick = 0;
+    st->generated_duration_ticks = 0;
+
+    if (st->chart == NULL || st->chart->song == NULL ||
+        st->chart->song->events == NULL)
+    {
+        return;
+    }
+
+    const audio_song_asset_t *song = st->chart->song;
+
+    bool left_hold_active = false;
+    uint32_t left_hold_start = 0;
+    bool right_hold_active = false;
+    uint32_t right_hold_start = 0;
+
+    for (uint32_t i = 0; i < song->event_count; i++)
+    {
+        const audio_song_event_t *event = &song->events[i];
+
+        if (event->type == AUDIO_SONG_EVENT_NOTE_ON)
+        {
+            if (event->data.note_on.patch_idx != 0)
+                continue;
+
+            uint8_t note = event->data.note_on.note_number;
+            uint32_t t = event->time_ms;
+
+            if (note == BEATLINE_NOTE_C3 || note == BEATLINE_NOTE_C4)
+            {
+                if (st->generated_note_count >= BEATLINE_MAX_NOTES)
+                    continue;
+
+                st->generated_notes[st->generated_note_count++] = (beatline_note_t){
+                    .hit_tick = t,
+                    .lane = (note == BEATLINE_NOTE_C3) ? BEATLINE_LANE_LEFT : BEATLINE_LANE_RIGHT,
+                    .type = BEATLINE_NOTE_TAP,
+                    .hold_duration = 0,
+                };
+                continue;
+            }
+
+            if (note == BEATLINE_NOTE_CS3)
+            {
+                left_hold_active = true;
+                left_hold_start = t;
+                continue;
+            }
+
+            if (note == BEATLINE_NOTE_CS4)
+            {
+                right_hold_active = true;
+                right_hold_start = t;
+                continue;
+            }
+        }
+        else if (event->type == AUDIO_SONG_EVENT_NOTE_OFF)
+        {
+            if (event->data.note_off.patch_idx != 0)
+                continue;
+
+            int8_t note = event->data.note_off.note_number;
+            uint32_t t = event->time_ms;
+
+            if (note == BEATLINE_NOTE_CS3 && left_hold_active)
+            {
+                if (st->generated_note_count >= BEATLINE_MAX_NOTES)
+                {
+                    left_hold_active = false;
+                    continue;
+                }
+
+                uint32_t dur = (t > left_hold_start) ? (t - left_hold_start) : 0;
+                if (dur > UINT16_MAX)
+                    dur = UINT16_MAX;
+
+                st->generated_notes[st->generated_note_count++] = (beatline_note_t){
+                    .hit_tick = left_hold_start,
+                    .lane = BEATLINE_LANE_LEFT,
+                    .type = (dur > 0) ? BEATLINE_NOTE_HOLD : BEATLINE_NOTE_TAP,
+                    .hold_duration = (uint16_t)dur,
+                };
+                left_hold_active = false;
+                continue;
+            }
+
+            if (note == BEATLINE_NOTE_CS4 && right_hold_active)
+            {
+                if (st->generated_note_count >= BEATLINE_MAX_NOTES)
+                {
+                    right_hold_active = false;
+                    continue;
+                }
+
+                uint32_t dur = (t > right_hold_start) ? (t - right_hold_start) : 0;
+                if (dur > UINT16_MAX)
+                    dur = UINT16_MAX;
+
+                st->generated_notes[st->generated_note_count++] = (beatline_note_t){
+                    .hit_tick = right_hold_start,
+                    .lane = BEATLINE_LANE_RIGHT,
+                    .type = (dur > 0) ? BEATLINE_NOTE_HOLD : BEATLINE_NOTE_TAP,
+                    .hold_duration = (uint16_t)dur,
+                };
+                right_hold_active = false;
+                continue;
+            }
+        }
+    }
+
+    // Unmatched hold starts degrade to tap notes at their NOTE_ON time.
+    if (left_hold_active && st->generated_note_count < BEATLINE_MAX_NOTES)
+    {
+        st->generated_notes[st->generated_note_count++] = (beatline_note_t){
+            .hit_tick = left_hold_start,
+            .lane = BEATLINE_LANE_LEFT,
+            .type = BEATLINE_NOTE_TAP,
+            .hold_duration = 0,
+        };
+    }
+    if (right_hold_active && st->generated_note_count < BEATLINE_MAX_NOTES)
+    {
+        st->generated_notes[st->generated_note_count++] = (beatline_note_t){
+            .hit_tick = right_hold_start,
+            .lane = BEATLINE_LANE_RIGHT,
+            .type = BEATLINE_NOTE_TAP,
+            .hold_duration = 0,
+        };
+    }
+
+    qsort(st->generated_notes,
+          st->generated_note_count,
+          sizeof(st->generated_notes[0]),
+          beatline_note_cmp_hit_tick);
+
+    for (uint16_t i = 0; i < st->generated_note_count; i++)
+    {
+        const beatline_note_t *n = &st->generated_notes[i];
+        uint32_t end_tick = n->hit_tick + n->hold_duration;
+        if (end_tick > st->generated_last_note_tick)
+            st->generated_last_note_tick = end_tick;
+    }
+
+    st->generated_duration_ticks = song->duration_ms;
+    if (st->generated_last_note_tick > st->generated_duration_ticks)
+        st->generated_duration_ticks = st->generated_last_note_tick;
+}
+
+static audio_song_event_action_t beatline_song_event_hook(
+    audio_song_player_t *player,
+    const audio_song_event_t *event,
+    void *user)
+{
+    (void)player;
+    (void)user;
+
+    if (event->type == AUDIO_SONG_EVENT_NOTE_ON &&
+        event->data.note_on.patch_idx == 0)
+    {
+        return AUDIO_SONG_EVENT_ACTION_CONSUME;
+    }
+
+    if (event->type == AUDIO_SONG_EVENT_NOTE_OFF &&
+        event->data.note_off.patch_idx == 0)
+    {
+        return AUDIO_SONG_EVENT_ACTION_CONSUME;
+    }
+
+    return AUDIO_SONG_EVENT_ACTION_PASS;
+}
 
 // --- Helpers ---
 
@@ -116,6 +308,9 @@ void beatline_game_select_track(beatline_state_t *st, int8_t track_idx)
     st->combo = 0;
     st->max_combo = 0;
     st->next_judge_idx = 0;
+    st->generated_note_count = 0;
+    st->generated_last_note_tick = 0;
+    st->generated_duration_ticks = 0;
     st->game_start_tick = 0;
     st->both_pressed_since = 0;
     memset(st->grade_counts, 0, sizeof(st->grade_counts));
@@ -138,6 +333,13 @@ void beatline_game_start_countdown(beatline_state_t *st)
 
     // init song player but don't start yet
     audio_song_player_init(&st->song_player, &g_engine.synth);
+    audio_song_player_set_hook(
+        &st->song_player,
+        (audio_song_event_hook_desc_t){
+            .callback = beatline_song_event_hook,
+            .user = st,
+            .mask = AUDIO_SONG_EVENT_MASK_NOTE_ON | AUDIO_SONG_EVENT_MASK_NOTE_OFF,
+        });
 }
 
 void beatline_game_start_play(beatline_state_t *st)
@@ -145,6 +347,10 @@ void beatline_game_start_play(beatline_state_t *st)
     st->screen = BEATLINE_SCREEN_PLAY;
     st->game_start_tick = g_engine.tick;
     st->grid_offset = 0;
+    beatline_generate_notes_from_song(st);
+    memset(st->note_grades, BEATLINE_NOTE_UNJUDGED, sizeof(st->note_grades));
+    st->next_judge_idx = 0;
+    memset(st->hold_state, 0, sizeof(st->hold_state));
 
     audio_song_player_play(
         &st->song_player,
@@ -165,7 +371,7 @@ static void register_grade(beatline_state_t *st, uint16_t note_idx,
     st->note_grades[note_idx] = (uint8_t)grade;
     st->grade_counts[grade]++;
 
-    uint8_t lane = st->chart->notes[note_idx].lane;
+    uint8_t lane = st->generated_notes[note_idx].lane;
 
     // scoring
     if (grade == BEATLINE_GRADE_MISS || grade == BEATLINE_GRADE_BAD)
@@ -210,20 +416,19 @@ static beatline_grade_t judge_timing(int32_t delta_ticks)
 static void try_hit_lane(beatline_state_t *st, uint8_t lane)
 {
     uint32_t game_time = beatline_game_time(st);
-    const beatline_chart_t *chart = st->chart;
 
     // scan for the closest unjudged note in this lane within the BAD window
     int32_t best_delta = INT32_MAX;
     int16_t best_idx = -1;
 
-    for (uint16_t i = 0; i < chart->note_count; i++)
+    for (uint16_t i = 0; i < st->generated_note_count; i++)
     {
         if (st->note_grades[i] != BEATLINE_NOTE_UNJUDGED)
             continue;
-        if (chart->notes[i].lane != lane)
+        if (st->generated_notes[i].lane != lane)
             continue;
 
-        int32_t delta = (int32_t)chart->notes[i].hit_tick - (int32_t)game_time;
+        int32_t delta = (int32_t)st->generated_notes[i].hit_tick - (int32_t)game_time;
 
         // too far in the future
         if (delta > BEATLINE_WINDOW_BAD)
@@ -242,12 +447,12 @@ static void try_hit_lane(beatline_state_t *st, uint8_t lane)
 
     if (best_idx >= 0)
     {
-        int32_t delta = (int32_t)chart->notes[best_idx].hit_tick - (int32_t)game_time;
+        int32_t delta = (int32_t)st->generated_notes[best_idx].hit_tick - (int32_t)game_time;
         beatline_grade_t grade = judge_timing(delta);
         register_grade(st, (uint16_t)best_idx, grade);
 
         // start hold tracking if hold note
-        if (chart->notes[best_idx].type == BEATLINE_NOTE_HOLD &&
+        if (st->generated_notes[best_idx].type == BEATLINE_NOTE_HOLD &&
             grade != BEATLINE_GRADE_MISS)
         {
             st->hold_state[lane].holding = true;
@@ -260,9 +465,8 @@ static void try_hit_lane(beatline_state_t *st, uint8_t lane)
 static void process_misses(beatline_state_t *st)
 {
     uint32_t game_time = beatline_game_time(st);
-    const beatline_chart_t *chart = st->chart;
 
-    while (st->next_judge_idx < chart->note_count)
+    while (st->next_judge_idx < st->generated_note_count)
     {
         uint16_t i = st->next_judge_idx;
 
@@ -272,7 +476,7 @@ static void process_misses(beatline_state_t *st)
             continue;
         }
 
-        int32_t delta = (int32_t)game_time - (int32_t)chart->notes[i].hit_tick;
+        int32_t delta = (int32_t)game_time - (int32_t)st->generated_notes[i].hit_tick;
         if (delta > BEATLINE_WINDOW_BAD)
         {
             register_grade(st, i, BEATLINE_GRADE_MISS);
@@ -293,7 +497,7 @@ static void process_holds(beatline_state_t *st)
             continue;
 
         uint16_t idx = st->hold_state[lane].note_idx;
-        const beatline_note_t *n = &st->chart->notes[idx];
+        const beatline_note_t *n = &st->generated_notes[idx];
         uint32_t end_tick = n->hit_tick + n->hold_duration;
 
         button_id_t btn = (lane == BEATLINE_LANE_LEFT) ? BUTTON_LEFT : BUTTON_RIGHT;
@@ -379,10 +583,10 @@ void beatline_game_tick(beatline_state_t *st)
 
     // check natural end
     uint32_t game_time = beatline_game_time(st);
-    if (game_time >= st->chart->duration_ticks)
+    if (game_time >= st->generated_duration_ticks)
     {
         // wait a little after last note for feedback to show
-        uint32_t last_note_tick = st->chart->notes[st->chart->note_count - 1].hit_tick;
+        uint32_t last_note_tick = st->generated_last_note_tick;
         if (game_time >= last_note_tick + 1500)
             beatline_game_finish(st);
     }
@@ -394,7 +598,7 @@ void beatline_game_finish(beatline_state_t *st)
     audio_song_player_stop(&st->song_player, true);
 
     // judge any remaining notes as miss
-    for (uint16_t i = 0; i < st->chart->note_count; i++)
+    for (uint16_t i = 0; i < st->generated_note_count; i++)
     {
         if (st->note_grades[i] == BEATLINE_NOTE_UNJUDGED)
             register_grade(st, i, BEATLINE_GRADE_MISS);

@@ -94,6 +94,10 @@ typedef struct
     int32_t av_offset_ticks; // audio-visual offset, default 0
 
     // note tracking
+    beatline_note_t generated_notes[BEATLINE_MAX_NOTES];
+    uint16_t generated_note_count;
+    uint32_t generated_last_note_tick;
+    uint32_t generated_duration_ticks;
     uint16_t next_judge_idx; // next unjudged note (for miss scanning)
     uint8_t note_grades[BEATLINE_MAX_NOTES];
 

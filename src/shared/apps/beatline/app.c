@@ -329,16 +329,15 @@ static void play_draw_notes(elm_t *root)
     u8g2_t *u8g2 = root->u8g2;
     uint32_t game_time = beatline_game_time(&state);
     float px_t = scroll_px_per_tick();
-    const beatline_chart_t *chart = state.chart;
 
-    for (uint16_t i = 0; i < chart->note_count; i++)
+    for (uint16_t i = 0; i < state.generated_note_count; i++)
     {
         if (state.note_grades[i] != BEATLINE_NOTE_UNJUDGED)
         {
             // hold notes still render tail while being held
-            if (chart->notes[i].type == BEATLINE_NOTE_HOLD)
+            if (state.generated_notes[i].type == BEATLINE_NOTE_HOLD)
             {
-                uint8_t lane = chart->notes[i].lane;
+                uint8_t lane = state.generated_notes[i].lane;
                 if (state.hold_state[lane].holding &&
                     state.hold_state[lane].note_idx == i)
                 {
@@ -355,7 +354,7 @@ static void play_draw_notes(elm_t *root)
             }
         }
 
-        const beatline_note_t *n = &chart->notes[i];
+        const beatline_note_t *n = &state.generated_notes[i];
         int32_t time_remaining = (int32_t)n->hit_tick - (int32_t)game_time;
         int32_t travel_px = (int32_t)(time_remaining * px_t);
 
