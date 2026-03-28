@@ -122,6 +122,7 @@ void midi_task(void)
 
     while (tud_midi_available())
     {
+        // printf("midi_task: checking for MIDI data...\n");
         tud_midi_packet_read(packet);
         engine_mark_input();
 

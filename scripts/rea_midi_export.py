@@ -63,7 +63,7 @@ def read_vlq(data: bytes, pos: int) -> Tuple[int, int]:
     return value, pos
 
 
-def parse_midi_events(midi_path: Path) -> Tuple[int, List[Dict[str, object]]]:
+def parse_midi_events(midi_path: Path) -> Tuple[int, int, List[Dict[str, object]]]:
     data = midi_path.read_bytes()
     pos = 0
 
@@ -83,6 +83,7 @@ def parse_midi_events(midi_path: Path) -> Tuple[int, List[Dict[str, object]]]:
         raise ValueError(f"Unsupported MIDI format: {midi_format}")
 
     events: List[Dict[str, object]] = []
+    song_end_tick = 0
     seq = 0
 
     for _ in range(ntrks):
@@ -99,6 +100,8 @@ def parse_midi_events(midi_path: Path) -> Tuple[int, List[Dict[str, object]]]:
         while pos < end:
             delta, pos = read_vlq(data, pos)
             tick += delta
+            if tick > song_end_tick:
+                song_end_tick = tick
             if pos >= end:
                 break
 
@@ -182,7 +185,7 @@ def parse_midi_events(midi_path: Path) -> Tuple[int, List[Dict[str, object]]]:
         pos = end
 
     events.sort(key=lambda e: (int(e["tick"]), int(e["seq"])))
-    return division, events
+    return division, song_end_tick, events
 
 
 def parse_prism_set_patch_sysex(raw: bytes) -> Optional[Dict[str, object]]:
@@ -346,7 +349,7 @@ def default_patch_ops() -> List[Dict[str, int]]:
 
 
 def build_song_model(
-    division: int, events: List[Dict[str, object]]
+    division: int, song_end_tick: int, events: List[Dict[str, object]]
 ) -> Dict[str, object]:
     seg_ticks, seg_cum_us, seg_tempo_us_per_qn = build_tempo_segments(events, division)
 
@@ -444,9 +447,15 @@ def build_song_model(
     }
     song_events.sort(key=lambda e: (int(e["time_ms"]), order.get(str(e["etype"]), 10)))
 
-    duration_ms = 0
+    duration_ms = tick_to_ms(
+        int(song_end_tick),
+        seg_ticks,
+        seg_cum_us,
+        seg_tempo_us_per_qn,
+        division,
+    )
     if song_events:
-        duration_ms = int(song_events[-1]["time_ms"])
+        duration_ms = max(duration_ms, int(song_events[-1]["time_ms"]))
 
     first_tempo = next((e for e in song_events if e["etype"] == "tempo"), None)
     us_per_q = 500000 if first_tempo is None else int(first_tempo["us_per_quarter"])
@@ -592,8 +601,8 @@ def build_song_header_from_midi(
     header_out: Path,
     symbol: str,
 ) -> None:
-    division, events = parse_midi_events(midi_path)
-    model = build_song_model(division, events)
+    division, song_end_tick, events = parse_midi_events(midi_path)
+    model = build_song_model(division, song_end_tick, events)
 
     header_content = emit_song_header(symbol, rpp_path, model)
     write_text_if_changed(header_out, header_content)

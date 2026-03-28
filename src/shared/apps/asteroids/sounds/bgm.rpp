@@ -1,4 +1,4 @@
-<REAPER_PROJECT 0.1 "7.36/win64" 1771294450
+<REAPER_PROJECT 0.1 "7.36/win64" 1774716523
   <NOTES 0 2
   >
   RIPPLE 0 0
@@ -18,7 +18,7 @@
   VIDEO_CONFIG 0 0 65792
   PANMODE 3
   PANLAWFLAGS 3
-  CURSOR 3
+  CURSOR 0
   ZOOM 35.85960413809067 0 0
   VZOOMEX 6 0
   USE_REC_CFG 0
@@ -346,7 +346,7 @@
     BUSCOMP 0 0 0 0 0
     SHOWINMIX 1 0.6667 0.5 1 0.5 0 0 0
     FIXEDLANES 9 0 0 0 0
-    SEL 1
+    SEL 0
     REC 0 5088 1 0 0 0 0 0
     VU 64
     TRACKHEIGHT 0 0 0 0 0 0 0
@@ -366,14 +366,14 @@
       <JS "prism synth" ""
         1 8 1 0 0 58 0 0 7 0.789 1 0 409 0 0 9 0.501 1 0 300 0 0 9 0.374 1 0 87 0 0 - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
       >
-      FLOAT 1429 467 505 695
+      FLOAT 67 430 505 695
       FXID {49105255-B5DB-4812-B52B-E9FBD93C8D7B}
       WAK 0 0
     >
     <ITEM
       POSITION 0
       SNAPOFFS 0
-      LENGTH 6
+      LENGTH 8
       LOOP 1
       ALLTAKES 0
       FADEIN 1 0 0 1 0 0 0
@@ -447,7 +447,7 @@
       <JS "prism synth" ""
         2 0 0.091 0 1 87 0.776 87 1 1 1 1 582 0 58 0 1 0 174 0 1 29 1 0 0 0 0 1 0 - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
       >
-      FLOAT 929 355 505 695
+      FLOAT 461 239 505 695
       FXID {BE1FB2FB-F0AD-4121-B7FC-FD9AF314E79E}
       WAK 0 0
     >
@@ -652,7 +652,7 @@
       <JS "prism synth" ""
         3 1 0.121 0 2076 0 1 0 0 0.472 0 1782 0 1 0 0 0.419 0 0 1570 0 0 1 0.18 1 1 0 1 26 - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
       >
-      FLOAT 1084 638 505 695
+      FLOAT 444 548 505 695
       FXID {D93832EF-2EA0-4CD0-9705-3420458EB257}
       WAK 0 0
     >

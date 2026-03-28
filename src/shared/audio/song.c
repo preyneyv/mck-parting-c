@@ -1,6 +1,7 @@
 #include "song.h"
 
 #include <assert.h>
+#include <stdio.h>
 #include <string.h>
 
 static uint32_t song_loop_end_ms(const audio_song_asset_t *song)
@@ -64,7 +65,7 @@ static bool song_event_is_due(const audio_song_event_t *event,
                               uint32_t from_ms,
                               uint32_t to_ms)
 {
-  return event->time_ms > from_ms && event->time_ms <= to_ms;
+  return event->time_ms >= from_ms && event->time_ms <= to_ms;
 }
 
 static void song_dispatch_to_synth(audio_song_player_t *player,
@@ -152,7 +153,7 @@ static void song_seek_to_time(audio_song_player_t *player, uint32_t time_ms)
 
   while (player->next_event_idx < song->event_count)
   {
-    if (song->events[player->next_event_idx].time_ms > time_ms)
+    if (song->events[player->next_event_idx].time_ms >= time_ms)
       break;
     player->next_event_idx++;
   }

@@ -130,6 +130,7 @@ end
 
 local function collect_channel_events(ppqn)
   local evts = {}
+  local track_end_tick = 0
   local num_tracks = r.CountTracks(0)
 
   local function for_each_looped_time(t0, item_pos, item_end, loop_period, cb)
@@ -192,6 +193,12 @@ local function collect_channel_events(ppqn)
 
       local take = r.GetActiveTake(item)
       if take and r.TakeIsMIDI(take) then
+        local end_qn = reaper.TimeMap2_timeToQN(0, item_end)
+        local item_end_tick = math.floor(end_qn * ppqn + 0.5)
+        if item_end_tick > track_end_tick then
+          track_end_tick = item_end_tick
+        end
+
         -- Loop source handling (keep your behavior)
         local loopsrc = r.GetMediaItemInfo_Value(item, "B_LOOPSRC") or 0
         local loop_period = nil
@@ -256,11 +263,11 @@ local function collect_channel_events(ppqn)
     end
   end
 
-  return evts
+  return evts, track_end_tick
 end
 
 
-local function write_type0_midi(filepath, ppqn, meta_events, chan_events)
+local function write_type0_midi(filepath, ppqn, meta_events, chan_events, track_end_tick)
   local all = {}
   for i = 1, #meta_events do all[#all + 1] = meta_events[i] end
   for i = 1, #chan_events do all[#all + 1] = chan_events[i] end
@@ -282,8 +289,12 @@ local function write_type0_midi(filepath, ppqn, meta_events, chan_events)
     last_tick = e.tick
   end
 
-  -- End of track
-  chunks[#chunks + 1] = vlq(0) .. string.char(0xFF, 0x2F, 0x00)
+  -- End of track: preserve trailing silence by delaying EOT to track_end_tick.
+  local eot_tick = last_tick
+  if track_end_tick and track_end_tick > eot_tick then
+    eot_tick = track_end_tick
+  end
+  chunks[#chunks + 1] = vlq(eot_tick - last_tick) .. string.char(0xFF, 0x2F, 0x00)
 
   local track_data = table.concat(chunks)
   local mthd = "MThd" .. u32be(6) .. u16be(0) .. u16be(1) .. u16be(ppqn)
@@ -326,10 +337,10 @@ local function run_bake_and_export()
   out = out:gsub("\\", "/")
 
   local meta = collect_tempo_timesig_meta(PPQN)
-  local chan = collect_channel_events(PPQN)
+  local chan, track_end_tick = collect_channel_events(PPQN)
   log("Collected channel events: " .. tostring(#chan))
   -- inject_prism_sysex_before_first_event(chan)
-  local ok, err = write_type0_midi(out, PPQN, meta, chan)
+  local ok, err = write_type0_midi(out, PPQN, meta, chan, track_end_tick)
 
 
   if not ok then
