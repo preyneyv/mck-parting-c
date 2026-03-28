@@ -5,3 +5,4 @@
 - asteroids: 2
 - rhythm: 3
 - simon: 4
+- beatline: 5

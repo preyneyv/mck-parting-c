@@ -49,6 +49,7 @@ add_subdirectory(lib/qrcodegen)
 set(SHARED_SOURCES
     src/shared/audio/buffer.c
     src/shared/audio/synth.c
+    src/shared/audio/song.c
     src/shared/audio/midi.c
     src/shared/leaderboard/leaderboard.c
     src/shared/anim.c
@@ -61,6 +62,9 @@ set(SHARED_SOURCES
     # src/shared/apps/rhythm/app.c
     # src/shared/apps/rhythm/tracker.c
     src/shared/apps/asteroids/app.c
+    src/shared/apps/beatline/app.c
+    src/shared/apps/beatline/chart.c
+    src/shared/apps/beatline/game.c
 )
 add_library(shared STATIC ${SHARED_SOURCES})
 target_include_directories(shared PRIVATE ${CMAKE_CURRENT_LIST_DIR}/src)

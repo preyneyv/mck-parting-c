@@ -1,0 +1,417 @@
+#include "game.h"
+
+#include <string.h>
+
+#include <shared/config.h>
+#include <shared/engine.h>
+#include <shared/leaderboard/leaderboard.h>
+
+#define BEATLINE_APP_ID 5
+
+// --- Helpers ---
+
+uint32_t beatline_game_time(const beatline_state_t *st)
+{
+    if (st->game_start_tick == 0)
+        return 0;
+    return g_engine.tick - st->game_start_tick;
+}
+
+uint16_t beatline_combo_multiplier(uint16_t combo)
+{
+    if (combo >= BEATLINE_COMBO_TIER3)
+        return 8;
+    if (combo >= BEATLINE_COMBO_TIER2)
+        return 4;
+    if (combo >= BEATLINE_COMBO_TIER1)
+        return 2;
+    return 1;
+}
+
+const char *beatline_grade_str(beatline_grade_t grade)
+{
+    switch (grade)
+    {
+    case BEATLINE_GRADE_PERFECT:
+        return "PERFECT";
+    case BEATLINE_GRADE_GOOD:
+        return "GOOD";
+    case BEATLINE_GRADE_BAD:
+        return "BAD";
+    case BEATLINE_GRADE_MISS:
+        return "MISS";
+    default:
+        return "";
+    }
+}
+
+const char *beatline_rank_str(beatline_rank_t rank)
+{
+    switch (rank)
+    {
+    case BEATLINE_RANK_S:
+        return "S";
+    case BEATLINE_RANK_A:
+        return "A";
+    case BEATLINE_RANK_B:
+        return "B";
+    case BEATLINE_RANK_C:
+        return "C";
+    case BEATLINE_RANK_D:
+        return "D";
+    default:
+        return "?";
+    }
+}
+
+beatline_rank_t beatline_game_rank(const beatline_state_t *st)
+{
+    uint16_t total = 0;
+    for (int i = 0; i < BEATLINE_GRADE_COUNT; i++)
+        total += st->grade_counts[i];
+
+    if (total == 0)
+        return BEATLINE_RANK_D;
+
+    // S: 100% PERFECT
+    if (st->grade_counts[BEATLINE_GRADE_PERFECT] == total)
+        return BEATLINE_RANK_S;
+
+    uint16_t good_or_better =
+        st->grade_counts[BEATLINE_GRADE_PERFECT] +
+        st->grade_counts[BEATLINE_GRADE_GOOD];
+
+    // A: >=95%, zero misses
+    if (good_or_better * 100 >= total * 95 &&
+        st->grade_counts[BEATLINE_GRADE_MISS] == 0)
+        return BEATLINE_RANK_A;
+
+    // B: >=85%
+    if (good_or_better * 100 >= total * 85)
+        return BEATLINE_RANK_B;
+
+    // C: >=70%
+    if (good_or_better * 100 >= total * 70)
+        return BEATLINE_RANK_C;
+
+    return BEATLINE_RANK_D;
+}
+
+// --- Init ---
+
+void beatline_game_init(beatline_state_t *st)
+{
+    memset(st, 0, sizeof(*st));
+    st->screen = BEATLINE_SCREEN_SELECT;
+    memset(st->note_grades, BEATLINE_NOTE_UNJUDGED, sizeof(st->note_grades));
+}
+
+void beatline_game_select_track(beatline_state_t *st, int8_t track_idx)
+{
+    st->chart = &beatline_tracks[track_idx];
+    st->selected_track = track_idx;
+
+    // reset play state
+    st->score = 0;
+    st->combo = 0;
+    st->max_combo = 0;
+    st->next_judge_idx = 0;
+    st->game_start_tick = 0;
+    st->both_pressed_since = 0;
+    memset(st->grade_counts, 0, sizeof(st->grade_counts));
+    memset(st->note_grades, BEATLINE_NOTE_UNJUDGED, sizeof(st->note_grades));
+    memset(st->hold_state, 0, sizeof(st->hold_state));
+    memset(st->feedback, 0, sizeof(st->feedback));
+    st->qr_ready = false;
+}
+
+// --- Countdown ---
+
+void beatline_game_start_countdown(beatline_state_t *st)
+{
+    st->screen = BEATLINE_SCREEN_COUNTDOWN;
+    st->countdown_beat = 3;
+
+    // beat interval in ticks
+    uint32_t beat_interval = 60000 / st->chart->bpm;
+    st->countdown_next_tick = g_engine.tick + beat_interval;
+
+    // init song player but don't start yet
+    audio_song_player_init(&st->song_player, &g_engine.synth);
+}
+
+void beatline_game_start_play(beatline_state_t *st)
+{
+    st->screen = BEATLINE_SCREEN_PLAY;
+    st->game_start_tick = g_engine.tick;
+    st->grid_offset = 0;
+
+    audio_song_player_play(
+        &st->song_player,
+        st->chart->song,
+        (audio_song_play_options_t){.loop = false, .restart_if_playing = true},
+        g_engine.tick);
+}
+
+// --- Judgment ---
+
+static void register_grade(beatline_state_t *st, uint16_t note_idx,
+                           beatline_grade_t grade)
+{
+    st->note_grades[note_idx] = (uint8_t)grade;
+    st->grade_counts[grade]++;
+
+    uint8_t lane = st->chart->notes[note_idx].lane;
+
+    // scoring
+    if (grade == BEATLINE_GRADE_MISS || grade == BEATLINE_GRADE_BAD)
+    {
+        if (grade == BEATLINE_GRADE_BAD)
+            st->score += BEATLINE_SCORE_BAD;
+        st->combo = 0;
+    }
+    else
+    {
+        st->combo++;
+        if (st->combo > st->max_combo)
+            st->max_combo = st->combo;
+
+        uint16_t mult = beatline_combo_multiplier(st->combo);
+        uint16_t base = (grade == BEATLINE_GRADE_PERFECT)
+                            ? BEATLINE_SCORE_PERFECT
+                            : BEATLINE_SCORE_GOOD;
+        st->score += base * mult;
+    }
+
+    // feedback
+    st->feedback[lane].grade = grade;
+    st->feedback[lane].until_tick = g_engine.tick + BEATLINE_FEEDBACK_DURATION;
+}
+
+static beatline_grade_t judge_timing(int32_t delta_ticks)
+{
+    if (delta_ticks < 0)
+        delta_ticks = -delta_ticks;
+
+    if (delta_ticks <= BEATLINE_WINDOW_PERFECT)
+        return BEATLINE_GRADE_PERFECT;
+    if (delta_ticks <= BEATLINE_WINDOW_GOOD)
+        return BEATLINE_GRADE_GOOD;
+    if (delta_ticks <= BEATLINE_WINDOW_BAD)
+        return BEATLINE_GRADE_BAD;
+
+    return BEATLINE_GRADE_MISS;
+}
+
+static void try_hit_lane(beatline_state_t *st, uint8_t lane)
+{
+    uint32_t game_time = beatline_game_time(st);
+    const beatline_chart_t *chart = st->chart;
+
+    // scan for the closest unjudged note in this lane within the BAD window
+    int32_t best_delta = INT32_MAX;
+    int16_t best_idx = -1;
+
+    for (uint16_t i = 0; i < chart->note_count; i++)
+    {
+        if (st->note_grades[i] != BEATLINE_NOTE_UNJUDGED)
+            continue;
+        if (chart->notes[i].lane != lane)
+            continue;
+
+        int32_t delta = (int32_t)chart->notes[i].hit_tick - (int32_t)game_time;
+
+        // too far in the future
+        if (delta > BEATLINE_WINDOW_BAD)
+            break;
+        // too far in the past
+        if (delta < -BEATLINE_WINDOW_BAD)
+            continue;
+
+        int32_t abs_delta = delta < 0 ? -delta : delta;
+        if (abs_delta < best_delta)
+        {
+            best_delta = abs_delta;
+            best_idx = (int16_t)i;
+        }
+    }
+
+    if (best_idx >= 0)
+    {
+        int32_t delta = (int32_t)chart->notes[best_idx].hit_tick - (int32_t)game_time;
+        beatline_grade_t grade = judge_timing(delta);
+        register_grade(st, (uint16_t)best_idx, grade);
+
+        // start hold tracking if hold note
+        if (chart->notes[best_idx].type == BEATLINE_NOTE_HOLD &&
+            grade != BEATLINE_GRADE_MISS)
+        {
+            st->hold_state[lane].holding = true;
+            st->hold_state[lane].note_idx = (uint16_t)best_idx;
+        }
+    }
+    // no note nearby — empty press, no penalty
+}
+
+static void process_misses(beatline_state_t *st)
+{
+    uint32_t game_time = beatline_game_time(st);
+    const beatline_chart_t *chart = st->chart;
+
+    while (st->next_judge_idx < chart->note_count)
+    {
+        uint16_t i = st->next_judge_idx;
+
+        if (st->note_grades[i] != BEATLINE_NOTE_UNJUDGED)
+        {
+            st->next_judge_idx++;
+            continue;
+        }
+
+        int32_t delta = (int32_t)game_time - (int32_t)chart->notes[i].hit_tick;
+        if (delta > BEATLINE_WINDOW_BAD)
+        {
+            register_grade(st, i, BEATLINE_GRADE_MISS);
+            st->next_judge_idx++;
+            continue;
+        }
+        break;
+    }
+}
+
+static void process_holds(beatline_state_t *st)
+{
+    uint32_t game_time = beatline_game_time(st);
+
+    for (uint8_t lane = 0; lane < 2; lane++)
+    {
+        if (!st->hold_state[lane].holding)
+            continue;
+
+        uint16_t idx = st->hold_state[lane].note_idx;
+        const beatline_note_t *n = &st->chart->notes[idx];
+        uint32_t end_tick = n->hit_tick + n->hold_duration;
+
+        button_id_t btn = (lane == BEATLINE_LANE_LEFT) ? BUTTON_LEFT : BUTTON_RIGHT;
+
+        if (!BUTTON_PRESSED(btn))
+        {
+            // released early — if significantly early, penalize
+            if (game_time + 80 < end_tick)
+            {
+                // override grade to BAD
+                st->note_grades[idx] = BEATLINE_GRADE_BAD;
+                // adjust counts: remove one from whatever we gave, add BAD
+                // (simplified: we already scored on initial hit, just reset combo)
+                st->combo = 0;
+            }
+            st->hold_state[lane].holding = false;
+        }
+        else if (game_time >= end_tick)
+        {
+            // held past end — success, stop tracking
+            st->hold_state[lane].holding = false;
+        }
+    }
+}
+
+// --- Tick ---
+
+void beatline_game_tick(beatline_state_t *st)
+{
+    if (st->screen == BEATLINE_SCREEN_COUNTDOWN)
+    {
+        if (g_engine.tick >= st->countdown_next_tick)
+        {
+            st->countdown_beat--;
+            if (st->countdown_beat == 0)
+            {
+                beatline_game_start_play(st);
+                return;
+            }
+            uint32_t beat_interval = 60000 / st->chart->bpm;
+            st->countdown_next_tick = g_engine.tick + beat_interval;
+        }
+        return;
+    }
+
+    if (st->screen != BEATLINE_SCREEN_PLAY)
+        return;
+
+    // advance song
+    audio_song_player_tick(&st->song_player, g_engine.tick);
+
+    // handle input
+    if (BUTTON_KEYDOWN(BUTTON_LEFT))
+        try_hit_lane(st, BEATLINE_LANE_LEFT);
+    if (BUTTON_KEYDOWN(BUTTON_RIGHT))
+        try_hit_lane(st, BEATLINE_LANE_RIGHT);
+
+    process_misses(st);
+    process_holds(st);
+
+    // clear expired feedback
+    for (uint8_t lane = 0; lane < 2; lane++)
+    {
+        if (st->feedback[lane].until_tick != 0 &&
+            g_engine.tick >= st->feedback[lane].until_tick)
+        {
+            st->feedback[lane].until_tick = 0;
+        }
+    }
+
+    // check hold-both-to-exit
+    if (BUTTON_PRESSED(BUTTON_LEFT) && BUTTON_PRESSED(BUTTON_RIGHT))
+    {
+        if (st->both_pressed_since == 0)
+            st->both_pressed_since = g_engine.tick;
+        else if (g_engine.tick - st->both_pressed_since >= 1500)
+            beatline_game_finish(st);
+    }
+    else
+    {
+        st->both_pressed_since = 0;
+    }
+
+    // check natural end
+    uint32_t game_time = beatline_game_time(st);
+    if (game_time >= st->chart->duration_ticks)
+    {
+        // wait a little after last note for feedback to show
+        uint32_t last_note_tick = st->chart->notes[st->chart->note_count - 1].hit_tick;
+        if (game_time >= last_note_tick + 1500)
+            beatline_game_finish(st);
+    }
+}
+
+void beatline_game_finish(beatline_state_t *st)
+{
+    st->screen = BEATLINE_SCREEN_RESULTS;
+    audio_song_player_stop(&st->song_player, true);
+
+    // judge any remaining notes as miss
+    for (uint16_t i = 0; i < st->chart->note_count; i++)
+    {
+        if (st->note_grades[i] == BEATLINE_NOTE_UNJUDGED)
+            register_grade(st, i, BEATLINE_GRADE_MISS);
+    }
+
+    uint8_t stats[14];
+    stats[0] = (uint8_t)st->selected_track;
+    stats[1] = (uint8_t)beatline_game_rank(st);
+    stats[2] = (uint8_t)(st->score & 0xFF);
+    stats[3] = (uint8_t)((st->score >> 8) & 0xFF);
+    stats[4] = (uint8_t)((st->score >> 16) & 0xFF);
+    stats[5] = (uint8_t)((st->score >> 24) & 0xFF);
+    stats[6] = (uint8_t)(st->max_combo & 0xFF);
+    stats[7] = (uint8_t)((st->max_combo >> 8) & 0xFF);
+    stats[8] = (uint8_t)(st->grade_counts[BEATLINE_GRADE_PERFECT] & 0xFF);
+    stats[9] = (uint8_t)((st->grade_counts[BEATLINE_GRADE_PERFECT] >> 8) & 0xFF);
+    stats[10] = (uint8_t)(st->grade_counts[BEATLINE_GRADE_GOOD] & 0xFF);
+    stats[11] = (uint8_t)((st->grade_counts[BEATLINE_GRADE_GOOD] >> 8) & 0xFF);
+    stats[12] = (uint8_t)(st->grade_counts[BEATLINE_GRADE_BAD] & 0xFF);
+    stats[13] = (uint8_t)(st->grade_counts[BEATLINE_GRADE_MISS] & 0xFF);
+    st->qr_ready = leaderboard_get_qrcode(BEATLINE_APP_ID, stats, sizeof(stats), st->qr_code);
+
+    engine_buttons_reset();
+}

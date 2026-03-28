@@ -70,5 +70,8 @@
     "__locale": "c",
     "ios": "c"
   },
-  "Lua.diagnostics.globals": ["reaper"]
+  "Lua.diagnostics.globals": ["reaper"],
+  "chat.tools.terminal.autoApprove": {
+    "cmake": true
+  }
 }

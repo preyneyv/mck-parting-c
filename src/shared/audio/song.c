@@ -122,7 +122,7 @@ void audio_song_player_set_hook(audio_song_player_t *player,
 }
 
 void audio_song_player_play(audio_song_player_t *player,
-                            const audio_song_asse t_t *song,
+                            const audio_song_asset_t *song,
                             audio_song_play_options_t options,
                             uint32_t now_ms)
 {
