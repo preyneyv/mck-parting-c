@@ -19,7 +19,7 @@ foreach(SRC IN LISTS SHARED_SOURCES)
 endforeach()
 
 
-# sound asset exports (.rpp -> .mid -> .h)
+# sound asset exports (.rpp -> .mid -> song .h)
 if(Reaper_FOUND)
     message(STATUS "REAPER found: ${REAPER_EXECUTABLE}")
 
@@ -61,7 +61,7 @@ if(Reaper_FOUND)
             "${CMAKE_CURRENT_SOURCE_DIR}/scripts/rea_midi_export.py"
             --rpp "${RPP}"
             --midi-out "${OUT_MID}"
-            --header-out "${OUT_HEADER}"
+            --song-header-out "${OUT_HEADER}"
             --symbol "${SOUND_SYMBOL}"
             --reaper-cli "${REAPER_EXECUTABLE}"
             DEPENDS "${RPP}"

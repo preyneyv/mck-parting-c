@@ -113,6 +113,7 @@ typedef struct
 } state_t;
 
 static state_t state;
+static audio_song_player_t bgm_player;
 
 static inline uint32_t now_ms()
 {
@@ -646,6 +647,8 @@ static void update_asteroids(float dt_s, uint32_t current_ms)
 static void tick()
 {
     uint32_t now = now_ms();
+    audio_song_player_tick(&bgm_player, now);
+
     uint32_t dt_ms = now - state.last_tick_ms;
     if (dt_ms == 0)
         return;
@@ -943,7 +946,32 @@ static void frame()
 
 static void enter()
 {
+    audio_song_player_init(&bgm_player, &g_engine.synth);
+    audio_song_player_play(
+        &bgm_player,
+        &sound_bgm_song,
+        (audio_song_play_options_t){
+            .patch_base = 0,
+            .loop = true,
+            .restart_if_playing = true,
+        },
+        now_ms());
     reset_state();
+}
+
+static void pause()
+{
+    audio_song_player_pause(&bgm_player);
+}
+
+static void resume()
+{
+    audio_song_player_resume(&bgm_player, now_ms());
+}
+
+static void leave()
+{
+    audio_song_player_stop(&bgm_player, true);
 }
 
 app_t app_asteroids = {
@@ -951,4 +979,7 @@ app_t app_asteroids = {
     .enter = enter,
     .tick = tick,
     .frame = frame,
+    .pause = pause,
+    .resume = resume,
+    .leave = leave,
 };

@@ -122,6 +122,8 @@ typedef struct
 
 typedef struct
 {
+  // Song-local patch indices are remapped as absolute = patch_base + local.
+  uint8_t patch_base;
   bool loop;
   bool restart_if_playing;
 } audio_song_play_options_t;
@@ -134,6 +136,7 @@ struct audio_song_player_t
   bool playing;
   bool paused;
   bool loop;
+  uint8_t patch_base;
 
   uint32_t song_time_ms;
   uint32_t last_engine_ms;

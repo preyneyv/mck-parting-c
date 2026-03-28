@@ -149,7 +149,11 @@ void beatline_game_start_play(beatline_state_t *st)
     audio_song_player_play(
         &st->song_player,
         st->chart->song,
-        (audio_song_play_options_t){.loop = false, .restart_if_playing = true},
+        (audio_song_play_options_t){
+            .patch_base = 0,
+            .loop = false,
+            .restart_if_playing = true,
+        },
         g_engine.tick);
 }
 

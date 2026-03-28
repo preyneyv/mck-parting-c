@@ -12,6 +12,8 @@
 #include "buffer.h"
 #include "synth.h"
 
+#define AUDIO_SYNTH_STOP_RELEASE_MS 5u
+
 static inline uint32_t lut_key(uint32_t phase)
 {
   return (phase >> (32 - AUDIO_SYNTH_LUT_RES));
@@ -199,6 +201,22 @@ static void audio_synth_operator_note_off(audio_synth_operator_t *op)
   env->evolution = 0;
 }
 
+static void audio_synth_operator_stop(audio_synth_operator_t *op)
+{
+  op->active = false;
+
+  audio_synth_env_state_t *env = &op->env;
+
+  // Recompute release from the current envelope level to avoid pops.
+  // This intentionally also works when already in release.
+  make_env_stage_from_cfg(&env->stages[3], op->voice->synth->d_timebase,
+                          AUDIO_SYNTH_STOP_RELEASE_MS, env->level,
+                          Q1X31_ZERO);
+
+  env->stage = 3;
+  env->evolution = 0;
+}
+
 void audio_synth_voice_note_off(audio_synth_voice_t *voice)
 {
   voice->note_number = -1;
@@ -207,6 +225,17 @@ void audio_synth_voice_note_off(audio_synth_voice_t *voice)
   {
     audio_synth_operator_t *op = &voice->ops[op_idx];
     audio_synth_operator_note_off(op);
+  }
+}
+
+static void audio_synth_voice_stop(audio_synth_voice_t *voice)
+{
+  voice->note_number = -1;
+
+  for (int op_idx = 0; op_idx < AUDIO_SYNTH_OPERATOR_COUNT; op_idx++)
+  {
+    audio_synth_operator_t *op = &voice->ops[op_idx];
+    audio_synth_operator_stop(op);
   }
 }
 
@@ -518,6 +547,19 @@ void audio_synth_note_off(audio_synth_t *synth, audio_synth_message_note_off_t m
   }
 }
 
+static void audio_synth_stop(audio_synth_t *synth, audio_synth_message_stop_t msg)
+{
+  for (int voice_idx = 0; voice_idx < AUDIO_SYNTH_VOICE_COUNT; voice_idx++)
+  {
+    audio_synth_voice_t *voice = &synth->voices[voice_idx];
+    if ((msg.note_number == -1 || voice->note_number == msg.note_number) &&
+        voice->patch_idx == msg.patch_idx)
+    {
+      audio_synth_voice_stop(voice);
+    }
+  }
+}
+
 void audio_synth_handle_message(audio_synth_t *synth,
                                 audio_synth_message_t *msg)
 {
@@ -533,6 +575,12 @@ void audio_synth_handle_message(audio_synth_t *synth,
   {
     assert(msg->data.note_off.patch_idx < AUDIO_SYNTH_PATCH_COUNT);
     audio_synth_note_off(synth, msg->data.note_off);
+    break;
+  }
+  case AUDIO_SYNTH_MESSAGE_STOP:
+  {
+    assert(msg->data.stop.patch_idx < AUDIO_SYNTH_PATCH_COUNT);
+    audio_synth_stop(synth, msg->data.stop);
     break;
   }
   case AUDIO_SYNTH_MESSAGE_PANIC:

@@ -1,5 +1,6 @@
 #include "song.h"
 
+#include <assert.h>
 #include <string.h>
 
 static uint32_t song_loop_end_ms(const audio_song_asset_t *song)
@@ -7,6 +8,14 @@ static uint32_t song_loop_end_ms(const audio_song_asset_t *song)
   if (song->loop_end_ms != 0)
     return song->loop_end_ms;
   return song->duration_ms;
+}
+
+static inline uint8_t song_map_patch_idx(const audio_song_player_t *player,
+                                         uint8_t patch_idx)
+{
+  uint8_t mapped = (uint8_t)(player->patch_base + patch_idx);
+  assert(mapped < AUDIO_SYNTH_PATCH_COUNT);
+  return mapped;
 }
 
 static void song_apply_patches(audio_song_player_t *player,
@@ -18,7 +27,36 @@ static void song_apply_patches(audio_song_player_t *player,
   for (uint32_t i = 0; i < song->patch_count; i++)
   {
     audio_song_patch_event_t patch = song->patches[i];
-    audio_synth_patch_config_set(player->synth, patch.patch_idx, patch.patch);
+    audio_synth_patch_config_set(
+        player->synth,
+        song_map_patch_idx(player, patch.patch_idx),
+        patch.patch);
+  }
+}
+
+static void song_stop_all_patches(audio_song_player_t *player)
+{
+  if (player == NULL || player->synth == NULL || player->song == NULL ||
+      player->song->patches == NULL)
+    return;
+
+  bool seen[AUDIO_SYNTH_PATCH_COUNT] = {false};
+  for (uint32_t i = 0; i < player->song->patch_count; i++)
+  {
+    uint8_t mapped_patch_idx =
+        song_map_patch_idx(player, player->song->patches[i].patch_idx);
+    if (seen[mapped_patch_idx])
+      continue;
+
+    seen[mapped_patch_idx] = true;
+    audio_synth_enqueue(player->synth,
+                        &(audio_synth_message_t){
+                            .type = AUDIO_SYNTH_MESSAGE_STOP,
+                            .data.stop =
+                                {
+                                    .patch_idx = mapped_patch_idx,
+                                    .note_number = -1,
+                                }});
   }
 }
 
@@ -38,33 +76,45 @@ static void song_dispatch_to_synth(audio_song_player_t *player,
   switch (event->type)
   {
   case AUDIO_SONG_EVENT_NOTE_ON:
+  {
+    uint8_t patch_idx =
+        song_map_patch_idx(player, event->data.note_on.patch_idx);
     audio_synth_enqueue(
         player->synth,
         &(audio_synth_message_t){
             .type = AUDIO_SYNTH_MESSAGE_NOTE_ON,
             .data.note_on =
                 {
-                    .patch_idx = event->data.note_on.patch_idx,
+                    .patch_idx = patch_idx,
                     .note_number = event->data.note_on.note_number,
                     .velocity = event->data.note_on.velocity,
                 }});
     break;
+  }
   case AUDIO_SONG_EVENT_NOTE_OFF:
+  {
+    uint8_t patch_idx =
+        song_map_patch_idx(player, event->data.note_off.patch_idx);
     audio_synth_enqueue(
         player->synth,
         &(audio_synth_message_t){
             .type = AUDIO_SYNTH_MESSAGE_NOTE_OFF,
             .data.note_off =
                 {
-                    .patch_idx = event->data.note_off.patch_idx,
+                    .patch_idx = patch_idx,
                     .note_number = event->data.note_off.note_number,
                 }});
     break;
+  }
   case AUDIO_SONG_EVENT_PATCH:
+  {
+    uint8_t patch_idx =
+        song_map_patch_idx(player, event->data.patch.patch_idx);
     audio_synth_patch_config_set(player->synth,
-                                 event->data.patch.patch_idx,
+                                 patch_idx,
                                  event->data.patch.patch);
     break;
+  }
   case AUDIO_SONG_EVENT_MARKER:
   case AUDIO_SONG_EVENT_TEMPO:
   case AUDIO_SONG_EVENT_TIMESIG:
@@ -113,6 +163,7 @@ void audio_song_player_init(audio_song_player_t *player, audio_synth_t *synth)
   memset(player, 0, sizeof(*player));
   player->synth = synth;
   player->hook.mask = AUDIO_SONG_EVENT_MASK_ALL;
+  player->patch_base = 0;
 }
 
 void audio_song_player_set_hook(audio_song_player_t *player,
@@ -143,6 +194,7 @@ void audio_song_player_play(audio_song_player_t *player,
   player->playing = true;
   player->paused = false;
   player->loop = options.loop;
+  player->patch_base = options.patch_base;
   player->last_engine_ms = now_ms;
 
   song_apply_patches(player, song);
@@ -151,6 +203,8 @@ void audio_song_player_play(audio_song_player_t *player,
 
 void audio_song_player_stop(audio_song_player_t *player, bool panic)
 {
+  song_stop_all_patches(player);
+
   if (panic && player->synth != NULL)
   {
     audio_synth_enqueue(player->synth,
@@ -169,6 +223,7 @@ void audio_song_player_stop(audio_song_player_t *player, bool panic)
 
 void audio_song_player_pause(audio_song_player_t *player)
 {
+  song_stop_all_patches(player);
   player->paused = true;
 }
 

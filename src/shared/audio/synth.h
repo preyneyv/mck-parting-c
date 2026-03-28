@@ -35,6 +35,7 @@ typedef enum
 {
   AUDIO_SYNTH_MESSAGE_NOTE_ON,  // play a note on a voice
   AUDIO_SYNTH_MESSAGE_NOTE_OFF, // release a voice
+  AUDIO_SYNTH_MESSAGE_STOP,     // short release stop for targeted voices
   AUDIO_SYNTH_MESSAGE_PANIC,    // stop all voices
 } audio_synth_message_type_t;
 
@@ -56,6 +57,12 @@ typedef struct audio_synth_message_panic_t
   // no data for panic
 } audio_synth_message_panic_t;
 
+typedef struct audio_synth_message_stop_t
+{
+  uint8_t patch_idx;  // patch index (0-31)
+  int8_t note_number; // MIDI note number (0-127) (-1 = all notes on patch)
+} audio_synth_message_stop_t;
+
 typedef struct audio_synth_message_t
 {
   audio_synth_message_type_t type;
@@ -63,6 +70,7 @@ typedef struct audio_synth_message_t
   {
     audio_synth_message_note_on_t note_on;
     audio_synth_message_note_off_t note_off;
+    audio_synth_message_stop_t stop;
     audio_synth_message_panic_t panic;
   } data;
 } audio_synth_message_t;
