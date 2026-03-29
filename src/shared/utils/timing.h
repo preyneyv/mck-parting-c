@@ -30,11 +30,14 @@ static inline void ti_start(TimingInstrumenter *ti)
 }
 
 // Stop and accumulate
-static inline void ti_stop(TimingInstrumenter *ti)
+static inline uint64_t ti_stop(TimingInstrumenter *ti)
 {
   ti->end_time = platform_now_us();
-  ti->aggregate_time += (uint64_t)platform_time_diff_us(ti->start_time, ti->end_time);
+  uint64_t elapsed = (uint64_t)platform_time_diff_us(ti->start_time, ti->end_time);
+  ti->aggregate_time += elapsed;
   ti->count++;
+
+  return elapsed;
 }
 
 static inline void ti_stop_n(TimingInstrumenter *ti, uint32_t n)

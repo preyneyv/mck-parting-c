@@ -138,8 +138,14 @@ void audio_playback_run_forever(audio_synth_t *synth)
     audio_buffer_t buffer = audio_buffer_pool_acquire_write(&pool, true);
     ti_start(&ti_synth);
     audio_synth_fill_buffer(synth, buffer, pool.buffer_size);
-    ti_stop(&ti_synth);
+    uint64_t elapsed = ti_stop(&ti_synth);
     audio_buffer_pool_commit_write(&pool);
+
+    if (elapsed > ms_per_buf * 1000)
+    {
+      printf("synth warning: buffer generation took %.2f ms (%.2f ms budget)\n",
+             elapsed / 1000.0f, ms_per_buf);
+    }
 
     if (i > buf_per_sec)
     {

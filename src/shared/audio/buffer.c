@@ -6,16 +6,19 @@
 
 #include "buffer.h"
 
-static inline uint32_t pool_count_load(const audio_buffer_pool_t *pool) {
+static inline uint32_t pool_count_load(const audio_buffer_pool_t *pool)
+{
   return __atomic_load_n(&pool->count, __ATOMIC_ACQUIRE);
 }
 
-static inline void pool_count_store(audio_buffer_pool_t *pool, uint32_t value) {
+static inline void pool_count_store(audio_buffer_pool_t *pool, uint32_t value)
+{
   __atomic_store_n(&pool->count, value, __ATOMIC_RELEASE);
 }
 
 void audio_buffer_pool_init(audio_buffer_pool_t *pool, uint8_t size,
-                            uint32_t buffer_size) {
+                            uint32_t buffer_size)
+{
   pool->buffers = malloc(size * buffer_size * sizeof(uint32_t));
   pool->size = size;
   pool->buffer_size = buffer_size;
@@ -24,7 +27,8 @@ void audio_buffer_pool_init(audio_buffer_pool_t *pool, uint8_t size,
   pool->read_head = 0;
 }
 
-void audio_buffer_pool_free(audio_buffer_pool_t *pool) {
+void audio_buffer_pool_free(audio_buffer_pool_t *pool)
+{
   free(pool->buffers);
 
   pool->buffers = NULL;
@@ -38,10 +42,13 @@ void audio_buffer_pool_free(audio_buffer_pool_t *pool) {
 }
 
 uint32_t *audio_buffer_pool_acquire_write(audio_buffer_pool_t *pool,
-                                          bool blocking) {
-  while (true) {
+                                          bool blocking)
+{
+  while (true)
+  {
     // did we flow into unread buffers?
-    if (pool_count_load(pool) >= pool->size) {
+    if (pool_count_load(pool) >= pool->size)
+    {
       if (!blocking)
         return NULL;
       // wait for read head to catch up
@@ -54,10 +61,12 @@ uint32_t *audio_buffer_pool_acquire_write(audio_buffer_pool_t *pool,
   }
 }
 
-void audio_buffer_pool_commit_write(audio_buffer_pool_t *pool) {
+void audio_buffer_pool_commit_write(audio_buffer_pool_t *pool)
+{
   pool->write_head = (pool->write_head + 1) % pool->size;
   uint32_t prev = __atomic_fetch_add(&pool->count, 1u, __ATOMIC_RELEASE);
-  if (prev >= pool->size) {
+  if (prev >= pool->size)
+  {
     pool_count_store(pool, pool->size);
   }
 }
@@ -69,10 +78,13 @@ const double radians_per_second = pitch * 2.0 * PI;
 const double seconds_per_frame = 1.0 / 24000.0;
 
 uint32_t *audio_buffer_pool_acquire_read(audio_buffer_pool_t *pool,
-                                         bool blocking) {
-  while (true) {
+                                         bool blocking)
+{
+  while (true)
+  {
     // did we flow into written buffers?
-    if (pool_count_load(pool) == 0) {
+    if (pool_count_load(pool) == 0)
+    {
       if (!blocking)
         return NULL;
       // wait for write head to catch up
@@ -86,10 +98,12 @@ uint32_t *audio_buffer_pool_acquire_read(audio_buffer_pool_t *pool,
   }
 }
 
-void audio_buffer_pool_commit_read(audio_buffer_pool_t *pool) {
+void audio_buffer_pool_commit_read(audio_buffer_pool_t *pool)
+{
   pool->read_head = (pool->read_head + 1) % pool->size;
   uint32_t prev = __atomic_fetch_sub(&pool->count, 1u, __ATOMIC_RELEASE);
-  if (prev == 0) {
+  if (prev == 0)
+  {
     pool_count_store(pool, 0);
   }
 }
