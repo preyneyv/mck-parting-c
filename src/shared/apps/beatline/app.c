@@ -259,30 +259,42 @@ static float scroll_px_per_tick(void)
 #define NOTE_H 5
 #define NOTE_HOLD_H 4
 #define NOTE_APPROACH_TICKS 200
-#define BEATLINE_HIT_LINE_LEFT_X (BEATLINE_HIT_ZONE_W + (NOTE_W / 2))
-#define BEATLINE_HIT_LINE_RIGHT_X (DISP_WIDTH - BEATLINE_HIT_ZONE_W - (NOTE_W / 2))
+#define BEATLINE_HIT_LINE_LEFT_X (BEATLINE_HIT_ZONE_W * 2 - 2)
+#define BEATLINE_HIT_LINE_RIGHT_X (DISP_WIDTH - BEATLINE_HIT_ZONE_W * 2 + 1)
+
+#define BEATLINE_TOP_TRACK_Y 2
+#define BEATLINE_TOP_TRACK_H 26
+#define BEATLINE_BOTTOM_TRACK_Y 37
+#define BEATLINE_BOTTOM_TRACK_H 25
+
+static void draw_dashed_vline(u8g2_t *u8g2, int16_t x, int16_t y, int16_t h)
+{
+    for (int16_t yy = y; yy < y + h; yy += 4)
+    {
+        int16_t seg = (int16_t)(y + h - yy);
+        if (seg > 2)
+            seg = 2;
+        if (seg > 0)
+            u8g2_DrawVLine(u8g2, x, yy, seg);
+    }
+}
 
 static void play_draw_hit_zones(elm_t *root)
 {
     u8g2_t *u8g2 = root->u8g2;
     u8g2_SetDrawColor(u8g2, 1);
-
-    u8g2_DrawRFrame(u8g2, 1, 1, BEATLINE_HIT_ZONE_W * 2 - 2, BEATLINE_LANE_DIVIDER_Y - 1, 2);
-    u8g2_DrawRFrame(u8g2, DISP_WIDTH - BEATLINE_HIT_ZONE_W * 2 + 1,
-                    BEATLINE_LANE_DIVIDER_Y + 1,
-                    BEATLINE_HIT_ZONE_W * 2 - 2,
-                    DISP_HEIGHT - BEATLINE_LANE_DIVIDER_Y - 2, 2);
-
-    u8g2_DrawVLine(u8g2, BEATLINE_HIT_LINE_LEFT_X, 2, BEATLINE_LANE_DIVIDER_Y - 3);
-    u8g2_DrawVLine(u8g2, BEATLINE_HIT_LINE_RIGHT_X, BEATLINE_LANE_DIVIDER_Y + 2,
-                   DISP_HEIGHT - BEATLINE_LANE_DIVIDER_Y - 4);
+    // Double-thick hit lines for stronger visual anchor.
+    u8g2_DrawVLine(u8g2, BEATLINE_HIT_LINE_LEFT_X, BEATLINE_TOP_TRACK_Y, BEATLINE_TOP_TRACK_H);
+    u8g2_DrawVLine(u8g2, BEATLINE_HIT_LINE_LEFT_X + 1, BEATLINE_TOP_TRACK_Y, BEATLINE_TOP_TRACK_H);
+    u8g2_DrawVLine(u8g2, BEATLINE_HIT_LINE_RIGHT_X, BEATLINE_BOTTOM_TRACK_Y, BEATLINE_BOTTOM_TRACK_H);
+    u8g2_DrawVLine(u8g2, BEATLINE_HIT_LINE_RIGHT_X + 1, BEATLINE_BOTTOM_TRACK_Y, BEATLINE_BOTTOM_TRACK_H);
 }
 
 static void play_draw_lane_divider(elm_t *root)
 {
     u8g2_t *u8g2 = root->u8g2;
     u8g2_SetDrawColor(u8g2, 1);
-    // dashed line
+    // Dashed divider between the two lanes.
     for (int16_t x = 0; x < DISP_WIDTH; x += 4)
     {
         u8g2_DrawPixel(u8g2, x, BEATLINE_LANE_DIVIDER_Y);
@@ -295,32 +307,49 @@ static void play_draw_grid(elm_t *root)
     u8g2_t *u8g2 = root->u8g2;
     u8g2_SetDrawColor(u8g2, 1);
     float px_t = scroll_px_per_tick();
-    int32_t game_t = (int32_t)beatline_game_time(&state);
+    uint32_t game_t = beatline_game_time(&state);
+    uint32_t beat_ticks = (state.chart->bpm > 0) ? (60000u / state.chart->bpm) : 500u;
+    if (beat_ticks == 0)
+        beat_ticks = 1;
 
-    // scroll at 25% of note speed
-    int32_t top_offset = (int32_t)(game_t * px_t * 0.25f) % 16;
-    int32_t bot_offset = (int32_t)(game_t * px_t * 0.25f) % 16;
+    float beat_px = (float)beat_ticks * px_t;
+    if (beat_px < 6.0f)
+        beat_px = 6.0f;
 
-    // top half: scrolling right (dots move rightward)
-    for (int16_t x_base = -16; x_base < DISP_WIDTH + 16; x_base += 16)
+    float frac = (float)(game_t % beat_ticks) / (float)beat_ticks;
+    float top_anchor = (float)BEATLINE_HIT_LINE_LEFT_X - frac * beat_px;
+    float bot_anchor = (float)BEATLINE_HIT_LINE_RIGHT_X + frac * beat_px;
+
+    // Quarter-note guides for the top lane (moving toward the left hit line).
+    for (float x = top_anchor; x < DISP_WIDTH; x += beat_px)
     {
-        int16_t x = x_base + (int16_t)top_offset;
-        if (x >= BEATLINE_HIT_ZONE_W && x < DISP_WIDTH - BEATLINE_HIT_ZONE_W)
-        {
-            u8g2_DrawPixel(u8g2, x, 10);
-            u8g2_DrawPixel(u8g2, x, 22);
-        }
+        int16_t xi = (int16_t)x;
+        if (xi <= BEATLINE_HIT_ZONE_W || xi >= DISP_WIDTH - BEATLINE_HIT_ZONE_W)
+            continue;
+        draw_dashed_vline(u8g2, xi, BEATLINE_TOP_TRACK_Y, BEATLINE_TOP_TRACK_H);
+    }
+    for (float x = top_anchor - beat_px; x > 0.0f; x -= beat_px)
+    {
+        int16_t xi = (int16_t)x;
+        if (xi <= BEATLINE_HIT_ZONE_W || xi >= DISP_WIDTH - BEATLINE_HIT_ZONE_W)
+            continue;
+        draw_dashed_vline(u8g2, xi, BEATLINE_TOP_TRACK_Y, BEATLINE_TOP_TRACK_H);
     }
 
-    // bottom half: scrolling left (dots move leftward)
-    for (int16_t x_base = -16; x_base < DISP_WIDTH + 16; x_base += 16)
+    // Quarter-note guides for the bottom lane (moving toward the right hit line).
+    for (float x = bot_anchor; x > 0.0f; x -= beat_px)
     {
-        int16_t x = x_base - (int16_t)bot_offset;
-        if (x >= BEATLINE_HIT_ZONE_W && x < DISP_WIDTH - BEATLINE_HIT_ZONE_W)
-        {
-            u8g2_DrawPixel(u8g2, x, BEATLINE_LANE_DIVIDER_Y + 10);
-            u8g2_DrawPixel(u8g2, x, BEATLINE_LANE_DIVIDER_Y + 22);
-        }
+        int16_t xi = (int16_t)x;
+        if (xi <= BEATLINE_HIT_ZONE_W || xi >= DISP_WIDTH - BEATLINE_HIT_ZONE_W)
+            continue;
+        draw_dashed_vline(u8g2, xi, BEATLINE_BOTTOM_TRACK_Y, BEATLINE_BOTTOM_TRACK_H);
+    }
+    for (float x = bot_anchor + beat_px; x < DISP_WIDTH; x += beat_px)
+    {
+        int16_t xi = (int16_t)x;
+        if (xi <= BEATLINE_HIT_ZONE_W || xi >= DISP_WIDTH - BEATLINE_HIT_ZONE_W)
+            continue;
+        draw_dashed_vline(u8g2, xi, BEATLINE_BOTTOM_TRACK_Y, BEATLINE_BOTTOM_TRACK_H);
     }
 }
 
@@ -364,31 +393,49 @@ static void play_draw_notes(elm_t *root)
 
         if (n->lane == BEATLINE_LANE_LEFT)
         {
-            // top lane: notes come from right, hit zone on left
+            // top lane: perfect when the note's center reaches the hit line
             note_x = BEATLINE_HIT_LINE_LEFT_X - NOTE_W / 2 + travel_px;
-            note_y = BEATLINE_LANE_DIVIDER_Y / 2 - NOTE_H / 2;
+            note_y = BEATLINE_TOP_TRACK_Y + (BEATLINE_TOP_TRACK_H / 2) - NOTE_H / 2;
         }
         else
         {
-            // bottom lane: notes come from left, hit zone on right
+            // bottom lane: perfect when the note's center reaches the hit line
             note_x = BEATLINE_HIT_LINE_RIGHT_X - NOTE_W / 2 - travel_px;
-            note_y = BEATLINE_LANE_DIVIDER_Y + (DISP_HEIGHT - BEATLINE_LANE_DIVIDER_Y) / 2 - NOTE_H / 2;
+            note_y = BEATLINE_BOTTOM_TRACK_Y + (BEATLINE_BOTTOM_TRACK_H / 2) - NOTE_H / 2;
         }
 
-        // cull off-screen
-        if (note_x < -NOTE_W || note_x > DISP_WIDTH + NOTE_W)
-            continue;
-
-        // approach indicator: invert when close to hit zone
-        bool approaching = (time_remaining >= 0 && time_remaining <= NOTE_APPROACH_TICKS);
-
+        int32_t hold_px = NOTE_W;
         if (n->type == BEATLINE_NOTE_HOLD)
         {
-            // hold: draw extended rect
-            int32_t hold_px = (int32_t)(n->hold_duration * px_t);
+            hold_px = (int32_t)(n->hold_duration * px_t);
             if (hold_px < NOTE_W)
                 hold_px = NOTE_W;
 
+            // Cull using full hold body bounds, not just the head.
+            int32_t body_min_x;
+            int32_t body_max_x;
+            if (n->lane == BEATLINE_LANE_LEFT)
+            {
+                body_min_x = note_x;
+                body_max_x = note_x + hold_px;
+            }
+            else
+            {
+                body_min_x = note_x - hold_px + NOTE_W;
+                body_max_x = note_x + NOTE_W;
+            }
+            if (body_max_x < 0 || body_min_x > DISP_WIDTH)
+                continue;
+        }
+        else
+        {
+            // tap note cull
+            if (note_x < -NOTE_W || note_x > DISP_WIDTH + NOTE_W)
+                continue;
+        }
+
+        if (n->type == BEATLINE_NOTE_HOLD)
+        {
             if (n->lane == BEATLINE_LANE_LEFT)
             {
                 // tail extends to the right from note head
@@ -414,17 +461,7 @@ static void play_draw_notes(elm_t *root)
         {
             // tap note
             u8g2_SetDrawColor(u8g2, 1);
-            if (n->lane == BEATLINE_LANE_LEFT)
-                u8g2_DrawBox(u8g2, note_x, note_y, NOTE_W, NOTE_H); // filled
-            else
-                u8g2_DrawFrame(u8g2, note_x, note_y, NOTE_W, NOTE_H); // hollow
-        }
-
-        // approach highlight
-        if (approaching)
-        {
-            u8g2_SetDrawColor(u8g2, 2); // XOR
-            u8g2_DrawBox(u8g2, note_x, note_y, NOTE_W, NOTE_H);
+            u8g2_DrawBox(u8g2, note_x, note_y, NOTE_W, NOTE_H); // filled
         }
     }
 }
@@ -442,31 +479,18 @@ static void play_draw_feedback(elm_t *root)
         u8g2_SetFont(u8g2, u8g2_font_u8glib_4_tf);
 
         const char *txt = beatline_grade_str(state.feedback[lane].grade);
+        if (state.feedback[lane].grade == BEATLINE_GRADE_BAD)
+            txt = state.feedback[lane].timing_late ? "LATE" : "EARLY";
         uint16_t tw = u8g2_GetStrWidth(u8g2, txt);
 
         int16_t fb_y;
         if (lane == BEATLINE_LANE_LEFT)
-            fb_y = BEATLINE_LANE_DIVIDER_Y / 2 - 2;
+            fb_y = BEATLINE_TOP_TRACK_Y + (BEATLINE_TOP_TRACK_H / 2) - 2;
         else
-            fb_y = BEATLINE_LANE_DIVIDER_Y + (DISP_HEIGHT - BEATLINE_LANE_DIVIDER_Y) / 2 - 2;
+            fb_y = BEATLINE_BOTTOM_TRACK_Y + (BEATLINE_BOTTOM_TRACK_H / 2) - 2;
 
         u8g2_DrawStr(u8g2, (DISP_WIDTH - tw) / 2, fb_y, txt);
     }
-}
-
-static void play_draw_combo(elm_t *root)
-{
-    if (state.combo < 2)
-        return;
-
-    u8g2_t *u8g2 = root->u8g2;
-    u8g2_SetDrawColor(u8g2, 1);
-    u8g2_SetFont(u8g2, u8g2_font_u8glib_4_tf);
-
-    char buf[8];
-    snprintf(buf, sizeof(buf), "%d", state.combo);
-    uint16_t tw = u8g2_GetStrWidth(u8g2, buf);
-    u8g2_DrawStr(u8g2, (DISP_WIDTH - tw) / 2, BEATLINE_LANE_DIVIDER_Y + 4, buf);
 }
 
 static void play_set_leds(void)
@@ -479,7 +503,8 @@ static void play_set_leds(void)
             continue;
 
         uint32_t remaining = state.feedback[lane].until_tick - g_engine.tick;
-        if (remaining > BEATLINE_LED_DURATION)
+        uint32_t elapsed = BEATLINE_FEEDBACK_DURATION - remaining;
+        if (elapsed >= BEATLINE_LED_DURATION)
             continue;
 
         switch (state.feedback[lane].grade)
@@ -524,7 +549,6 @@ static void play_frame(void)
     play_draw_hit_zones(&root);
     play_draw_notes(&root);
     play_draw_feedback(&root);
-    play_draw_combo(&root);
     play_set_leds();
 }
 

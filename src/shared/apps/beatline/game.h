@@ -21,9 +21,12 @@ typedef enum
 #define BEATLINE_GRADE_COUNT 4
 
 // Timing windows (±ticks around hit_tick)
-#define BEATLINE_WINDOW_PERFECT 40
-#define BEATLINE_WINDOW_GOOD 80
-#define BEATLINE_WINDOW_BAD 120
+#define BEATLINE_WINDOW_PERFECT 60
+#define BEATLINE_WINDOW_GOOD 100
+#define BEATLINE_WINDOW_BAD 140
+
+// Negative values delay game-time relative to wall clock to compensate output/input latency.
+#define BEATLINE_DEFAULT_AV_OFFSET_TICKS 20
 
 // --- Scoring ---
 
@@ -68,7 +71,7 @@ typedef enum
 #define BEATLINE_NOTE_UNJUDGED 0xFF
 
 // Max notes we can track (sized for compiled charts)
-#define BEATLINE_MAX_NOTES 256
+#define BEATLINE_MAX_NOTES 1024
 
 // Feedback display duration (ticks)
 #define BEATLINE_FEEDBACK_DURATION 300
@@ -122,6 +125,7 @@ typedef struct
     struct
     {
         beatline_grade_t grade;
+        bool timing_late;
         uint32_t until_tick;
     } feedback[2];
 

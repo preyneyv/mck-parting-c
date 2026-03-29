@@ -1,4 +1,5 @@
 #include "chart.h"
+#include "sounds/never_gonna.h"
 
 // Compile-time constant versions for static initializers
 #define Q1X15_C(f) ((q1x15)((int)((f) * 32767.0)))
@@ -213,28 +214,37 @@ static const audio_song_asset_t pulse_song = {
     .loop_end_ms = 0,
 };
 
+// --- Track "Never Gonna" ---
+
 // --- Track registry ---
 const beatline_chart_t beatline_tracks[] = {
     {
-        .title = "First Light",
-        .difficulty = 1,
-        .bpm = 120,
-        .scroll_speed = 65,
-        .duration_ticks = 10000,
-        .notes = first_light_notes,
-        .note_count = sizeof(first_light_notes) / sizeof(first_light_notes[0]),
-        .song = &first_light_song,
-    },
-    {
-        .title = "Pulse",
+        .title = "Never Gonna",
         .difficulty = 3,
-        .bpm = 140,
-        .scroll_speed = 80,
-        .duration_ticks = 10000,
-        .notes = pulse_notes,
-        .note_count = sizeof(pulse_notes) / sizeof(pulse_notes[0]),
-        .song = &pulse_song,
-    },
+        .bpm = 113,
+        .song = &sound_never_gonna_song,
+        .scroll_speed = 70,
+    }
+    // {
+    //     .title = "First Light",
+    //     .difficulty = 1,
+    //     .bpm = 120,
+    //     .scroll_speed = 65,
+    //     .duration_ticks = 10000,
+    //     .notes = first_light_notes,
+    //     .note_count = sizeof(first_light_notes) / sizeof(first_light_notes[0]),
+    //     .song = &first_light_song,
+    // },
+    // {
+    //     .title = "Pulse",
+    //     .difficulty = 3,
+    //     .bpm = 140,
+    //     .scroll_speed = 80,
+    //     .duration_ticks = 10000,
+    //     .notes = pulse_notes,
+    //     .note_count = sizeof(pulse_notes) / sizeof(pulse_notes[0]),
+    //     .song = &pulse_song,
+    // },
 };
 
 const uint8_t BEATLINE_TRACK_COUNT =

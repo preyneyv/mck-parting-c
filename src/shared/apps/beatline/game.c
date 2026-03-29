@@ -206,7 +206,11 @@ uint32_t beatline_game_time(const beatline_state_t *st)
 {
     if (st->game_start_tick == 0)
         return 0;
-    return g_engine.tick - st->game_start_tick;
+
+    int32_t t = (int32_t)(g_engine.tick - st->game_start_tick) + st->av_offset_ticks;
+    if (t < 0)
+        return 0;
+    return (uint32_t)t;
 }
 
 uint16_t beatline_combo_multiplier(uint16_t combo)
@@ -265,17 +269,17 @@ beatline_rank_t beatline_game_rank(const beatline_state_t *st)
     if (total == 0)
         return BEATLINE_RANK_D;
 
-    // S: 100% PERFECT
-    if (st->grade_counts[BEATLINE_GRADE_PERFECT] == total)
+    // S: all GOOD or PERFECT (no BAD/MISS)
+    if (st->grade_counts[BEATLINE_GRADE_BAD] == 0 &&
+        st->grade_counts[BEATLINE_GRADE_MISS] == 0)
         return BEATLINE_RANK_S;
 
     uint16_t good_or_better =
         st->grade_counts[BEATLINE_GRADE_PERFECT] +
         st->grade_counts[BEATLINE_GRADE_GOOD];
 
-    // A: >=95%, zero misses
-    if (good_or_better * 100 >= total * 95 &&
-        st->grade_counts[BEATLINE_GRADE_MISS] == 0)
+    // A: >=90%
+    if (good_or_better * 100 >= total * 90)
         return BEATLINE_RANK_A;
 
     // B: >=85%
@@ -312,6 +316,7 @@ void beatline_game_select_track(beatline_state_t *st, int8_t track_idx)
     st->generated_last_note_tick = 0;
     st->generated_duration_ticks = 0;
     st->game_start_tick = 0;
+    st->av_offset_ticks = BEATLINE_DEFAULT_AV_OFFSET_TICKS;
     st->both_pressed_since = 0;
     memset(st->grade_counts, 0, sizeof(st->grade_counts));
     memset(st->note_grades, BEATLINE_NOTE_UNJUDGED, sizeof(st->note_grades));
@@ -360,13 +365,14 @@ void beatline_game_start_play(beatline_state_t *st)
             .loop = false,
             .restart_if_playing = true,
         },
-        g_engine.tick);
+        g_engine.tick); 
 }
 
 // --- Judgment ---
 
 static void register_grade(beatline_state_t *st, uint16_t note_idx,
-                           beatline_grade_t grade)
+                           beatline_grade_t grade,
+                           int32_t timing_delta_ticks)
 {
     st->note_grades[note_idx] = (uint8_t)grade;
     st->grade_counts[grade]++;
@@ -395,6 +401,17 @@ static void register_grade(beatline_state_t *st, uint16_t note_idx,
 
     // feedback
     st->feedback[lane].grade = grade;
+    st->feedback[lane].timing_late = (timing_delta_ticks < 0);
+    st->feedback[lane].until_tick = g_engine.tick + BEATLINE_FEEDBACK_DURATION;
+}
+
+static void register_empty_miss(beatline_state_t *st, uint8_t lane)
+{
+    st->grade_counts[BEATLINE_GRADE_MISS]++;
+    st->combo = 0;
+
+    st->feedback[lane].grade = BEATLINE_GRADE_MISS;
+    st->feedback[lane].timing_late = false;
     st->feedback[lane].until_tick = g_engine.tick + BEATLINE_FEEDBACK_DURATION;
 }
 
@@ -449,7 +466,7 @@ static void try_hit_lane(beatline_state_t *st, uint8_t lane)
     {
         int32_t delta = (int32_t)st->generated_notes[best_idx].hit_tick - (int32_t)game_time;
         beatline_grade_t grade = judge_timing(delta);
-        register_grade(st, (uint16_t)best_idx, grade);
+        register_grade(st, (uint16_t)best_idx, grade, delta);
 
         // start hold tracking if hold note
         if (st->generated_notes[best_idx].type == BEATLINE_NOTE_HOLD &&
@@ -458,8 +475,11 @@ static void try_hit_lane(beatline_state_t *st, uint8_t lane)
             st->hold_state[lane].holding = true;
             st->hold_state[lane].note_idx = (uint16_t)best_idx;
         }
+
+        return;
     }
-    // no note nearby — empty press, no penalty
+    // no note nearby — count as miss
+    register_empty_miss(st, lane);
 }
 
 static void process_misses(beatline_state_t *st)
@@ -479,7 +499,7 @@ static void process_misses(beatline_state_t *st)
         int32_t delta = (int32_t)game_time - (int32_t)st->generated_notes[i].hit_tick;
         if (delta > BEATLINE_WINDOW_BAD)
         {
-            register_grade(st, i, BEATLINE_GRADE_MISS);
+            register_grade(st, i, BEATLINE_GRADE_MISS, -(int32_t)delta);
             st->next_judge_idx++;
             continue;
         }
@@ -558,6 +578,8 @@ void beatline_game_tick(beatline_state_t *st)
     process_misses(st);
     process_holds(st);
 
+    uint32_t game_time = beatline_game_time(st);
+
     // clear expired feedback
     for (uint8_t lane = 0; lane < 2; lane++)
     {
@@ -582,7 +604,6 @@ void beatline_game_tick(beatline_state_t *st)
     }
 
     // check natural end
-    uint32_t game_time = beatline_game_time(st);
     if (game_time >= st->generated_duration_ticks)
     {
         // wait a little after last note for feedback to show
@@ -601,7 +622,7 @@ void beatline_game_finish(beatline_state_t *st)
     for (uint16_t i = 0; i < st->generated_note_count; i++)
     {
         if (st->note_grades[i] == BEATLINE_NOTE_UNJUDGED)
-            register_grade(st, i, BEATLINE_GRADE_MISS);
+            register_grade(st, i, BEATLINE_GRADE_MISS, 0);
     }
 
     uint8_t stats[14];
