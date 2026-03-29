@@ -72,6 +72,7 @@
   },
   "Lua.diagnostics.globals": ["reaper"],
   "chat.tools.terminal.autoApprove": {
-    "cmake": true
+    "cmake": true,
+    "&": true
   }
 }

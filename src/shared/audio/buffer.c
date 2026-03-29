@@ -6,6 +6,14 @@
 
 #include "buffer.h"
 
+static inline uint32_t pool_count_load(const audio_buffer_pool_t *pool) {
+  return __atomic_load_n(&pool->count, __ATOMIC_ACQUIRE);
+}
+
+static inline void pool_count_store(audio_buffer_pool_t *pool, uint32_t value) {
+  __atomic_store_n(&pool->count, value, __ATOMIC_RELEASE);
+}
+
 void audio_buffer_pool_init(audio_buffer_pool_t *pool, uint8_t size,
                             uint32_t buffer_size) {
   pool->buffers = malloc(size * buffer_size * sizeof(uint32_t));
@@ -33,8 +41,7 @@ uint32_t *audio_buffer_pool_acquire_write(audio_buffer_pool_t *pool,
                                           bool blocking) {
   while (true) {
     // did we flow into unread buffers?
-    platform_memory_barrier();
-    if (pool->count == pool->size) {
+    if (pool_count_load(pool) >= pool->size) {
       if (!blocking)
         return NULL;
       // wait for read head to catch up
@@ -49,8 +56,10 @@ uint32_t *audio_buffer_pool_acquire_write(audio_buffer_pool_t *pool,
 
 void audio_buffer_pool_commit_write(audio_buffer_pool_t *pool) {
   pool->write_head = (pool->write_head + 1) % pool->size;
-  platform_memory_barrier();
-  pool->count++;
+  uint32_t prev = __atomic_fetch_add(&pool->count, 1u, __ATOMIC_RELEASE);
+  if (prev >= pool->size) {
+    pool_count_store(pool, pool->size);
+  }
 }
 
 static const double PI = 3.14159265358979323846264338328;
@@ -63,8 +72,7 @@ uint32_t *audio_buffer_pool_acquire_read(audio_buffer_pool_t *pool,
                                          bool blocking) {
   while (true) {
     // did we flow into written buffers?
-    platform_memory_barrier();
-    if (pool->count == 0) {
+    if (pool_count_load(pool) == 0) {
       if (!blocking)
         return NULL;
       // wait for write head to catch up
@@ -80,6 +88,8 @@ uint32_t *audio_buffer_pool_acquire_read(audio_buffer_pool_t *pool,
 
 void audio_buffer_pool_commit_read(audio_buffer_pool_t *pool) {
   pool->read_head = (pool->read_head + 1) % pool->size;
-  platform_memory_barrier();
-  pool->count--;
+  uint32_t prev = __atomic_fetch_sub(&pool->count, 1u, __ATOMIC_RELEASE);
+  if (prev == 0) {
+    pool_count_store(pool, 0);
+  }
 }

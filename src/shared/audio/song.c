@@ -236,6 +236,20 @@ void audio_song_player_resume(audio_song_player_t *player, uint32_t now_ms)
   player->last_engine_ms = now_ms;
 }
 
+void audio_song_player_seek(audio_song_player_t *player,
+                            uint32_t time_ms,
+                            uint32_t now_ms)
+{
+  if (player == NULL || !player->playing || player->song == NULL)
+    return;
+
+  if (time_ms > player->song->duration_ms)
+    time_ms = player->song->duration_ms;
+
+  song_seek_to_time(player, time_ms);
+  player->last_engine_ms = now_ms;
+}
+
 void audio_song_player_tick(audio_song_player_t *player, uint32_t now_ms)
 {
   if (!player->playing || player->paused || player->song == NULL)

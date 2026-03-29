@@ -13,7 +13,7 @@ typedef struct {
   uint8_t size;         // total number of buffers
   uint32_t buffer_size; // number of samples per buffer
 
-  volatile uint8_t count; // number of filled buffers
+  uint32_t count; // number of filled buffers (updated atomically)
 
   uint8_t write_head;
   uint8_t read_head;

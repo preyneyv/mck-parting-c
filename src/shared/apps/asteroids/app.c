@@ -15,6 +15,7 @@
 #include <shared/utils/vec.h>
 
 #include "sounds/bgm.h"
+#include "sounds/gameover.h"
 
 // --- Tunables ---
 static const float SHIP_RADIUS = 4.0f;
@@ -56,6 +57,15 @@ static const float LED_BOOST_FADE_PER_SEC = 2.8f;
 static const float LED_WARNING_ATTACK_PER_SEC = 14.0f;
 static const float LED_WARNING_RELEASE_PER_SEC = 8.0f;
 static const uint32_t LED_WARNING_SIDE_LOCK_MS = 120;
+
+// Asteroids SFX patches (keep 0-3 reserved for BGM)
+static const uint8_t SFX_PATCH_ENGINE_OVERTONE = 4;
+
+static const uint32_t SFX_ENGINE_UPDATE_MS = 70;
+
+static const uint8_t SFX_ENGINE_NOTE_MIN = 30;
+static const uint8_t SFX_ENGINE_NOTE_MAX = 54;
+static const uint8_t SFX_ENGINE_OVERTONE_VELOCITY = 88;
 
 enum
 {
@@ -126,10 +136,100 @@ typedef struct
     uint32_t led_last_render_ms;
     uint32_t led_warning_side_lock_until_ms;
     uint32_t game_over_at_ms;
+
+    bool sfx_overtone_on;
+    uint8_t sfx_engine_note;
+    uint32_t sfx_engine_next_update_at;
 } state_t;
 
 static state_t state;
 static audio_song_player_t bgm_player;
+
+static float song_progress_ratio(const audio_song_player_t *player)
+{
+    if (player == NULL || !player->playing || player->song == NULL)
+        return 0.0f;
+
+    const audio_song_asset_t *song = player->song;
+    if (song->duration_ms == 0)
+        return 0.0f;
+
+    uint32_t t = player->song_time_ms;
+    if (t > song->duration_ms)
+        t = song->duration_ms;
+
+    uint32_t loop_end = (song->loop_end_ms != 0) ? song->loop_end_ms : song->duration_ms;
+    if (player->loop && loop_end > song->loop_start_ms)
+    {
+        uint32_t loop_start = song->loop_start_ms;
+        uint32_t loop_span = loop_end - loop_start;
+        if (loop_span == 0)
+            return 0.0f;
+
+        if (t < loop_start)
+            t = loop_start;
+        if (t > loop_end)
+            t = loop_end;
+        return (float)(t - loop_start) / (float)loop_span;
+    }
+
+    return (float)t / (float)song->duration_ms;
+}
+
+static uint32_t song_time_from_progress_ratio(const audio_song_asset_t *song,
+                                              bool loop,
+                                              float ratio)
+{
+    if (song == NULL || song->duration_ms == 0)
+        return 0;
+
+    if (ratio < 0.0f)
+        ratio = 0.0f;
+    else if (ratio > 1.0f)
+        ratio = 1.0f;
+
+    uint32_t loop_end = (song->loop_end_ms != 0) ? song->loop_end_ms : song->duration_ms;
+    if (loop && loop_end > song->loop_start_ms)
+    {
+        uint32_t loop_start = song->loop_start_ms;
+        uint32_t loop_span = loop_end - loop_start;
+        return loop_start + (uint32_t)(ratio * (float)loop_span);
+    }
+
+    return (uint32_t)(ratio * (float)song->duration_ms);
+}
+
+static void play_song(const audio_song_asset_t *song, bool preserve_progress)
+{
+    const bool loop = true;
+    float progress = preserve_progress ? song_progress_ratio(&bgm_player) : 0.0f;
+
+    audio_song_player_play(
+        &bgm_player,
+        song,
+        (audio_song_play_options_t){
+            .patch_base = 0,
+            .loop = loop,
+            .restart_if_playing = true,
+        },
+        g_engine.tick);
+
+    if (preserve_progress)
+    {
+        uint32_t seek_ms = song_time_from_progress_ratio(song, loop, progress);
+        audio_song_player_seek(&bgm_player, seek_ms, g_engine.tick);
+    }
+}
+
+static void play_bgm_song(bool preserve_progress)
+{
+    play_song(&sound_bgm_song, preserve_progress);
+}
+
+static void play_gameover_song(bool preserve_progress)
+{
+    play_song(&sound_gameover_song, preserve_progress);
+}
 
 static inline uint32_t now_ms()
 {
@@ -183,6 +283,123 @@ static inline color_t color_cap(color_t c, uint8_t cap)
         return c;
     float scale = (float)cap / 255.0f;
     return color_scale(c, scale);
+}
+
+static void sfx_enqueue_note_on(uint8_t patch, uint8_t note_number,
+                                uint8_t velocity)
+{
+    audio_synth_message_t msg = {
+        .type = AUDIO_SYNTH_MESSAGE_NOTE_ON,
+        .data.note_on = {
+            .patch_idx = patch,
+            .note_number = note_number,
+            .velocity = velocity,
+        },
+    };
+    audio_synth_enqueue(&g_engine.synth, &msg);
+}
+
+static void sfx_enqueue_note_off(uint8_t patch, int8_t note_number)
+{
+    audio_synth_message_t msg = {
+        .type = AUDIO_SYNTH_MESSAGE_NOTE_OFF,
+        .data.note_off = {
+            .patch_idx = patch,
+            .note_number = note_number,
+        },
+    };
+    audio_synth_enqueue(&g_engine.synth, &msg);
+}
+
+static void sfx_enqueue_stop(uint8_t patch, int8_t note_number)
+{
+    audio_synth_message_t msg = {
+        .type = AUDIO_SYNTH_MESSAGE_STOP,
+        .data.stop = {
+            .patch_idx = patch,
+            .note_number = note_number,
+        },
+    };
+    audio_synth_enqueue(&g_engine.synth, &msg);
+}
+
+static void sfx_stop_engine()
+{
+    if (!state.sfx_overtone_on)
+        return;
+    sfx_enqueue_note_off(SFX_PATCH_ENGINE_OVERTONE, -1);
+    state.sfx_overtone_on = false;
+}
+
+static void sfx_stop_all()
+{
+    sfx_stop_engine();
+    sfx_enqueue_stop(SFX_PATCH_ENGINE_OVERTONE, -1);
+}
+
+static void sfx_configure_patches()
+{
+    audio_synth_patch_config_t patch = audio_synth_patch_config_default;
+
+    // Speed drone: sustained overtone layer that tracks ship speed.
+    patch = audio_synth_patch_config_default;
+    patch.ops[0] = (audio_synth_operator_config_t){
+        .freq_mult = 7,
+        .level = q1x15_f(1.0f),
+        .mode = AUDIO_SYNTH_OP_MODE_ADDITIVE,
+        .env = {.a = 28, .d = 0, .s = q1x31_f(1.0f), .r = 420},
+    };
+    patch.ops[1] = (audio_synth_operator_config_t){
+        .freq_mult = 7,
+        .level = q1x15_f(0.8f),
+        .mode = AUDIO_SYNTH_OP_MODE_FREQ_MOD,
+        .env = {.a = 18, .d = 0, .s = q1x31_f(1.0f), .r = 360},
+    };
+    patch.ops[2] = (audio_synth_operator_config_t){
+        .freq_mult = 9,
+        .level = q1x15_f(0.5f),
+        .mode = AUDIO_SYNTH_OP_MODE_FREQ_MOD,
+        .env = {.a = 18, .d = 0, .s = q1x31_f(1.0f), .r = 360},
+    };
+    patch.ops[3] = (audio_synth_operator_config_t){
+        .freq_mult = 9,
+        .level = q1x15_f(0.05f),
+        .mode = AUDIO_SYNTH_OP_MODE_FREQ_MOD,
+        .env = {.a = 18, .d = 0, .s = q1x31_f(1.0f), .r = 360},
+    };
+    audio_synth_patch_config_set(&g_engine.synth, SFX_PATCH_ENGINE_OVERTONE,
+                                 patch);
+}
+
+static void sfx_update_engine(float speed, uint32_t now)
+{
+    float speed_ratio = clampf(speed / BOOST_MAX_SPEED, 0.0f, 1.0f);
+    uint8_t target_note = (uint8_t)(SFX_ENGINE_NOTE_MIN +
+                                    (SFX_ENGINE_NOTE_MAX - SFX_ENGINE_NOTE_MIN) * speed_ratio);
+    uint8_t target_velocity = SFX_ENGINE_OVERTONE_VELOCITY;
+
+    // Speed drone stays on regardless of accelerating/decelerating.
+    if (!state.sfx_overtone_on)
+    {
+        state.sfx_engine_note = target_note;
+        state.sfx_overtone_on = true;
+        state.sfx_engine_next_update_at = now + SFX_ENGINE_UPDATE_MS;
+        sfx_enqueue_note_on(SFX_PATCH_ENGINE_OVERTONE, target_note + 12, 30);
+        return;
+    }
+
+    if (now < state.sfx_engine_next_update_at)
+        return;
+    state.sfx_engine_next_update_at = now + SFX_ENGINE_UPDATE_MS;
+
+    int note_delta = (int)target_note - (int)state.sfx_engine_note;
+    if (abs(note_delta) < 1)
+        return;
+
+    // Preserve the low rumble layer and retune the overtone smoothly.
+    sfx_enqueue_note_off(SFX_PATCH_ENGINE_OVERTONE, state.sfx_engine_note + 12);
+    state.sfx_engine_note = target_note;
+    sfx_enqueue_note_on(SFX_PATCH_ENGINE_OVERTONE, target_note + 12, 30);
 }
 
 static inline float wrapf(float v, float max)
@@ -471,6 +688,7 @@ static void finish_game()
     state.game_over = true;
     state.results_ready = true;
     state.game_over_at_ms = now_ms();
+    play_gameover_song(true);
 
     uint8_t stats[8];
     uint32_t elapsed_ms = state.elapsed_ms;
@@ -491,6 +709,8 @@ static void finish_game()
 
 static void reset_state()
 {
+    sfx_stop_all();
+
     memset(&state, 0, sizeof(state));
     state.pos = (vec2f_t){.x = DISP_WIDTH / 2.0f, .y = DISP_HEIGHT / 2.0f};
     state.cam_pos = state.pos;
@@ -647,6 +867,8 @@ static void update_ship(float dt_s, uint32_t dt_ms)
     state.distance += speed * dt_s;
 
     state.elapsed_ms += dt_ms;
+
+    sfx_update_engine(speed, now_ms());
 }
 
 static void update_asteroids(float dt_s, uint32_t current_ms)
@@ -703,6 +925,7 @@ static void update_asteroids(float dt_s, uint32_t current_ms)
         ship_triangle(state.pos, state.angle, 1.0f, &nose, &p1, &p2);
         if (circle_triangle_overlap(a->pos, (float)a->r, nose, p1, p2))
         {
+            sfx_stop_engine();
             finish_game();
             break;
         }
@@ -1122,6 +1345,7 @@ static void draw_results(u8g2_t *u8g2)
     if (pressed)
     {
         reset_state();
+        play_bgm_song(true);
     }
 }
 
@@ -1150,20 +1374,14 @@ static void frame()
 static void enter()
 {
     audio_song_player_init(&bgm_player, &g_engine.synth);
-    audio_song_player_play(
-        &bgm_player,
-        &sound_bgm_song,
-        (audio_song_play_options_t){
-            .patch_base = 0,
-            .loop = true,
-            .restart_if_playing = true,
-        },
-        now_ms());
+    sfx_configure_patches();
+    play_bgm_song(false);
     reset_state();
 }
 
 static void pause()
 {
+    sfx_stop_all();
     audio_song_player_pause(&bgm_player);
 }
 
@@ -1174,6 +1392,7 @@ static void resume()
 
 static void leave()
 {
+    sfx_stop_all();
     audio_song_player_stop(&bgm_player, true);
 }
 
