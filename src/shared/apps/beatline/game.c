@@ -365,7 +365,7 @@ void beatline_game_start_play(beatline_state_t *st)
             .loop = false,
             .restart_if_playing = true,
         },
-        g_engine.tick); 
+        g_engine.tick);
 }
 
 // --- Judgment ---
