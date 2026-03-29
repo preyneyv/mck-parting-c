@@ -363,7 +363,7 @@ static void sfx_configure_patches()
     };
     patch.ops[3] = (audio_synth_operator_config_t){
         .freq_mult = 9,
-        .level = q1x15_f(0.05f),
+        .level = q1x15_f(0.1f),
         .mode = AUDIO_SYNTH_OP_MODE_FREQ_MOD,
         .env = {.a = 18, .d = 0, .s = q1x31_f(1.0f), .r = 360},
     };
@@ -997,21 +997,13 @@ static void render_leds()
             return;
         }
 
-        float p = (float)elapsed / (float)LED_GAME_OVER_ANIM_MS;
-        color_t c;
-        if (p < 0.45f)
-        {
-            c = color_lerp(rgba(255, 40, 0, 255), rgba(255, 0, 180, 255), p / 0.45f);
-        }
-        else if (p < 0.8f)
-        {
-            c = color_lerp(rgba(255, 0, 180, 255), rgba(20, 80, 255, 255), (p - 0.45f) / 0.35f);
-        }
-        else
-        {
-            c = color_lerp(rgba(20, 80, 255, 255), rgba(0, 0, 0, 255), (p - 0.8f) / 0.2f);
-        }
-        c = color_cap(c, LED_BRIGHTNESS_CAP);
+        // Flash red three times, then end dark.
+        const uint32_t flash_count = 3;
+        const uint32_t phase_count = flash_count * 2; // on/off phases
+        uint32_t phase = (elapsed * phase_count) / LED_GAME_OVER_ANIM_MS;
+        bool on = (phase < phase_count) && ((phase % 2u) == 0u);
+        color_t c = on ? color_cap(rgba(255, 0, 0, 255), LED_BRIGHTNESS_CAP)
+                       : rgba(0, 0, 0, 255);
         g_engine.led_colors[LED_L] = c;
         g_engine.led_colors[LED_R] = c;
         return;
@@ -1033,10 +1025,11 @@ static void render_leds()
     }
 
     state.led_boost_level = clampf(state.led_boost_level, 0.0f, 1.0f);
-    if (state.led_boost_level > 0.01f)
+    if (state.led_boost_level > 0.001f)
     {
         color_t tint = color_lerp(rgba(255, 255, 255, 255), rgba(70, 140, 255, 255), state.led_boost_level);
-        float intensity = 0.15f + (0.85f * state.led_boost_level);
+        // Fade all the way to black on release; no minimum brightness floor.
+        float intensity = state.led_boost_level;
         color_t c = color_cap(color_scale(tint, intensity), LED_BRIGHTNESS_CAP);
         left = c;
         right = c;

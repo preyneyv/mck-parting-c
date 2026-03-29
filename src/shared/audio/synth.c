@@ -310,7 +310,7 @@ static void audio_synth_operator_fill_buffer(audio_synth_operator_t *op,
                                              q1x15 *buffer,
                                              uint32_t buffer_size)
 {
-  if (op->level == Q1X15_ZERO)
+  if (op->env.stage == 4 || op->level == Q1X15_ZERO)
   {
     if (op->config.mode == AUDIO_SYNTH_OP_MODE_FREQ_MOD)
     {
@@ -334,10 +334,25 @@ static void audio_synth_operator_fill_buffer(audio_synth_operator_t *op,
   }
 }
 
+static inline bool audio_synth_voice_is_silent(const audio_synth_voice_t *voice)
+{
+  for (int op_idx = 0; op_idx < AUDIO_SYNTH_OPERATOR_COUNT; op_idx++)
+  {
+    if (voice->ops[op_idx].env.stage != 4)
+      return false;
+  }
+  return true;
+}
+
 void audio_synth_voice_fill_buffer(audio_synth_voice_t *voice, q1x15 *buffer,
                                    uint32_t buffer_size)
 {
   memset(buffer, 0, buffer_size * sizeof(q1x15));
+
+  // Fully released voices contribute silence; skip per-operator loops.
+  if (audio_synth_voice_is_silent(voice))
+    return;
+
   for (int op_idx = 0; op_idx < AUDIO_SYNTH_OPERATOR_COUNT; op_idx++)
   {
     audio_synth_operator_fill_buffer(&voice->ops[op_idx], buffer, buffer_size);
@@ -353,46 +368,9 @@ static inline void _merge_drafts(q1x15 *out, q1x15 *in, uint32_t buffer_size)
   }
 }
 
-static inline q1x15 soft_limit_q17x15(int32_t x_q17_15)
+static inline q1x15 hard_limit_q17x15(int32_t x_q17_15)
 {
-  // We treat "1.0" threshold in q17.15 as 0x00008000 (32768).
-  // But q1.15 max representable is 32767, so we clamp output accordingly.
-  const int32_t ONE_Q17_15 = (1 << 15); // 32768
-
-  // Fast saturate for huge values (optional but cheap)
-  if (x_q17_15 >= (int32_t)(4 * ONE_Q17_15))
-    return (int16_t)Q1X15_ONE;
-  if (x_q17_15 <= -(int32_t)(4 * ONE_Q17_15))
-    return (int16_t)Q1X15_NEG_ONE;
-
-  int32_t ax = x_q17_15 < 0 ? -x_q17_15 : x_q17_15;
-
-  // Hard saturation beyond |x|>1.0, but *smoothly joined* by the cubic inside.
-  if (ax > ONE_Q17_15)
-  {
-    return (int16_t)(x_q17_15 < 0 ? Q1X15_NEG_ONE : Q1X15_ONE);
-  }
-
-  // Compute y = (3/2) * (x - x^3/3) in fixed point.
-  // All intermediates kept in 64-bit to avoid overflow.
-
-  // x^2 in q17.15: (x*x) is q34.30, >>15 -> q19.15
-  int64_t x = (int64_t)x_q17_15;
-  int64_t x2 = (x * x) >> 15; // q19.15
-  // x^3 in q17.15-ish: (x2*x) is q(19+17).30, >>15 -> q21.15
-  int64_t x3 = (x2 * x) >> 15; // q21.15
-
-  // term = x^3 / 3 (still q21.15)
-  int64_t term = x3 / 3;
-
-  // (x - x^3/3): x is q17.15, term is q21.15 (compatible; both have 15 frac bits)
-  int64_t y = x - term; // q21.15
-
-  // Multiply by 3/2: y = y * 3 / 2
-  y = (y * 3) / 2; // q21.15
-
-  // Now y is in q?.15 but guaranteed within [-1,1] for |x|<=1, due to the shaping.
-  return q1x15_clamp_s32((int32_t)y);
+  return q1x15_clamp_s32(x_q17_15);
 }
 
 void audio_synth_fill_buffer(audio_synth_t *synth, audio_buffer_t buffer,
@@ -402,9 +380,12 @@ void audio_synth_fill_buffer(audio_synth_t *synth, audio_buffer_t buffer,
   platform_mutex_lock(synth->mutex);
   // handle queued messages
   audio_synth_message_t msg;
-  while (platform_queue_try_pop(synth->msg_queue, &msg))
+  uint32_t messages_processed = 0;
+  while (messages_processed < AUDIO_SYNTH_MAX_MESSAGES_PER_BUFFER &&
+         platform_queue_try_pop(synth->msg_queue, &msg))
   {
     audio_synth_handle_message(synth, &msg);
+    messages_processed++;
   }
 
   static q1x15 *draft_voice = NULL;
@@ -425,11 +406,16 @@ void audio_synth_fill_buffer(audio_synth_t *synth, audio_buffer_t buffer,
   // misuse 32bit buffer as a 16bit mono buffer with room for overflow (so we
   // can clip later)
   memset(buffer, 0, buffer_size * sizeof(int32_t));
+  uint8_t active_voice_count = 0;
   for (uint8_t voice_idx = 0; voice_idx < AUDIO_SYNTH_VOICE_COUNT;
        voice_idx++)
   {
-    audio_synth_voice_fill_buffer(&synth->voices[voice_idx], draft_voice,
-                                  buffer_size);
+    audio_synth_voice_t *voice = &synth->voices[voice_idx];
+    if (audio_synth_voice_is_silent(voice))
+      continue;
+
+    active_voice_count++;
+    audio_synth_voice_fill_buffer(voice, draft_voice, buffer_size);
     for (uint32_t i = 0; i < buffer_size; i++)
     {
       q1x15 sample = draft_voice[i];
@@ -439,11 +425,18 @@ void audio_synth_fill_buffer(audio_synth_t *synth, audio_buffer_t buffer,
 
   // apply master level and write to output
   q1x15 master_level = synth->master_level;
+  if (active_voice_count == 0 || master_level == Q1X15_ZERO)
+  {
+    // buffer is already zeroed; packed stereo zero frame is 0.
+    platform_mutex_unlock(synth->mutex);
+    return;
+  }
+
   for (uint32_t i = 0; i < buffer_size; i++)
   {
     int32_t sample = buffer[i];
-    // apply soft clipping
-    sample = soft_limit_q17x15(sample);
+    // apply hard clipping
+    sample = hard_limit_q17x15(sample);
     // apply master level
     sample = q1x15_mul(master_level, sample);
     buffer[i] = audio_buffer_frame_from_mono((int16_t)sample);
