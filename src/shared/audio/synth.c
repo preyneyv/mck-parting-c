@@ -14,13 +14,14 @@
 
 #define AUDIO_SYNTH_STOP_RELEASE_MS 5u
 
+// put the sine LUT in Y scratch for core 1 prio
+__attribute__((section(".scratch_y"))) static q1x15 LUT_SINE[AUDIO_SYNTH_LUT_SIZE];
+
 static inline uint32_t lut_key(uint32_t phase)
 {
   return (phase >> (32 - AUDIO_SYNTH_LUT_RES));
 }
 
-// put the sine LUT in Y scratch for core 1 prio
-__attribute__((section(".scratch_y"))) static q1x15 LUT_SINE[AUDIO_SYNTH_LUT_SIZE];
 static void _fill_sine_lut()
 {
   for (int i = 0; i < AUDIO_SYNTH_LUT_SIZE; i++)

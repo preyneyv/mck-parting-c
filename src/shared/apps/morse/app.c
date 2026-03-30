@@ -5,6 +5,8 @@
 #include <shared/utils/elm.h>
 #include <shared/engine.h>
 #include <shared/leaderboard/leaderboard.h>
+#include <shared/utils/led.h>
+#include <shared/utils/led_anim.h>
 #include <platform/display.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -643,18 +645,12 @@ static void frame_results()
   }
 }
 
-static void _set_both_leds(color_t color)
-{
-  g_engine.led_colors[LED_L] = color;
-  g_engine.led_colors[LED_R] = color;
-}
-
 static void _frame_leds()
 {
   if (state->finished)
   {
-    uint8_t b = 50 + (uint8_t)(70.f * (1.f + __builtin_sinf(g_engine.tick * 0.01f)) * 0.5f);
-    _set_both_leds(rgba(0, b, 0, 255));
+    uint8_t b = 50 + (uint8_t)(70.f * led_sine_pulse(g_engine.tick, 0.01f));
+    led_set_both(rgba(0, b, 0, 255));
     return;
   }
 
@@ -669,16 +665,16 @@ static void _frame_leds()
       switch (state->led_event)
       {
       case MORSE_LED_EVENT_DOT:
-        _set_both_leds(rgba(255, 255, 255, 255));
+        led_set_both(rgba(255, 255, 255, 255));
         return;
       case MORSE_LED_EVENT_DASH:
-        _set_both_leds(rgba(0, 180, 255, 255));
+        led_set_both(rgba(0, 180, 255, 255));
         return;
       case MORSE_LED_EVENT_OK:
-        _set_both_leds(rgba(0, 255, 0, 255));
+        led_set_both(rgba(0, 255, 0, 255));
         return;
       case MORSE_LED_EVENT_ERR:
-        _set_both_leds(rgba(255, 0, 0, 255));
+        led_set_both(rgba(255, 0, 0, 255));
         return;
       case MORSE_LED_EVENT_NONE:
       default:
@@ -691,25 +687,25 @@ static void _frame_leds()
   {
     uint32_t dt = g_engine.tick - state->last_edge_tick;
     bool dash = dt > 2 * state->T;
-    _set_both_leds(dash ? rgba(0, 120, 200, 255) : rgba(130, 130, 130, 255));
+    led_set_both(dash ? rgba(0, 120, 200, 255) : rgba(130, 130, 130, 255));
     return;
   }
 
   stats_t stats = get_stats();
   if (state->started && stats.remaining_s <= 5)
   {
-    uint8_t b = 30 + (uint8_t)(120.f * (1.f + __builtin_sinf(g_engine.tick * 0.02f)) * 0.5f);
-    _set_both_leds(rgba(b, b / 3, 0, 255));
+    uint8_t b = 30 + (uint8_t)(120.f * led_sine_pulse(g_engine.tick, 0.02f));
+    led_set_both(rgba(b, b / 3, 0, 255));
     return;
   }
 
   if (!state->started)
   {
-    _set_both_leds(rgba(0, 35, 35, 255));
+    led_set_both(rgba(0, 35, 35, 255));
     return;
   }
 
-  _set_both_leds(rgba(0, 20, 0, 255));
+  led_set_both(rgba(0, 20, 0, 255));
 }
 
 static void frame()

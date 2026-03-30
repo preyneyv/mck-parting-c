@@ -12,6 +12,7 @@
 #include <shared/engine.h>
 #include <shared/leaderboard/leaderboard.h>
 #include <platform/display.h>
+#include <shared/utils/color.h>
 #include <shared/utils/vec.h>
 
 #include "sounds/bgm.h"
@@ -248,41 +249,6 @@ static inline float clampf(float v, float lo, float hi)
 static inline float randf()
 {
     return (float)rand() / (float)RAND_MAX;
-}
-
-static inline uint8_t u8_lerp(uint8_t a, uint8_t b, float t)
-{
-    if (t <= 0.0f)
-        return a;
-    if (t >= 1.0f)
-        return b;
-    return (uint8_t)(a + (int16_t)((b - a) * t));
-}
-
-static inline color_t color_lerp(color_t a, color_t b, float t)
-{
-    return rgba(
-        u8_lerp(a.r, b.r, t),
-        u8_lerp(a.g, b.g, t),
-        u8_lerp(a.b, b.b, t),
-        255);
-}
-
-static inline color_t color_scale(color_t c, float scale)
-{
-    scale = clampf(scale, 0.0f, 1.0f);
-    uint8_t r = (uint8_t)clampf(c.r * scale, 0.0f, 255.0f);
-    uint8_t g = (uint8_t)clampf(c.g * scale, 0.0f, 255.0f);
-    uint8_t b = (uint8_t)clampf(c.b * scale, 0.0f, 255.0f);
-    return rgba(r, g, b, 255);
-}
-
-static inline color_t color_cap(color_t c, uint8_t cap)
-{
-    if (cap >= 255)
-        return c;
-    float scale = (float)cap / 255.0f;
-    return color_scale(c, scale);
 }
 
 static void sfx_enqueue_note_on(uint8_t patch, uint8_t note_number,

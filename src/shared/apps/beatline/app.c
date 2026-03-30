@@ -7,6 +7,7 @@
 #include <shared/engine.h>
 #include <platform/display.h>
 #include <shared/utils/elm.h>
+#include <shared/utils/led_anim.h>
 #include <shared/utils/misc.h>
 #include <shared/utils/vec.h>
 
@@ -553,7 +554,7 @@ static void play_set_leds(void)
 
         uint8_t led = (lane == BEATLINE_LANE_LEFT) ? LED_L : LED_R;
         // slow pulse: sine-like using tick
-        uint8_t bri = 80 + (uint8_t)(80.f * (1.f + __builtin_sinf(g_engine.tick * 0.006f)) * 0.5f);
+        uint8_t bri = 80 + (uint8_t)(80.f * led_sine_pulse(g_engine.tick, 0.006f));
         g_engine.led_colors[led] = rgba(0, bri, bri, 255);
     }
 }
