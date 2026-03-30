@@ -382,7 +382,8 @@ void audio_synth_fill_buffer(audio_synth_t *synth, audio_buffer_t buffer,
   // handle queued messages
   audio_synth_message_t msg;
   uint32_t messages_processed = 0;
-  while (platform_queue_try_pop(synth->msg_queue, &msg))
+  while (messages_processed < AUDIO_SYNTH_MAX_MESSAGES_PER_BUFFER &&
+         platform_queue_try_pop(synth->msg_queue, &msg))
   {
     audio_synth_handle_message(synth, &msg);
     messages_processed++;
