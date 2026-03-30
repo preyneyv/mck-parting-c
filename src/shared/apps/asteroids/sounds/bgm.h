@@ -136,6 +136,378 @@ static const audio_song_patch_event_t sound_bgm_patches[] = {
             },
         },
     },
+    {
+        .patch_idx = 4u,
+        .patch = {
+            .ops = {
+                {
+                    .freq_mult = 1,
+                    .level = (q1x15)16384,
+                    .mode = AUDIO_SYNTH_OP_MODE_ADDITIVE,
+                    .env = {.a = 2u, .d = 40u, .s = (q1x31)1610612736, .r = 40u},
+                },
+                {
+                    .freq_mult = 1,
+                    .level = (q1x15)0,
+                    .mode = AUDIO_SYNTH_OP_MODE_ADDITIVE,
+                    .env = {.a = 0u, .d = 0u, .s = (q1x31)0, .r = 0u},
+                },
+                {
+                    .freq_mult = 1,
+                    .level = (q1x15)0,
+                    .mode = AUDIO_SYNTH_OP_MODE_ADDITIVE,
+                    .env = {.a = 0u, .d = 0u, .s = (q1x31)0, .r = 0u},
+                },
+                {
+                    .freq_mult = 1,
+                    .level = (q1x15)0,
+                    .mode = AUDIO_SYNTH_OP_MODE_ADDITIVE,
+                    .env = {.a = 0u, .d = 0u, .s = (q1x31)0, .r = 0u},
+                },
+            },
+        },
+    },
+    {
+        .patch_idx = 5u,
+        .patch = {
+            .ops = {
+                {
+                    .freq_mult = 1,
+                    .level = (q1x15)16384,
+                    .mode = AUDIO_SYNTH_OP_MODE_ADDITIVE,
+                    .env = {.a = 2u, .d = 40u, .s = (q1x31)1610612736, .r = 40u},
+                },
+                {
+                    .freq_mult = 1,
+                    .level = (q1x15)0,
+                    .mode = AUDIO_SYNTH_OP_MODE_ADDITIVE,
+                    .env = {.a = 0u, .d = 0u, .s = (q1x31)0, .r = 0u},
+                },
+                {
+                    .freq_mult = 1,
+                    .level = (q1x15)0,
+                    .mode = AUDIO_SYNTH_OP_MODE_ADDITIVE,
+                    .env = {.a = 0u, .d = 0u, .s = (q1x31)0, .r = 0u},
+                },
+                {
+                    .freq_mult = 1,
+                    .level = (q1x15)0,
+                    .mode = AUDIO_SYNTH_OP_MODE_ADDITIVE,
+                    .env = {.a = 0u, .d = 0u, .s = (q1x31)0, .r = 0u},
+                },
+            },
+        },
+    },
+    {
+        .patch_idx = 6u,
+        .patch = {
+            .ops = {
+                {
+                    .freq_mult = 1,
+                    .level = (q1x15)16384,
+                    .mode = AUDIO_SYNTH_OP_MODE_ADDITIVE,
+                    .env = {.a = 2u, .d = 40u, .s = (q1x31)1610612736, .r = 40u},
+                },
+                {
+                    .freq_mult = 1,
+                    .level = (q1x15)0,
+                    .mode = AUDIO_SYNTH_OP_MODE_ADDITIVE,
+                    .env = {.a = 0u, .d = 0u, .s = (q1x31)0, .r = 0u},
+                },
+                {
+                    .freq_mult = 1,
+                    .level = (q1x15)0,
+                    .mode = AUDIO_SYNTH_OP_MODE_ADDITIVE,
+                    .env = {.a = 0u, .d = 0u, .s = (q1x31)0, .r = 0u},
+                },
+                {
+                    .freq_mult = 1,
+                    .level = (q1x15)0,
+                    .mode = AUDIO_SYNTH_OP_MODE_ADDITIVE,
+                    .env = {.a = 0u, .d = 0u, .s = (q1x31)0, .r = 0u},
+                },
+            },
+        },
+    },
+    {
+        .patch_idx = 7u,
+        .patch = {
+            .ops = {
+                {
+                    .freq_mult = 1,
+                    .level = (q1x15)16384,
+                    .mode = AUDIO_SYNTH_OP_MODE_ADDITIVE,
+                    .env = {.a = 2u, .d = 40u, .s = (q1x31)1610612736, .r = 40u},
+                },
+                {
+                    .freq_mult = 1,
+                    .level = (q1x15)0,
+                    .mode = AUDIO_SYNTH_OP_MODE_ADDITIVE,
+                    .env = {.a = 0u, .d = 0u, .s = (q1x31)0, .r = 0u},
+                },
+                {
+                    .freq_mult = 1,
+                    .level = (q1x15)0,
+                    .mode = AUDIO_SYNTH_OP_MODE_ADDITIVE,
+                    .env = {.a = 0u, .d = 0u, .s = (q1x31)0, .r = 0u},
+                },
+                {
+                    .freq_mult = 1,
+                    .level = (q1x15)0,
+                    .mode = AUDIO_SYNTH_OP_MODE_ADDITIVE,
+                    .env = {.a = 0u, .d = 0u, .s = (q1x31)0, .r = 0u},
+                },
+            },
+        },
+    },
+    {
+        .patch_idx = 8u,
+        .patch = {
+            .ops = {
+                {
+                    .freq_mult = 1,
+                    .level = (q1x15)16384,
+                    .mode = AUDIO_SYNTH_OP_MODE_ADDITIVE,
+                    .env = {.a = 2u, .d = 40u, .s = (q1x31)1610612736, .r = 40u},
+                },
+                {
+                    .freq_mult = 1,
+                    .level = (q1x15)0,
+                    .mode = AUDIO_SYNTH_OP_MODE_ADDITIVE,
+                    .env = {.a = 0u, .d = 0u, .s = (q1x31)0, .r = 0u},
+                },
+                {
+                    .freq_mult = 1,
+                    .level = (q1x15)0,
+                    .mode = AUDIO_SYNTH_OP_MODE_ADDITIVE,
+                    .env = {.a = 0u, .d = 0u, .s = (q1x31)0, .r = 0u},
+                },
+                {
+                    .freq_mult = 1,
+                    .level = (q1x15)0,
+                    .mode = AUDIO_SYNTH_OP_MODE_ADDITIVE,
+                    .env = {.a = 0u, .d = 0u, .s = (q1x31)0, .r = 0u},
+                },
+            },
+        },
+    },
+    {
+        .patch_idx = 9u,
+        .patch = {
+            .ops = {
+                {
+                    .freq_mult = 1,
+                    .level = (q1x15)16384,
+                    .mode = AUDIO_SYNTH_OP_MODE_ADDITIVE,
+                    .env = {.a = 2u, .d = 40u, .s = (q1x31)1610612736, .r = 40u},
+                },
+                {
+                    .freq_mult = 1,
+                    .level = (q1x15)0,
+                    .mode = AUDIO_SYNTH_OP_MODE_ADDITIVE,
+                    .env = {.a = 0u, .d = 0u, .s = (q1x31)0, .r = 0u},
+                },
+                {
+                    .freq_mult = 1,
+                    .level = (q1x15)0,
+                    .mode = AUDIO_SYNTH_OP_MODE_ADDITIVE,
+                    .env = {.a = 0u, .d = 0u, .s = (q1x31)0, .r = 0u},
+                },
+                {
+                    .freq_mult = 1,
+                    .level = (q1x15)0,
+                    .mode = AUDIO_SYNTH_OP_MODE_ADDITIVE,
+                    .env = {.a = 0u, .d = 0u, .s = (q1x31)0, .r = 0u},
+                },
+            },
+        },
+    },
+    {
+        .patch_idx = 10u,
+        .patch = {
+            .ops = {
+                {
+                    .freq_mult = 1,
+                    .level = (q1x15)16384,
+                    .mode = AUDIO_SYNTH_OP_MODE_ADDITIVE,
+                    .env = {.a = 2u, .d = 40u, .s = (q1x31)1610612736, .r = 40u},
+                },
+                {
+                    .freq_mult = 1,
+                    .level = (q1x15)0,
+                    .mode = AUDIO_SYNTH_OP_MODE_ADDITIVE,
+                    .env = {.a = 0u, .d = 0u, .s = (q1x31)0, .r = 0u},
+                },
+                {
+                    .freq_mult = 1,
+                    .level = (q1x15)0,
+                    .mode = AUDIO_SYNTH_OP_MODE_ADDITIVE,
+                    .env = {.a = 0u, .d = 0u, .s = (q1x31)0, .r = 0u},
+                },
+                {
+                    .freq_mult = 1,
+                    .level = (q1x15)0,
+                    .mode = AUDIO_SYNTH_OP_MODE_ADDITIVE,
+                    .env = {.a = 0u, .d = 0u, .s = (q1x31)0, .r = 0u},
+                },
+            },
+        },
+    },
+    {
+        .patch_idx = 11u,
+        .patch = {
+            .ops = {
+                {
+                    .freq_mult = 1,
+                    .level = (q1x15)16384,
+                    .mode = AUDIO_SYNTH_OP_MODE_ADDITIVE,
+                    .env = {.a = 2u, .d = 40u, .s = (q1x31)1610612736, .r = 40u},
+                },
+                {
+                    .freq_mult = 1,
+                    .level = (q1x15)0,
+                    .mode = AUDIO_SYNTH_OP_MODE_ADDITIVE,
+                    .env = {.a = 0u, .d = 0u, .s = (q1x31)0, .r = 0u},
+                },
+                {
+                    .freq_mult = 1,
+                    .level = (q1x15)0,
+                    .mode = AUDIO_SYNTH_OP_MODE_ADDITIVE,
+                    .env = {.a = 0u, .d = 0u, .s = (q1x31)0, .r = 0u},
+                },
+                {
+                    .freq_mult = 1,
+                    .level = (q1x15)0,
+                    .mode = AUDIO_SYNTH_OP_MODE_ADDITIVE,
+                    .env = {.a = 0u, .d = 0u, .s = (q1x31)0, .r = 0u},
+                },
+            },
+        },
+    },
+    {
+        .patch_idx = 12u,
+        .patch = {
+            .ops = {
+                {
+                    .freq_mult = 1,
+                    .level = (q1x15)16384,
+                    .mode = AUDIO_SYNTH_OP_MODE_ADDITIVE,
+                    .env = {.a = 2u, .d = 40u, .s = (q1x31)1610612736, .r = 40u},
+                },
+                {
+                    .freq_mult = 1,
+                    .level = (q1x15)0,
+                    .mode = AUDIO_SYNTH_OP_MODE_ADDITIVE,
+                    .env = {.a = 0u, .d = 0u, .s = (q1x31)0, .r = 0u},
+                },
+                {
+                    .freq_mult = 1,
+                    .level = (q1x15)0,
+                    .mode = AUDIO_SYNTH_OP_MODE_ADDITIVE,
+                    .env = {.a = 0u, .d = 0u, .s = (q1x31)0, .r = 0u},
+                },
+                {
+                    .freq_mult = 1,
+                    .level = (q1x15)0,
+                    .mode = AUDIO_SYNTH_OP_MODE_ADDITIVE,
+                    .env = {.a = 0u, .d = 0u, .s = (q1x31)0, .r = 0u},
+                },
+            },
+        },
+    },
+    {
+        .patch_idx = 13u,
+        .patch = {
+            .ops = {
+                {
+                    .freq_mult = 1,
+                    .level = (q1x15)16384,
+                    .mode = AUDIO_SYNTH_OP_MODE_ADDITIVE,
+                    .env = {.a = 2u, .d = 40u, .s = (q1x31)1610612736, .r = 40u},
+                },
+                {
+                    .freq_mult = 1,
+                    .level = (q1x15)0,
+                    .mode = AUDIO_SYNTH_OP_MODE_ADDITIVE,
+                    .env = {.a = 0u, .d = 0u, .s = (q1x31)0, .r = 0u},
+                },
+                {
+                    .freq_mult = 1,
+                    .level = (q1x15)0,
+                    .mode = AUDIO_SYNTH_OP_MODE_ADDITIVE,
+                    .env = {.a = 0u, .d = 0u, .s = (q1x31)0, .r = 0u},
+                },
+                {
+                    .freq_mult = 1,
+                    .level = (q1x15)0,
+                    .mode = AUDIO_SYNTH_OP_MODE_ADDITIVE,
+                    .env = {.a = 0u, .d = 0u, .s = (q1x31)0, .r = 0u},
+                },
+            },
+        },
+    },
+    {
+        .patch_idx = 14u,
+        .patch = {
+            .ops = {
+                {
+                    .freq_mult = 1,
+                    .level = (q1x15)16384,
+                    .mode = AUDIO_SYNTH_OP_MODE_ADDITIVE,
+                    .env = {.a = 2u, .d = 40u, .s = (q1x31)1610612736, .r = 40u},
+                },
+                {
+                    .freq_mult = 1,
+                    .level = (q1x15)0,
+                    .mode = AUDIO_SYNTH_OP_MODE_ADDITIVE,
+                    .env = {.a = 0u, .d = 0u, .s = (q1x31)0, .r = 0u},
+                },
+                {
+                    .freq_mult = 1,
+                    .level = (q1x15)0,
+                    .mode = AUDIO_SYNTH_OP_MODE_ADDITIVE,
+                    .env = {.a = 0u, .d = 0u, .s = (q1x31)0, .r = 0u},
+                },
+                {
+                    .freq_mult = 1,
+                    .level = (q1x15)0,
+                    .mode = AUDIO_SYNTH_OP_MODE_ADDITIVE,
+                    .env = {.a = 0u, .d = 0u, .s = (q1x31)0, .r = 0u},
+                },
+            },
+        },
+    },
+    {
+        .patch_idx = 15u,
+        .patch = {
+            .ops = {
+                {
+                    .freq_mult = 1,
+                    .level = (q1x15)16384,
+                    .mode = AUDIO_SYNTH_OP_MODE_ADDITIVE,
+                    .env = {.a = 2u, .d = 40u, .s = (q1x31)1610612736, .r = 40u},
+                },
+                {
+                    .freq_mult = 1,
+                    .level = (q1x15)0,
+                    .mode = AUDIO_SYNTH_OP_MODE_ADDITIVE,
+                    .env = {.a = 0u, .d = 0u, .s = (q1x31)0, .r = 0u},
+                },
+                {
+                    .freq_mult = 1,
+                    .level = (q1x15)0,
+                    .mode = AUDIO_SYNTH_OP_MODE_ADDITIVE,
+                    .env = {.a = 0u, .d = 0u, .s = (q1x31)0, .r = 0u},
+                },
+                {
+                    .freq_mult = 1,
+                    .level = (q1x15)0,
+                    .mode = AUDIO_SYNTH_OP_MODE_ADDITIVE,
+                    .env = {.a = 0u, .d = 0u, .s = (q1x31)0, .r = 0u},
+                },
+            },
+        },
+    },
 };
 
 static const audio_song_event_t sound_bgm_events[] = {
@@ -504,7 +876,7 @@ static const audio_song_event_t sound_bgm_events[] = {
 static const audio_song_asset_t sound_bgm_song = {
     .header = &sound_bgm_header,
     .patches = sound_bgm_patches,
-    .patch_count = 4u,
+    .patch_count = 16u,
     .events = sound_bgm_events,
     .event_count = 360u,
     .duration_ms = 8000u,

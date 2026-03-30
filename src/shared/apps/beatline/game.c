@@ -14,6 +14,62 @@
 #define BEATLINE_NOTE_C4 60
 #define BEATLINE_NOTE_CS4 61
 
+static beatline_song_timing_t beatline_song_timing_from_asset(const audio_song_asset_t *song)
+{
+    beatline_song_timing_t timing = {
+        .quarter_ticks = 500.0f,
+        .beat_ticks = 500.0f,
+        .bpm_q8 = 120u * 256u,
+        .numerator = 4,
+        .denominator = 4,
+    };
+
+    if (song != NULL && song->header != NULL)
+    {
+        if (song->header->bpm_q8 > 0)
+            timing.bpm_q8 = song->header->bpm_q8;
+        if (song->header->numerator > 0)
+            timing.numerator = song->header->numerator;
+        if (song->header->denominator > 0)
+            timing.denominator = song->header->denominator;
+    }
+
+    if (timing.bpm_q8 > 0)
+        timing.quarter_ticks = (60000.0f * 256.0f) / (float)timing.bpm_q8;
+
+    if (song != NULL && song->events != NULL)
+    {
+        for (uint32_t i = 0; i < song->event_count; i++)
+        {
+            const audio_song_event_t *ev = &song->events[i];
+            if (ev->time_ms > 0)
+                break;
+
+            if (ev->type == AUDIO_SONG_EVENT_TEMPO &&
+                ev->data.tempo.us_per_quarter > 0)
+            {
+                timing.quarter_ticks = (float)ev->data.tempo.us_per_quarter / 1000.0f;
+                timing.bpm_q8 = (uint32_t)((60000.0f * 256.0f) / timing.quarter_ticks + 0.5f);
+            }
+            else if (ev->type == AUDIO_SONG_EVENT_TIMESIG)
+            {
+                if (ev->data.timesig.numerator > 0)
+                    timing.numerator = ev->data.timesig.numerator;
+                if (ev->data.timesig.denominator > 0)
+                    timing.denominator = ev->data.timesig.denominator;
+            }
+        }
+    }
+
+    if (timing.denominator == 0)
+        timing.denominator = 4;
+    timing.beat_ticks = timing.quarter_ticks * (4.0f / (float)timing.denominator);
+    if (timing.beat_ticks < 1.0f)
+        timing.beat_ticks = 1.0f;
+
+    return timing;
+}
+
 static int beatline_note_cmp_hit_tick(const void *a, const void *b)
 {
     const beatline_note_t *na = (const beatline_note_t *)a;
@@ -39,6 +95,7 @@ static void beatline_generate_notes_from_song(beatline_state_t *st)
     }
 
     const audio_song_asset_t *song = st->chart->song;
+    uint8_t rhythm_patch = beatline_difficulty_patch(st->selected_difficulty);
 
     bool left_hold_active = false;
     uint32_t left_hold_start = 0;
@@ -51,7 +108,7 @@ static void beatline_generate_notes_from_song(beatline_state_t *st)
 
         if (event->type == AUDIO_SONG_EVENT_NOTE_ON)
         {
-            if (event->data.note_on.patch_idx != 0)
+            if (event->data.note_on.patch_idx != rhythm_patch)
                 continue;
 
             uint8_t note = event->data.note_on.note_number;
@@ -87,7 +144,7 @@ static void beatline_generate_notes_from_song(beatline_state_t *st)
         }
         else if (event->type == AUDIO_SONG_EVENT_NOTE_OFF)
         {
-            if (event->data.note_off.patch_idx != 0)
+            if (event->data.note_off.patch_idx != rhythm_patch)
                 continue;
 
             int8_t note = event->data.note_off.note_number;
@@ -183,16 +240,17 @@ static audio_song_event_action_t beatline_song_event_hook(
     void *user)
 {
     (void)player;
-    (void)user;
+    const beatline_state_t *st = (const beatline_state_t *)user;
+    // filter out note events on rhythm patches (0 = normal, 1 = hard)
 
     if (event->type == AUDIO_SONG_EVENT_NOTE_ON &&
-        event->data.note_on.patch_idx == 0)
+        event->data.note_on.patch_idx <= 1)
     {
         return AUDIO_SONG_EVENT_ACTION_CONSUME;
     }
 
     if (event->type == AUDIO_SONG_EVENT_NOTE_OFF &&
-        event->data.note_off.patch_idx == 0)
+        event->data.note_off.patch_idx <= 1)
     {
         return AUDIO_SONG_EVENT_ACTION_CONSUME;
     }
@@ -211,6 +269,13 @@ uint32_t beatline_game_time(const beatline_state_t *st)
     if (t < 0)
         return 0;
     return (uint32_t)t;
+}
+
+beatline_song_timing_t beatline_song_timing(const beatline_state_t *st)
+{
+    if (st == NULL || st->chart == NULL)
+        return beatline_song_timing_from_asset(NULL);
+    return beatline_song_timing_from_asset(st->chart->song);
 }
 
 uint16_t beatline_combo_multiplier(uint16_t combo)
@@ -299,13 +364,16 @@ void beatline_game_init(beatline_state_t *st)
 {
     memset(st, 0, sizeof(*st));
     st->screen = BEATLINE_SCREEN_SELECT;
+    st->selected_difficulty = BEATLINE_DIFFICULTY_NORMAL;
     memset(st->note_grades, BEATLINE_NOTE_UNJUDGED, sizeof(st->note_grades));
 }
 
-void beatline_game_select_track(beatline_state_t *st, int8_t track_idx)
+void beatline_game_select_track(beatline_state_t *st, int8_t track_idx,
+                                beatline_difficulty_t difficulty)
 {
     st->chart = &beatline_tracks[track_idx];
     st->selected_track = track_idx;
+    st->selected_difficulty = difficulty;
 
     // reset play state
     st->score = 0;
@@ -333,7 +401,10 @@ void beatline_game_start_countdown(beatline_state_t *st)
     st->countdown_beat = 3;
 
     // beat interval in ticks
-    uint32_t beat_interval = 60000 / st->chart->bpm;
+    beatline_song_timing_t timing = beatline_song_timing(st);
+    uint32_t beat_interval = (uint32_t)(timing.beat_ticks + 0.5f);
+    if (beat_interval == 0)
+        beat_interval = 1;
     st->countdown_next_tick = g_engine.tick + beat_interval;
 
     // init song player but don't start yet
@@ -557,7 +628,10 @@ void beatline_game_tick(beatline_state_t *st)
                 beatline_game_start_play(st);
                 return;
             }
-            uint32_t beat_interval = 60000 / st->chart->bpm;
+            beatline_song_timing_t timing = beatline_song_timing(st);
+            uint32_t beat_interval = (uint32_t)(timing.beat_ticks + 0.5f);
+            if (beat_interval == 0)
+                beat_interval = 1;
             st->countdown_next_tick = g_engine.tick + beat_interval;
         }
         return;
@@ -626,7 +700,8 @@ void beatline_game_finish(beatline_state_t *st)
     }
 
     uint8_t stats[14];
-    stats[0] = (uint8_t)st->selected_track;
+    stats[0] = (uint8_t)(((uint8_t)st->selected_track << 1) |
+                         ((uint8_t)st->selected_difficulty & 0x01u));
     stats[1] = (uint8_t)beatline_game_rank(st);
     stats[2] = (uint8_t)(st->score & 0xFF);
     stats[3] = (uint8_t)((st->score >> 8) & 0xFF);

@@ -16,6 +16,17 @@ typedef enum
     BEATLINE_NOTE_HOLD = 1,
 } beatline_note_type_t;
 
+typedef enum
+{
+    BEATLINE_DIFFICULTY_NORMAL = 0,
+    BEATLINE_DIFFICULTY_HARD = 1,
+} beatline_difficulty_t;
+
+static inline uint8_t beatline_difficulty_patch(beatline_difficulty_t difficulty)
+{
+    return (difficulty == BEATLINE_DIFFICULTY_HARD) ? 1u : 0u;
+}
+
 // A single note in the chart. Sorted by hit_tick ascending.
 typedef struct
 {
@@ -25,16 +36,11 @@ typedef struct
     uint16_t hold_duration; // hold length in ticks (0 for taps)
 } beatline_note_t;
 
-// A complete chart: metadata + note data + song reference.
+// A song entry: shared display metadata + one source song asset.
 typedef struct
 {
     const char *title;
-    uint8_t difficulty; // 1-5 stars
-    uint16_t bpm;
-    uint16_t scroll_speed;   // pixels per second
-    uint32_t duration_ticks; // total chart length in ticks
-    const beatline_note_t *notes;
-    uint16_t note_count;
+    const char *display_info;
     const audio_song_asset_t *song;
 } beatline_chart_t;
 

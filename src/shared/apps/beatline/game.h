@@ -82,10 +82,20 @@ typedef enum
 
 typedef struct
 {
+    float quarter_ticks;
+    float beat_ticks;
+    uint32_t bpm_q8;
+    uint8_t numerator;
+    uint8_t denominator;
+} beatline_song_timing_t;
+
+typedef struct
+{
     beatline_screen_t screen;
 
     // selection
     int8_t selected_track;
+    beatline_difficulty_t selected_difficulty;
     int32_t select_scroll_y; // animated scroll offset
 
     // chart reference
@@ -143,7 +153,8 @@ typedef struct
 // --- API ---
 
 void beatline_game_init(beatline_state_t *st);
-void beatline_game_select_track(beatline_state_t *st, int8_t track_idx);
+void beatline_game_select_track(beatline_state_t *st, int8_t track_idx,
+                                beatline_difficulty_t difficulty);
 void beatline_game_start_countdown(beatline_state_t *st);
 void beatline_game_start_play(beatline_state_t *st);
 void beatline_game_tick(beatline_state_t *st);
@@ -151,6 +162,7 @@ void beatline_game_finish(beatline_state_t *st);
 
 // Query helpers
 uint32_t beatline_game_time(const beatline_state_t *st);
+beatline_song_timing_t beatline_song_timing(const beatline_state_t *st);
 beatline_rank_t beatline_game_rank(const beatline_state_t *st);
 const char *beatline_grade_str(beatline_grade_t grade);
 const char *beatline_rank_str(beatline_rank_t rank);

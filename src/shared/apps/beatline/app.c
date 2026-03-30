@@ -25,7 +25,6 @@ static beatline_state_t state;
 #define SELECT_CARD_H (DISP_HEIGHT - 2)
 #define SELECT_CARD_GAP 0
 #define SELECT_CARD_Y 1
-#define SELECT_STAR_W 5
 #define SELECT_HOLD_BOX_W 78
 #define SELECT_HOLD_BOX_H 11
 
@@ -67,23 +66,6 @@ static void select_enter(void)
 {
     memset(&sel, 0, sizeof(sel));
     select_retarget(true);
-}
-
-static void select_draw_stars(elm_t *parent, vec2_t pos, uint8_t filled,
-                              uint8_t total)
-{
-    u8g2_t *u8g2 = parent->u8g2;
-    for (uint8_t i = 0; i < total; i++)
-    {
-        int16_t x = pos.x + i * SELECT_STAR_W;
-        int16_t y = pos.y;
-        if (i < filled)
-            u8g2_DrawDisc(u8g2, parent->pos.x + x + 2, parent->pos.y + y + 2, 1,
-                          U8G2_DRAW_ALL);
-        else
-            u8g2_DrawCircle(u8g2, parent->pos.x + x + 2, parent->pos.y + y + 2, 1,
-                            U8G2_DRAW_ALL);
-    }
 }
 
 static void select_draw_centered_trimmed(u8g2_t *u8g2, int16_t y, const char *txt,
@@ -135,7 +117,9 @@ static void select_tick(void)
         }
         if (held >= 1.f)
         {
-            beatline_game_select_track(&state, state.selected_track);
+            beatline_difficulty_t difficulty =
+                (btn == BUTTON_RIGHT) ? BEATLINE_DIFFICULTY_HARD : BEATLINE_DIFFICULTY_NORMAL;
+            beatline_game_select_track(&state, state.selected_track, difficulty);
             beatline_game_start_countdown(&state);
             engine_buttons_reset();
             return;
@@ -210,16 +194,31 @@ static void select_frame(void)
     u8g2_SetFont(u8g2, u8g2_font_6x10_tf);
     select_draw_centered_trimmed(u8g2, 20, t->title, DISP_WIDTH - 8);
 
-    char bpm_buf[16];
-    snprintf(bpm_buf, sizeof(bpm_buf), "%u BPM", t->bpm);
+    beatline_song_timing_t timing = beatline_song_timing(&state);
+    uint32_t bpm = (timing.bpm_q8 + 128u) / 256u;
+
+    char bpm_buf[20];
+    snprintf(bpm_buf, sizeof(bpm_buf), "%lu BPM", (unsigned long)bpm);
     u8g2_SetFont(u8g2, u8g2_font_5x7_tr);
     select_draw_centered_trimmed(u8g2, 33, bpm_buf, DISP_WIDTH - 8);
 
-    int16_t star_x = (DISP_WIDTH - (5 * SELECT_STAR_W)) / 2;
-    select_draw_stars(&root, vec2(star_x, 37), t->difficulty, 5);
+    if (t->display_info != NULL)
+    {
+        u8g2_SetFont(u8g2, u8g2_font_4x6_tf);
+        select_draw_centered_trimmed(u8g2, 40, t->display_info, DISP_WIDTH - 8);
+    }
 
     u8g2_SetFont(u8g2, u8g2_font_4x6_tf);
-    select_draw_centered_trimmed(u8g2, hold_y + 8, "HOLD TO START", SELECT_HOLD_BOX_W - 6);
+    if (sel.fill_w > 0)
+    {
+        const char *hold_txt =
+            (sel.fill_btn == BUTTON_RIGHT) ? "HOLD TO START: HARD" : "HOLD TO START: NORMAL";
+        select_draw_centered_trimmed(u8g2, hold_y + 8, hold_txt, SELECT_HOLD_BOX_W - 6);
+    }
+    else
+    {
+        select_draw_centered_trimmed(u8g2, hold_y + 8, "HOLD L:NORM R:HARD", SELECT_HOLD_BOX_W - 6);
+    }
 
     // LED ramp during hold
     if (sel.fill_w > 0)
@@ -256,7 +255,10 @@ static void countdown_frame(void)
     elm_str(&root, vec2((DISP_WIDTH - nw) / 2, 40), num);
 
     // LED flash on each beat transition
-    uint32_t beat_interval = 60000 / state.chart->bpm;
+    beatline_song_timing_t timing = beatline_song_timing(&state);
+    uint32_t beat_interval = (uint32_t)(timing.beat_ticks + 0.5f);
+    if (beat_interval == 0)
+        beat_interval = 1;
     uint32_t since_beat = g_engine.tick -
                           (state.countdown_next_tick - beat_interval);
     if (since_beat < 100)
@@ -274,46 +276,16 @@ static void countdown_frame(void)
 
 static float scroll_px_per_tick(void)
 {
-    // scroll_speed is px/sec, tick rate is 1000 Hz
-    return state.chart->scroll_speed / 1000.f;
+    // Fixed scroll speed for all songs/difficulties.
+    return 70.0f / 1000.0f;
 }
 
-static float chart_quarter_ticks(const beatline_chart_t *chart)
+static float chart_quarter_ticks(void)
 {
-    if (chart == NULL)
-        return 500.0f;
-
-    if (chart->song != NULL && chart->song->events != NULL)
-    {
-        const audio_song_event_t *events = chart->song->events;
-        uint32_t event_count = chart->song->event_count;
-
-        // Prefer the last tempo declared at time 0 for stable initial grid phase.
-        for (uint32_t i = 0; i < event_count; i++)
-        {
-            const audio_song_event_t *ev = &events[i];
-            if (ev->time_ms > 0)
-                break;
-            if (ev->type != AUDIO_SONG_EVENT_TEMPO)
-                continue;
-            if (ev->data.tempo.us_per_quarter == 0)
-                continue;
-
-            return (float)ev->data.tempo.us_per_quarter / 1000.0f;
-        }
-
-        if (chart->song->header != NULL && chart->song->header->bpm_q8 > 0)
-        {
-            float bpm = (float)chart->song->header->bpm_q8 / 256.0f;
-            if (bpm > 0.0f)
-                return 60000.0f / bpm;
-        }
-    }
-
-    if (chart->bpm > 0)
-        return 60000.0f / (float)chart->bpm;
-
-    return 500.0f;
+    beatline_song_timing_t timing = beatline_song_timing(&state);
+    if (timing.quarter_ticks < 1.0f)
+        return 1.0f;
+    return timing.quarter_ticks;
 }
 
 #define NOTE_W 6
@@ -369,7 +341,7 @@ static void play_draw_grid(elm_t *root)
     u8g2_SetDrawColor(u8g2, 1);
     float px_t = scroll_px_per_tick();
     float game_t = (float)beatline_game_time(&state);
-    float beat_ticks = chart_quarter_ticks(state.chart);
+    float beat_ticks = chart_quarter_ticks();
     if (beat_ticks < 1.0f)
         beat_ticks = 1.0f;
 

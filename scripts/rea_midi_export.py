@@ -354,7 +354,6 @@ def build_song_model(
     seg_ticks, seg_cum_us, seg_tempo_us_per_qn = build_tempo_segments(events, division)
 
     patch_defs_by_orig: Dict[int, Dict[str, object]] = {}
-    used_patch_ids: set[int] = set()
     song_events: List[Dict[str, object]] = []
 
     for ev in events:
@@ -366,7 +365,6 @@ def build_song_model(
             if parsed is not None:
                 patch_idx = int(parsed["patch_idx"])
                 patch_defs_by_orig[patch_idx] = parsed
-                used_patch_ids.add(patch_idx)
             continue
 
         if ev["kind"] == "chan":
@@ -374,14 +372,13 @@ def build_song_model(
             channel = int(ev["channel"])
             note = int(ev["d1"])
             vel = int(ev["d2"])
-            used_patch_ids.add(channel)
 
             if msg_type == 0x90 and vel > 0:
                 song_events.append(
                     {
                         "time_ms": time_ms,
                         "etype": "note_on",
-                        "patch_orig": channel,
+                        "patch_idx": channel,
                         "note_number": note,
                         "velocity": vel,
                     }
@@ -391,7 +388,7 @@ def build_song_model(
                     {
                         "time_ms": time_ms,
                         "etype": "note_off",
-                        "patch_orig": channel,
+                        "patch_idx": channel,
                         "note_number": note,
                     }
                 )
@@ -421,21 +418,23 @@ def build_song_model(
                     }
                 )
 
-    orig_patch_ids = sorted(used_patch_ids)
-    patch_map = {orig: i for i, orig in enumerate(orig_patch_ids)}
+    # Preserve original MIDI channel identity (0-15) instead of compact-remapping
+    # to avoid pruning channels that have no note activity in a given export.
+    orig_patch_ids = set(range(16))
+    # Also retain explicitly authored SysEx patch definitions above MIDI channel range,
+    # bounded by synth capacity to keep generated assets valid at runtime.
+    for patch_idx in patch_defs_by_orig.keys():
+        if 0 <= int(patch_idx) < 32:
+            orig_patch_ids.add(int(patch_idx))
 
     patch_defs_local: List[Dict[str, object]] = []
-    for orig in orig_patch_ids:
+    for orig in sorted(orig_patch_ids):
         parsed = patch_defs_by_orig.get(orig)
         if parsed is None:
             ops = default_patch_ops()
         else:
             ops = list(parsed["ops"])
-        patch_defs_local.append({"local_idx": patch_map[orig], "ops": ops})
-
-    for ev in song_events:
-        if "patch_orig" in ev:
-            ev["patch_idx"] = patch_map[int(ev["patch_orig"])]
+        patch_defs_local.append({"local_idx": orig, "ops": ops})
 
     order = {
         "note_off": 0,
