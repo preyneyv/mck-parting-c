@@ -92,7 +92,20 @@ enum
   TARGET_MORSE_LENGTH = 5,
   INITIAL_T = 100,
   DURATION_MS = 30000, // 30 seconds
+  MORSE_LED_EVENT_DOT_MS = 120,
+  MORSE_LED_EVENT_DASH_MS = 180,
+  MORSE_LED_EVENT_OK_MS = 180,
+  MORSE_LED_EVENT_ERR_MS = 220,
 };
+
+typedef enum
+{
+  MORSE_LED_EVENT_NONE = 0,
+  MORSE_LED_EVENT_DOT,
+  MORSE_LED_EVENT_DASH,
+  MORSE_LED_EVENT_OK,
+  MORSE_LED_EVENT_ERR,
+} morse_led_event_t;
 
 typedef struct
 {
@@ -116,6 +129,9 @@ typedef struct
   } stats;
 
   leaderboard_qrcode_t qr_code;
+
+  morse_led_event_t led_event;
+  uint32_t led_event_until_tick;
 } state_t;
 
 typedef struct
@@ -129,6 +145,12 @@ typedef struct
 } stats_t;
 
 static state_t *state;
+
+static void _set_led_event(morse_led_event_t event, uint32_t duration_ms)
+{
+  state->led_event = event;
+  state->led_event_until_tick = g_engine.tick + duration_ms;
+}
 
 static stats_t get_stats()
 {
@@ -300,6 +322,9 @@ static void tick_game()
       state->input_buffer[state->input_len] = '\0';
     }
 
+    _set_led_event(symbol == '-' ? MORSE_LED_EVENT_DASH : MORSE_LED_EVENT_DOT,
+                   symbol == '-' ? MORSE_LED_EVENT_DASH_MS : MORSE_LED_EVENT_DOT_MS);
+
     // check current letter match
     const char *target = state->target_morse[state->current_letter];
     size_t target_len = strlen(target);
@@ -322,11 +347,13 @@ static void tick_game()
       state->input_buffer[0] = '\0';
       // ideally play error sound
       state->stats.errors++;
+      _set_led_event(MORSE_LED_EVENT_ERR, MORSE_LED_EVENT_ERR_MS);
     }
     else if (state->input_len == target_len)
     {
       // letter matched
       state->stats.letters++;
+      _set_led_event(MORSE_LED_EVENT_OK, MORSE_LED_EVENT_OK_MS);
 
       state->current_letter++;
       state->input_len = 0;
@@ -616,6 +643,75 @@ static void frame_results()
   }
 }
 
+static void _set_both_leds(color_t color)
+{
+  g_engine.led_colors[LED_L] = color;
+  g_engine.led_colors[LED_R] = color;
+}
+
+static void _frame_leds()
+{
+  if (state->finished)
+  {
+    uint8_t b = 50 + (uint8_t)(70.f * (1.f + __builtin_sinf(g_engine.tick * 0.01f)) * 0.5f);
+    _set_both_leds(rgba(0, b, 0, 255));
+    return;
+  }
+
+  if (state->led_event != MORSE_LED_EVENT_NONE)
+  {
+    if (g_engine.tick >= state->led_event_until_tick)
+    {
+      state->led_event = MORSE_LED_EVENT_NONE;
+    }
+    else
+    {
+      switch (state->led_event)
+      {
+      case MORSE_LED_EVENT_DOT:
+        _set_both_leds(rgba(255, 255, 255, 255));
+        return;
+      case MORSE_LED_EVENT_DASH:
+        _set_both_leds(rgba(0, 180, 255, 255));
+        return;
+      case MORSE_LED_EVENT_OK:
+        _set_both_leds(rgba(0, 255, 0, 255));
+        return;
+      case MORSE_LED_EVENT_ERR:
+        _set_both_leds(rgba(255, 0, 0, 255));
+        return;
+      case MORSE_LED_EVENT_NONE:
+      default:
+        break;
+      }
+    }
+  }
+
+  if (BUTTON_PRESSED(BUTTON_RIGHT))
+  {
+    uint32_t dt = g_engine.tick - state->last_edge_tick;
+    bool dash = dt > 2 * state->T;
+    _set_both_leds(dash ? rgba(0, 120, 200, 255) : rgba(130, 130, 130, 255));
+    return;
+  }
+
+  stats_t stats = get_stats();
+  if (state->started && stats.remaining_s <= 5)
+  {
+    uint8_t b = 30 + (uint8_t)(120.f * (1.f + __builtin_sinf(g_engine.tick * 0.02f)) * 0.5f);
+    _set_both_leds(rgba(b, b / 3, 0, 255));
+    return;
+  }
+
+  if (!state->started)
+  {
+    _set_both_leds(rgba(0, 35, 35, 255));
+    return;
+  }
+
+  _set_both_leds(rgba(0, 20, 0, 255));
+}
+
 static void frame()
 {
   if (state->finished)
@@ -627,10 +723,7 @@ static void frame()
     frame_game();
   }
 
-  for (uint8_t i = 0; i < LED_COUNT; i++)
-  {
-    g_engine.led_colors[i] = (color_t){.hex = 0x00ff00};
-  }
+  _frame_leds();
 }
 
 static void leave()
