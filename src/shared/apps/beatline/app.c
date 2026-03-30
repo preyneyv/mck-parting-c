@@ -19,11 +19,13 @@ static beatline_state_t state;
 // Track Selection Screen
 // ============================================================
 
-#define SELECT_CARD_W 56
-#define SELECT_CARD_H 34
-#define SELECT_CARD_GAP 10
-#define SELECT_CARD_Y 11
+#define SELECT_CARD_W (DISP_WIDTH - 2)
+#define SELECT_CARD_H (DISP_HEIGHT - 2)
+#define SELECT_CARD_GAP 0
+#define SELECT_CARD_Y 1
 #define SELECT_STAR_W 5
+#define SELECT_HOLD_BOX_W 78
+#define SELECT_HOLD_BOX_H 11
 
 static const int16_t SELECT_SCROLL_MARGIN =
     (DISP_WIDTH - SELECT_CARD_W) / 2;
@@ -82,6 +84,38 @@ static void select_draw_stars(elm_t *parent, vec2_t pos, uint8_t filled,
     }
 }
 
+static void select_draw_centered_trimmed(u8g2_t *u8g2, int16_t y, const char *txt,
+                                         int16_t max_w)
+{
+    char buf[48];
+    size_t n = strlen(txt);
+    if (n >= sizeof(buf))
+        n = sizeof(buf) - 1;
+    memcpy(buf, txt, n);
+    buf[n] = '\0';
+
+    while (u8g2_GetStrWidth(u8g2, buf) > max_w && n > 0)
+    {
+        if (n > 3)
+        {
+            n--;
+            buf[n - 2] = '.';
+            buf[n - 1] = '.';
+            buf[n] = '.';
+            buf[n + 1] = '\0';
+        }
+        else
+        {
+            n--;
+            buf[n] = '\0';
+        }
+    }
+
+    uint16_t w = u8g2_GetStrWidth(u8g2, buf);
+    int16_t x = (DISP_WIDTH - (int16_t)w) / 2;
+    u8g2_DrawStr(u8g2, x, y, buf);
+}
+
 static void select_tick(void)
 {
     // handle hold-to-select
@@ -94,7 +128,7 @@ static void select_tick(void)
         {
             anim_cancel(&sel.fill_w, false);
             float eased = held * held * (3.f - 2.f * held); // smoothstep
-            sel.fill_w = (int32_t)(SELECT_CARD_W * eased);
+            sel.fill_w = (int32_t)((SELECT_HOLD_BOX_W - 2) * eased);
             sel.fill_btn = btn;
         }
         if (held >= 1.f)
@@ -138,70 +172,57 @@ static void select_frame(void)
     u8g2_t *u8g2 = platform_display_get_u8g2();
     elm_t root = elm_root(u8g2, VEC2_Z);
 
-    // title bar
     u8g2_SetDrawColor(u8g2, 1);
-    u8g2_SetFont(u8g2, u8g2_font_6x10_tf);
-    uint16_t tw = u8g2_GetStrWidth(u8g2, "BEATLINE");
-    elm_str(&root, vec2((DISP_WIDTH - tw) / 2, 8), "BEATLINE");
-
     char idx_buf[12];
     snprintf(idx_buf, sizeof(idx_buf), "%u/%u", (unsigned)(state.selected_track + 1),
              (unsigned)BEATLINE_TRACK_COUNT);
     u8g2_SetFont(u8g2, u8g2_font_5x7_tr);
-    elm_str(&root, vec2(DISP_WIDTH - u8g2_GetStrWidth(u8g2, idx_buf), 6), idx_buf);
+    elm_str(&root, vec2(DISP_WIDTH - u8g2_GetStrWidth(u8g2, idx_buf) - 2, 8), idx_buf);
 
-    // cards
-    for (uint8_t i = 0; i < BEATLINE_TRACK_COUNT; i++)
+    const beatline_chart_t *t = &beatline_tracks[state.selected_track];
+    int16_t card_x = 1;
+    int16_t card_y = SELECT_CARD_Y;
+
+    // Full-screen song panel.
+    u8g2_SetDrawColor(u8g2, 1);
+    u8g2_DrawRFrame(u8g2, card_x, card_y, SELECT_CARD_W, SELECT_CARD_H, 3);
+
+    // compact hold-to-start box near the bottom of the panel
+    int16_t hold_x = (DISP_WIDTH - SELECT_HOLD_BOX_W) / 2;
+    int16_t hold_y = DISP_HEIGHT - SELECT_HOLD_BOX_H - 4;
+    u8g2_DrawRFrame(u8g2, hold_x, hold_y, SELECT_HOLD_BOX_W, SELECT_HOLD_BOX_H, 2);
+
+    // hold fill
+    if (sel.fill_w > 0)
     {
-        int16_t card_x = (int16_t)(sel.scroll_offset + select_card_x(i));
-        int16_t card_y = SELECT_CARD_Y;
-        if (card_x < -SELECT_CARD_W - 6 || card_x > DISP_WIDTH + 6)
-            continue;
-
-        const beatline_chart_t *t = &beatline_tracks[i];
-
+        u8g2_SetDrawColor(u8g2, 2); // XOR
+        if (sel.fill_btn == BUTTON_RIGHT)
+            u8g2_DrawBox(u8g2, hold_x + SELECT_HOLD_BOX_W - 1 - sel.fill_w, hold_y + 1,
+                         sel.fill_w, SELECT_HOLD_BOX_H - 2);
+        else
+            u8g2_DrawBox(u8g2, hold_x + 1, hold_y + 1, sel.fill_w, SELECT_HOLD_BOX_H - 2);
         u8g2_SetDrawColor(u8g2, 1);
-        u8g2_DrawRFrame(u8g2, card_x, card_y, SELECT_CARD_W, SELECT_CARD_H, 3);
-
-        u8g2_SetFont(u8g2, u8g2_font_5x7_tr);
-        uint16_t title_w = u8g2_GetStrWidth(u8g2, t->title);
-        int16_t title_x = card_x + (SELECT_CARD_W - title_w) / 2;
-        if (title_x < card_x + 2)
-            title_x = card_x + 2;
-        u8g2_DrawStr(u8g2, title_x, card_y + 11, t->title);
-
-        char bpm_buf[12];
-        snprintf(bpm_buf, sizeof(bpm_buf), "%u BPM", t->bpm);
-        uint16_t bpm_w = u8g2_GetStrWidth(u8g2, bpm_buf);
-        u8g2_DrawStr(u8g2, card_x + (SELECT_CARD_W - bpm_w) / 2, card_y + 21, bpm_buf);
-
-        int16_t star_x = card_x + (SELECT_CARD_W - (5 * SELECT_STAR_W)) / 2;
-        select_draw_stars(&root, vec2(star_x, card_y + 25), t->difficulty, 5);
-
-        // selection indicator
-        if (i == state.selected_track)
-        {
-            // hold fill
-            if (sel.fill_w > 0)
-            {
-                u8g2_SetDrawColor(u8g2, 2); // XOR
-                if (sel.fill_btn == BUTTON_RIGHT)
-                    u8g2_DrawBox(u8g2, card_x + SELECT_CARD_W - sel.fill_w, card_y + 1,
-                                 sel.fill_w, SELECT_CARD_H - 2);
-                else
-                    u8g2_DrawBox(u8g2, card_x + 1, card_y + 1, sel.fill_w, SELECT_CARD_H - 2);
-            }
-        }
     }
 
-    u8g2_SetDrawColor(u8g2, 1);
-    u8g2_DrawRFrame(u8g2, sel.scroll_offset + sel.active_offset - 2, SELECT_CARD_Y - 2,
-                    SELECT_CARD_W + 4, SELECT_CARD_H + 4, 3);
+    // title + metadata
+    u8g2_SetFont(u8g2, u8g2_font_6x10_tf);
+    select_draw_centered_trimmed(u8g2, 20, t->title, DISP_WIDTH - 8);
+
+    char bpm_buf[16];
+    snprintf(bpm_buf, sizeof(bpm_buf), "%u BPM", t->bpm);
+    u8g2_SetFont(u8g2, u8g2_font_5x7_tr);
+    select_draw_centered_trimmed(u8g2, 33, bpm_buf, DISP_WIDTH - 8);
+
+    int16_t star_x = (DISP_WIDTH - (5 * SELECT_STAR_W)) / 2;
+    select_draw_stars(&root, vec2(star_x, 37), t->difficulty, 5);
+
+    u8g2_SetFont(u8g2, u8g2_font_4x6_tf);
+    select_draw_centered_trimmed(u8g2, hold_y + 8, "HOLD TO START", SELECT_HOLD_BOX_W - 6);
 
     // LED ramp during hold
     if (sel.fill_w > 0)
     {
-        float ratio = (float)sel.fill_w / (float)SELECT_CARD_W;
+        float ratio = (float)sel.fill_w / (float)(SELECT_HOLD_BOX_W - 2);
         uint8_t brightness = (uint8_t)(ratio * 255);
         if (sel.fill_btn == BUTTON_LEFT)
             g_engine.led_colors[LED_L] = rgba(brightness, brightness, brightness, 255);
