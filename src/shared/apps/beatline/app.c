@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <string.h>
+#include <math.h>
 
 #include <shared/anim.h>
 #include <shared/apps/apps.h>
@@ -277,6 +278,44 @@ static float scroll_px_per_tick(void)
     return state.chart->scroll_speed / 1000.f;
 }
 
+static float chart_quarter_ticks(const beatline_chart_t *chart)
+{
+    if (chart == NULL)
+        return 500.0f;
+
+    if (chart->song != NULL && chart->song->events != NULL)
+    {
+        const audio_song_event_t *events = chart->song->events;
+        uint32_t event_count = chart->song->event_count;
+
+        // Prefer the last tempo declared at time 0 for stable initial grid phase.
+        for (uint32_t i = 0; i < event_count; i++)
+        {
+            const audio_song_event_t *ev = &events[i];
+            if (ev->time_ms > 0)
+                break;
+            if (ev->type != AUDIO_SONG_EVENT_TEMPO)
+                continue;
+            if (ev->data.tempo.us_per_quarter == 0)
+                continue;
+
+            return (float)ev->data.tempo.us_per_quarter / 1000.0f;
+        }
+
+        if (chart->song->header != NULL && chart->song->header->bpm_q8 > 0)
+        {
+            float bpm = (float)chart->song->header->bpm_q8 / 256.0f;
+            if (bpm > 0.0f)
+                return 60000.0f / bpm;
+        }
+    }
+
+    if (chart->bpm > 0)
+        return 60000.0f / (float)chart->bpm;
+
+    return 500.0f;
+}
+
 #define NOTE_W 6
 #define NOTE_H 5
 #define NOTE_HOLD_H 4
@@ -329,16 +368,16 @@ static void play_draw_grid(elm_t *root)
     u8g2_t *u8g2 = root->u8g2;
     u8g2_SetDrawColor(u8g2, 1);
     float px_t = scroll_px_per_tick();
-    uint32_t game_t = beatline_game_time(&state);
-    uint32_t beat_ticks = (state.chart->bpm > 0) ? (60000u / state.chart->bpm) : 500u;
-    if (beat_ticks == 0)
-        beat_ticks = 1;
+    float game_t = (float)beatline_game_time(&state);
+    float beat_ticks = chart_quarter_ticks(state.chart);
+    if (beat_ticks < 1.0f)
+        beat_ticks = 1.0f;
 
-    float beat_px = (float)beat_ticks * px_t;
+    float beat_px = beat_ticks * px_t;
     if (beat_px < 6.0f)
         beat_px = 6.0f;
 
-    float frac = (float)(game_t % beat_ticks) / (float)beat_ticks;
+    float frac = fmodf(game_t, beat_ticks) / beat_ticks;
     float top_anchor = (float)BEATLINE_HIT_LINE_LEFT_X - frac * beat_px;
     float bot_anchor = (float)BEATLINE_HIT_LINE_RIGHT_X + frac * beat_px;
 

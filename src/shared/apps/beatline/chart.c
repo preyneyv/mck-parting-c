@@ -1,5 +1,6 @@
 #include "chart.h"
 #include "sounds/never_gonna.h"
+#include "sounds/golden.h"
 
 // Compile-time constant versions for static initializers
 #define Q1X15_C(f) ((q1x15)((int)((f) * 32767.0)))
@@ -223,6 +224,13 @@ const beatline_chart_t beatline_tracks[] = {
         .difficulty = 3,
         .bpm = 113,
         .song = &sound_never_gonna_song,
+        .scroll_speed = 70,
+    },
+    {
+        .title = "Golden",
+        .difficulty = 2,
+        .bpm = 120,
+        .song = &sound_golden_song,
         .scroll_speed = 70,
     }
     // {
