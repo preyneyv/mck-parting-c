@@ -260,12 +260,16 @@ static audio_song_event_action_t beatline_song_event_hook(
 
 // --- Helpers ---
 
-uint32_t beatline_game_time(const beatline_state_t *st)
+int32_t beatline_game_time_signed(const beatline_state_t *st)
 {
     if (st->game_start_tick == 0)
         return 0;
+    return (int32_t)(g_engine.tick - st->game_start_tick) + st->av_offset_ticks;
+}
 
-    int32_t t = (int32_t)(g_engine.tick - st->game_start_tick) + st->av_offset_ticks;
+uint32_t beatline_game_time(const beatline_state_t *st)
+{
+    int32_t t = beatline_game_time_signed(st);
     if (t < 0)
         return 0;
     return (uint32_t)t;
@@ -397,17 +401,32 @@ void beatline_game_select_track(beatline_state_t *st, int8_t track_idx,
 
 void beatline_game_start_countdown(beatline_state_t *st)
 {
-    st->screen = BEATLINE_SCREEN_COUNTDOWN;
-    st->countdown_beat = 3;
-
-    // beat interval in ticks
     beatline_song_timing_t timing = beatline_song_timing(st);
     uint32_t beat_interval = (uint32_t)(timing.beat_ticks + 0.5f);
     if (beat_interval == 0)
         beat_interval = 1;
+
+    // Set game_start_tick 4 beats in the future so notes pre-roll
+    // visibly during the count-in.
+    uint32_t count_in_ticks = 4 * beat_interval;
+    st->game_start_tick = g_engine.tick + count_in_ticks;
+    st->grid_offset = 0;
+
+    // Generate notes now so they appear scrolling during the count-in.
+    beatline_generate_notes_from_song(st);
+    memset(st->note_grades, BEATLINE_NOTE_UNJUDGED, sizeof(st->note_grades));
+    st->next_judge_idx = 0;
+    memset(st->hold_state, 0, sizeof(st->hold_state));
+
+    // Count-in state — beat number displayed as overlay on the play screen.
+    st->countdown_beat = 4;
     st->countdown_next_tick = g_engine.tick + beat_interval;
 
-    // init song player but don't start yet
+    // Show the play screen immediately so the player sees the notes scroll in.
+    st->screen = BEATLINE_SCREEN_PLAY;
+
+    // Init audio player with hook but don't start playback yet;
+    // beatline_game_start_play() triggers it when the count-in ends.
     audio_song_player_init(&st->song_player, &g_engine.synth);
     audio_song_player_set_hook(
         &st->song_player,
@@ -420,13 +439,7 @@ void beatline_game_start_countdown(beatline_state_t *st)
 
 void beatline_game_start_play(beatline_state_t *st)
 {
-    st->screen = BEATLINE_SCREEN_PLAY;
-    st->game_start_tick = g_engine.tick;
-    st->grid_offset = 0;
-    beatline_generate_notes_from_song(st);
-    memset(st->note_grades, BEATLINE_NOTE_UNJUDGED, sizeof(st->note_grades));
-    st->next_judge_idx = 0;
-    memset(st->hold_state, 0, sizeof(st->hold_state));
+    st->countdown_beat = 0;
 
     audio_song_player_play(
         &st->song_player,
@@ -618,8 +631,13 @@ static void process_holds(beatline_state_t *st)
 
 void beatline_game_tick(beatline_state_t *st)
 {
-    if (st->screen == BEATLINE_SCREEN_COUNTDOWN)
+    if (st->screen != BEATLINE_SCREEN_PLAY)
+        return;
+
+    // Count-in pre-roll: block input/judging until the 4 beats elapse.
+    if (st->countdown_beat > 0)
     {
+        audio_song_player_tick(&st->song_player, g_engine.tick);
         if (g_engine.tick >= st->countdown_next_tick)
         {
             st->countdown_beat--;
@@ -632,13 +650,10 @@ void beatline_game_tick(beatline_state_t *st)
             uint32_t beat_interval = (uint32_t)(timing.beat_ticks + 0.5f);
             if (beat_interval == 0)
                 beat_interval = 1;
-            st->countdown_next_tick = g_engine.tick + beat_interval;
+            st->countdown_next_tick += beat_interval;
         }
         return;
     }
-
-    if (st->screen != BEATLINE_SCREEN_PLAY)
-        return;
 
     // advance song
     audio_song_player_tick(&st->song_player, g_engine.tick);

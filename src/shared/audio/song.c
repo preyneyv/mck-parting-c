@@ -200,6 +200,18 @@ void audio_song_player_play(audio_song_player_t *player,
 
   song_apply_patches(player, song);
   song_seek_to_time(player, 0);
+
+  // Dispatch events at time_ms=0 immediately so the synth receives them
+  // before the first audio buffer is rendered. Without this, the 1ms gap
+  // between play() and the first non-zero-dt tick() means the audio ISR
+  // can generate a buffer before any NOTE_ON is queued, causing notes at
+  // the song start to be silently dropped.
+  while (player->next_event_idx < song->event_count &&
+         song->events[player->next_event_idx].time_ms == 0)
+  {
+    song_dispatch_event(player, &song->events[player->next_event_idx]);
+    player->next_event_idx++;
+  }
 }
 
 void audio_song_player_stop(audio_song_player_t *player, bool panic)

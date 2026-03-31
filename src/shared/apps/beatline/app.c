@@ -233,44 +233,6 @@ static void select_frame(void)
 }
 
 // ============================================================
-// Countdown Screen
-// ============================================================
-
-static void countdown_frame(void)
-{
-    u8g2_t *u8g2 = platform_display_get_u8g2();
-    elm_t root = elm_root(u8g2, VEC2_Z);
-
-    u8g2_SetDrawColor(u8g2, 1);
-
-    // track title at top
-    u8g2_SetFont(u8g2, u8g2_font_5x7_tr);
-    uint16_t tw = u8g2_GetStrWidth(u8g2, state.chart->title);
-    elm_str(&root, vec2((DISP_WIDTH - tw) / 2, 10), state.chart->title);
-
-    // big countdown number
-    char num[2] = {(char)('0' + state.countdown_beat), '\0'};
-    u8g2_SetFont(u8g2, u8g2_font_6x10_tf);
-    uint16_t nw = u8g2_GetStrWidth(u8g2, num);
-    elm_str(&root, vec2((DISP_WIDTH - nw) / 2, 40), num);
-
-    // LED flash on each beat transition
-    beatline_song_timing_t timing = beatline_song_timing(&state);
-    uint32_t beat_interval = (uint32_t)(timing.beat_ticks + 0.5f);
-    if (beat_interval == 0)
-        beat_interval = 1;
-    uint32_t since_beat = g_engine.tick -
-                          (state.countdown_next_tick - beat_interval);
-    if (since_beat < 100)
-    {
-        // flash — brighter on final beat
-        uint8_t bri = (state.countdown_beat == 1) ? 255 : 120;
-        g_engine.led_colors[LED_L] = rgba(bri, bri, bri, 255);
-        g_engine.led_colors[LED_R] = rgba(bri, bri, bri, 255);
-    }
-}
-
-// ============================================================
 // Gameplay Screen
 // ============================================================
 
@@ -286,6 +248,15 @@ static float chart_quarter_ticks(void)
     if (timing.quarter_ticks < 1.0f)
         return 1.0f;
     return timing.quarter_ticks;
+}
+
+// fmodf corrected to [0, b) — needed for negative game times during count-in.
+static float fmodf_pos(float a, float b)
+{
+    float r = fmodf(a, b);
+    if (r < 0.0f)
+        r += b;
+    return r;
 }
 
 #define NOTE_W 6
@@ -340,7 +311,7 @@ static void play_draw_grid(elm_t *root)
     u8g2_t *u8g2 = root->u8g2;
     u8g2_SetDrawColor(u8g2, 1);
     float px_t = scroll_px_per_tick();
-    float game_t = (float)beatline_game_time(&state);
+    float game_t = (float)beatline_game_time_signed(&state);
     float beat_ticks = chart_quarter_ticks();
     if (beat_ticks < 1.0f)
         beat_ticks = 1.0f;
@@ -349,7 +320,7 @@ static void play_draw_grid(elm_t *root)
     if (beat_px < 6.0f)
         beat_px = 6.0f;
 
-    float frac = fmodf(game_t, beat_ticks) / beat_ticks;
+    float frac = fmodf_pos(game_t, beat_ticks) / beat_ticks;
     float top_anchor = (float)BEATLINE_HIT_LINE_LEFT_X - frac * beat_px;
     float bot_anchor = (float)BEATLINE_HIT_LINE_RIGHT_X + frac * beat_px;
 
@@ -389,7 +360,7 @@ static void play_draw_grid(elm_t *root)
 static void play_draw_notes(elm_t *root)
 {
     u8g2_t *u8g2 = root->u8g2;
-    uint32_t game_time = beatline_game_time(&state);
+    int32_t game_time = beatline_game_time_signed(&state);
     float px_t = scroll_px_per_tick();
 
     for (uint16_t i = 0; i < state.generated_note_count; i++)
@@ -417,7 +388,7 @@ static void play_draw_notes(elm_t *root)
         }
 
         const beatline_note_t *n = &state.generated_notes[i];
-        int32_t time_remaining = (int32_t)n->hit_tick - (int32_t)game_time;
+        int32_t time_remaining = (int32_t)n->hit_tick - game_time;
         int32_t travel_px = (int32_t)(time_remaining * px_t);
 
         // compute note screen x
@@ -583,6 +554,30 @@ static void play_frame(void)
     play_draw_notes(&root);
     play_draw_feedback(&root);
     play_set_leds();
+
+    // Count-in overlay: show beat number (4→3→2→1) and flash LEDs.
+    if (state.countdown_beat > 0)
+    {
+        char num[2] = {(char)('0' + state.countdown_beat), '\0'};
+        u8g2_SetFont(u8g2, u8g2_font_6x10_tf);
+        u8g2_SetDrawColor(u8g2, 2); // XOR so the digit doesn't obscure notes
+        uint16_t nw = u8g2_GetStrWidth(u8g2, num);
+        u8g2_DrawStr(u8g2, (DISP_WIDTH - nw) / 2, BEATLINE_LANE_DIVIDER_Y + 5, num);
+        u8g2_SetDrawColor(u8g2, 1);
+
+        beatline_song_timing_t timing = beatline_song_timing(&state);
+        uint32_t beat_interval = (uint32_t)(timing.beat_ticks + 0.5f);
+        if (beat_interval == 0)
+            beat_interval = 1;
+        uint32_t since_beat = g_engine.tick - (state.countdown_next_tick - beat_interval);
+        if (since_beat < 100)
+        {
+            // Brighter flash on the last count-in beat.
+            uint8_t bri = (state.countdown_beat == 1) ? 255 : 120;
+            g_engine.led_colors[LED_L] = rgba(bri, bri, bri, 255);
+            g_engine.led_colors[LED_R] = rgba(bri, bri, bri, 255);
+        }
+    }
 }
 
 // ============================================================
@@ -670,9 +665,6 @@ static void frame(void)
     {
     case BEATLINE_SCREEN_SELECT:
         select_frame();
-        break;
-    case BEATLINE_SCREEN_COUNTDOWN:
-        countdown_frame();
         break;
     case BEATLINE_SCREEN_PLAY:
         play_frame();

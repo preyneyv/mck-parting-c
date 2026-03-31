@@ -62,7 +62,6 @@ typedef enum
 typedef enum
 {
     BEATLINE_SCREEN_SELECT,
-    BEATLINE_SCREEN_COUNTDOWN,
     BEATLINE_SCREEN_PLAY,
     BEATLINE_SCREEN_RESULTS,
 } beatline_screen_t;
@@ -161,6 +160,7 @@ void beatline_game_tick(beatline_state_t *st);
 void beatline_game_finish(beatline_state_t *st);
 
 // Query helpers
+int32_t beatline_game_time_signed(const beatline_state_t *st);
 uint32_t beatline_game_time(const beatline_state_t *st);
 beatline_song_timing_t beatline_song_timing(const beatline_state_t *st);
 beatline_rank_t beatline_game_rank(const beatline_state_t *st);

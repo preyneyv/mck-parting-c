@@ -218,6 +218,8 @@ local function collect_channel_events(ppqn)
           local idx = 1
           local ppqpos = 0
           local packlen = #packed
+          local take_evts = {}
+          local active_notes = {} -- [ch*128+note] = {ch=..., note=...}
 
           while idx <= packlen do
             local ok_unpack, offset, flags, msgbytes
@@ -249,7 +251,23 @@ local function collect_channel_events(ppqn)
                     outbytes = wrap_sysex_for_smf(msgbytes)
                   end
 
-                  evts[#evts + 1] = {
+                  -- Track active notes to detect missing note-offs at take end.
+                  local hi4 = band(b0, 0xF0)
+                  local ch = band(b0, 0x0F)
+                  if hi4 == 0x90 and #msgbytes >= 3 then
+                    local note = msgbytes:byte(2)
+                    local vel  = msgbytes:byte(3)
+                    if vel > 0 then
+                      active_notes[ch * 128 + note] = { ch = ch, note = note }
+                    else
+                      active_notes[ch * 128 + note] = nil
+                    end
+                  elseif hi4 == 0x80 and #msgbytes >= 2 then
+                    local note = msgbytes:byte(2)
+                    active_notes[ch * 128 + note] = nil
+                  end
+
+                  take_evts[#take_evts + 1] = {
                     tick = tick,
                     bytes = outbytes,
                     order = kind_and_order_for_bytes(outbytes),
@@ -257,6 +275,20 @@ local function collect_channel_events(ppqn)
                 end)
               end
             end
+          end
+
+          -- Mirror REAPER's behaviour: inject a note-off at item end for every
+          -- note that was turned on but never explicitly released within the take.
+          for _, info in pairs(active_notes) do
+            take_evts[#take_evts + 1] = {
+              tick = item_end_tick,
+              bytes = string.char(bor(0x80, info.ch), info.note, 0),
+              order = 11,
+            }
+          end
+
+          for _, ev in ipairs(take_evts) do
+            evts[#evts + 1] = ev
           end
         end
       end
