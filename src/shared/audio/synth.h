@@ -23,8 +23,24 @@
 
 #define AUDIO_SYNTH_VOICE_COUNT 12
 #define AUDIO_SYNTH_OPERATOR_COUNT 4
+
+// Sine LUT: quarter-wave, 256 entries. Phase bits 31=sign, 30=mirror, 29:22=key.
 #define AUDIO_SYNTH_LUT_RES 10
 #define AUDIO_SYNTH_LUT_SIZE (1 << AUDIO_SYNTH_LUT_RES)
+#define AUDIO_SYNTH_QUARTER_LUT_SIZE (AUDIO_SYNTH_LUT_SIZE >> 2)
+
+// Exp LUT: maps nlogq → linear Q1.15 amplitude.
+#define AUDIO_SYNTH_EXP_LUT_RES  10
+#define AUDIO_SYNTH_EXP_LUT_SIZE (1 << AUDIO_SYNTH_EXP_LUT_RES)
+
+// nlogq: negated log₂ amplitude, uint16_t.
+//   0       = amplitude 1.0  (loudest)
+//   65535   = silence        (NLOGQ_SILENCE)
+//   scale   = 4096 units per octave (per factor-of-2 in amplitude)
+// Combination: nlogq(a*b) = nlogq(a) + nlogq(b)  [saturating at NLOGQ_SILENCE]
+#define NLOGQ_SCALE   4096u
+#define NLOGQ_SILENCE ((uint16_t)65535u)
+
 #define AUDIO_SYNTH_MESSAGE_QUEUE_SIZE 64
 #define AUDIO_SYNTH_MAX_MESSAGES_PER_BUFFER 16
 #define AUDIO_SYNTH_PATCH_COUNT 32
@@ -132,17 +148,17 @@ static const audio_synth_patch_config_t audio_synth_patch_config_default =
 
 typedef struct audio_synth_env_state_stage_t
 {
-  uint32_t duration; // sample count in this stage
-  q1x31 d_level;     // change per sample in this stage
-  q1x31 level;       // target level for this stage
+  uint32_t duration;   // sample count in this stage (UINT32_MAX = sustain hold)
+  int32_t  d_nlog;     // nlogq change per sample (negative = louder, positive = quieter)
+  uint16_t nlog_level; // target nlogq for this stage
 } audio_synth_env_state_stage_t;
 
 typedef struct audio_synth_env_state_t
 {
-  q1x31 level;                             // current level
-  uint32_t evolution;                      // evolution in sample count
-  uint8_t stage;                           // current stage (0 = A, 1 = D, 2 = S, 3 = R)
-  audio_synth_env_state_stage_t stages[4]; // stages for A, D, 0, R
+  uint16_t nlog_level;                     // current nlogq level (0=peak, NLOGQ_SILENCE=silent)
+  uint32_t evolution;                      // samples elapsed in current stage
+  uint8_t stage;                           // current stage (0=A, 1=D, 2=S, 3=R, 4=done)
+  audio_synth_env_state_stage_t stages[4]; // stages for A, D, S, R
 } audio_synth_env_state_t;
 
 typedef struct audio_synth_operator_t
@@ -153,12 +169,11 @@ typedef struct audio_synth_operator_t
   uint32_t phase;              // wave phase
   uint32_t d_phase;            // wave increment (derived from freq and mult)
   audio_synth_env_state_t env; // envelope state
-  q1x15 level;                 // output level (after velocity)
+  uint16_t nlog_level;         // nlogq of (config.level * velocity); NLOGQ_SILENCE = silent
   bool active;                 // is this operator active?
 
   // todo: feedback
   // todo: waveform
-  // todo: note velocity (?)
 
   audio_synth_voice_t *voice;
 } audio_synth_operator_t;
