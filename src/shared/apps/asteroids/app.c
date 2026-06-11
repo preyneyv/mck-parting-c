@@ -17,6 +17,7 @@
 
 #include "sounds/bgm.h"
 #include "sounds/gameover.h"
+#include "sprites/icon.h"
 
 // --- Tunables ---
 static const float SHIP_RADIUS = 4.0f;
@@ -1357,6 +1358,7 @@ static void leave()
 
 app_t app_asteroids = {
     .name = "asteroids",
+    .icon = icon__0_bits,
     .enter = enter,
     .tick = tick,
     .frame = frame,

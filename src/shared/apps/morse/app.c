@@ -12,6 +12,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "sprites/icon.h"
+
 // top 200 english words (199 because i removed "I")
 // https://github.com/monkeytypegame/monkeytype/blob/10130d73481ce1277a13845c0b1810aa77d47c11/frontend/static/languages/english.json
 static const char *words[] = {
@@ -731,6 +733,7 @@ static void leave()
 
 app_t app_morse = {
     .name = "morse",
+    .icon = icon__0_bits,
     .enter = enter,
     .tick = tick,
     .frame = frame,

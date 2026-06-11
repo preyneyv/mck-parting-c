@@ -389,7 +389,6 @@ void beatline_game_select_track(beatline_state_t *st, int8_t track_idx,
     st->generated_duration_ticks = 0;
     st->game_start_tick = 0;
     st->av_offset_ticks = BEATLINE_DEFAULT_AV_OFFSET_TICKS;
-    st->both_pressed_since = 0;
     memset(st->grade_counts, 0, sizeof(st->grade_counts));
     memset(st->note_grades, BEATLINE_NOTE_UNJUDGED, sizeof(st->note_grades));
     memset(st->hold_state, 0, sizeof(st->hold_state));
@@ -677,19 +676,6 @@ void beatline_game_tick(beatline_state_t *st)
         {
             st->feedback[lane].until_tick = 0;
         }
-    }
-
-    // check hold-both-to-exit
-    if (BUTTON_PRESSED(BUTTON_LEFT) && BUTTON_PRESSED(BUTTON_RIGHT))
-    {
-        if (st->both_pressed_since == 0)
-            st->both_pressed_since = g_engine.tick;
-        else if (g_engine.tick - st->both_pressed_since >= 1500)
-            beatline_game_finish(st);
-    }
-    else
-    {
-        st->both_pressed_since = 0;
     }
 
     // check natural end

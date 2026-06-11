@@ -12,6 +12,8 @@
 #include <shared/utils/misc.h>
 #include <shared/utils/vec.h>
 
+#include "sprites/icon.h"
+
 #include "chart.h"
 #include "game.h"
 
@@ -634,11 +636,12 @@ static void results_frame(void)
     }
 
     bool pressed = false;
-    elm_btn(&root, vec2(126, 62), "NEW RUN?", ELM_ALIGN_BOTTOM_RIGHT, &pressed);
+    elm_btn(&root, vec2(126, 62), "MENU", ELM_ALIGN_BOTTOM_RIGHT, &pressed);
     if (pressed)
     {
         beatline_game_init(&state);
         select_enter();
+        return;
     }
 }
 
@@ -694,6 +697,7 @@ static void leave(void)
 
 app_t app_beatline = {
     .name = "beatline",
+    .icon = icon__0_bits,
     .enter = enter,
     .tick = tick,
     .frame = frame,

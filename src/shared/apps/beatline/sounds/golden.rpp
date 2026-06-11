@@ -1,4 +1,4 @@
-<REAPER_PROJECT 0.1 "7.36/win64" 1774988051
+<REAPER_PROJECT 0.1 "7.36/win64" 1780499534
   <NOTES 0 2
   >
   RIPPLE 0 0
@@ -19,7 +19,7 @@
   PANMODE 3
   PANLAWFLAGS 3
   CURSOR 0
-  ZOOM 79.95509824828849 0 0
+  ZOOM 10.28151570494185 0 0
   VZOOMEX 4.5999999 0
   USE_REC_CFG 0
   RECMODE 1
@@ -66,8 +66,8 @@
   GLOBAL_AUTO -1
   TEMPO 120 4 4 0
   PLAYRATE 1 0 0.25 4
-  SELECTION 14 14
-  SELECTION2 14 14
+  SELECTION 0 0
+  SELECTION2 0 0
   MASTERAUTOMODE 0
   MASTERTRACKHEIGHT 0 0
   MASTERPEAKCOL 16576
@@ -115,7 +115,7 @@
     BUSCOMP 0 0 0 0 0
     SHOWINMIX 1 0.6667 0.5 1 0.5 0 0 0
     FIXEDLANES 9 0 0 0 0
-    SEL 0
+    SEL 1
     REC 0 0 1 0 0 0 0 0
     VU 64
     MIDICTL -1 4
@@ -142,7 +142,7 @@
     BUSCOMP 0 0 0 0 0
     SHOWINMIX 1 0.6667 0.5 1 0.5 0 0 0
     FIXEDLANES 9 0 0 0 0
-    SEL 1
+    SEL 0
     REC 0 5088 1 0 0 0 0 0
     VU 64
     TRACKHEIGHT 0 0 0 0 0 0 0
@@ -175,7 +175,7 @@
       FADEIN 1 0 0 1 0 0 0
       FADEOUT 1 0 0 1 0 0 0
       MUTE 0 0
-      SEL 1
+      SEL 0
       IGUID {0BD4326D-F54D-4060-9B67-60F78BE71F95}
       IID 206
       NAME "02-prism patch sender MIDI 1-MIDI"
@@ -188,7 +188,9 @@
         HASDATA 1 960 QN
         CCINTERP 32
         POOLEDEVTS {0858883D-849B-4CBD-B2C3-D6B17E7F2335}
+        e 0 90 3d 7f
         E 3840 90 31 7f
+        e 0 80 3d 00
         E 3840 80 31 00
         E 0 90 3d 7f
         E 3840 80 3d 00
@@ -276,8 +278,8 @@
         E 320 80 41 00
         E 640 90 41 7f
         E 320 80 41 00
-        e 640 90 41 7f
-        e 320 80 41 00
+        E 640 90 41 7f
+        E 320 80 41 00
         E 117120 b0 7b 00
         CCINTERP 32
         CHASE_CC_TAKEOFFS 1
@@ -285,7 +287,7 @@
         IGNTEMPO 0 120 4 4
         SRCCOLOR 427
         VELLANE -1 100 0 0 1
-        CFGEDITVIEW 0 0.015121 44 18 0 -1 0 0 0 0.5
+        CFGEDITVIEW -3840 0.03642 60 18 0 -1 0 0 0 0.5
         KEYSNAP 0
         TRACKSEL 252
         EVTFILTER 0 -1 -1 -1 -1 0 0 0 0 -1 -1 -1 -1 0 -1 0 -1 -1
@@ -400,7 +402,7 @@
       DOCKED 0
       BYPASS 0 0 0
       <JS "prism synth" ""
-        2 0 0.091 0 1 87 0.776 87 1 0.467 1 1 582 0 58 0 0 0 116 0 1 29 1 0 0 0 0 1 0 - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+        2 0 0.091 0 1 87 0.776 87 1 0.695 1 1 582 0 58 0 0 0 116 0 1 29 1 0 0 0 0 1 0 - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
       >
       FLOATPOS 1378 585 505 695
       FXID {BE1FB2FB-F0AD-4121-B7FC-FD9AF314E79E}
@@ -3459,7 +3461,7 @@
       DOCKED 0
       BYPASS 0 0 0
       <JS "prism synth" ""
-        6 1 0.116 0 816 760 0 29 2 0.229 0 10 0 1 10 1 0.111 1 10 0 1 10 1 0.18 0 58 0 1 28 - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+        6 1 0.116 0 816 760 0 29 2 0.229 0 10 0 1 10 1 0.197 1 10 0 1 10 2 0.127 0 58 0 1 28 - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
       >
       FLOATPOS 553 654 505 695
       FXID {3F5A53A2-55A8-42B8-B6E7-2DFBF242DD1B}
@@ -4329,7 +4331,7 @@
         CCINTERP 32
         POOLEDEVTS {9F62B6E8-9B9B-49E1-86A3-12E5826F8581}
         E 0 90 1c 27
-        e 0 90 30 50
+        e 0 90 30 6b
         e 80 80 30 00
         E 40 80 1c 00
         E 840 90 1c 2c
@@ -4345,7 +4347,7 @@
         IGNTEMPO 0 120 4 4
         SRCCOLOR 84
         VELLANE -1 100 0 0 1
-        CFGEDITVIEW -3845.345708 0.02806 72 12 0 -1 0 0 0 0.5
+        CFGEDITVIEW -26746.253061 0.02806 72 12 0 -1 0 0 0 0.5
         KEYSNAP 0
         TRACKSEL 252
         EVTFILTER 0 -1 -1 -1 -1 0 0 0 0 -1 -1 -1 -1 0 -1 0 -1 -1

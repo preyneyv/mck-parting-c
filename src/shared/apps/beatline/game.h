@@ -144,9 +144,6 @@ typedef struct
 
     // background grid scroll offset (animated)
     int32_t grid_offset;
-
-    // hold-both-to-exit tracking
-    uint32_t both_pressed_since;
 } beatline_state_t;
 
 // --- API ---
