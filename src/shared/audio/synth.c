@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include <string.h>
 
+#include <platform/memory.h>
 #include <platform/sync.h>
 #include <platform/time.h>
 #include <shared/utils/q1x15.h>
@@ -13,9 +14,11 @@
 #include "synth.h"
 
 #define AUDIO_SYNTH_STOP_RELEASE_MS 5u
+#define AUDIO_SYNTH_DRAFT_BUFFER_SIZE 512u
 
 // put the sine LUT in Y scratch for core 1 prio
-__attribute__((section(".scratch_y"))) static q1x15 LUT_SINE[AUDIO_SYNTH_LUT_SIZE];
+static q1x15 PLATFORM_SCRATCH_Y("audio_synth") LUT_SINE[AUDIO_SYNTH_LUT_SIZE];
+static q1x15 PLATFORM_SCRATCH_X("audio_synth") draft_voice[AUDIO_SYNTH_DRAFT_BUFFER_SIZE];
 
 static inline uint32_t lut_key(uint32_t phase)
 {
@@ -68,6 +71,7 @@ void audio_synth_init(audio_synth_t *synth, float sample_rate,
     voice->note_number = -1;
     voice->patch_idx = 0;
     voice->on_at = PLATFORM_TIME_ZERO;
+    voice->active_op_mask = 0;
 
     for (int op_idx = 0; op_idx < AUDIO_SYNTH_OPERATOR_COUNT; op_idx++)
     {
@@ -157,12 +161,14 @@ static void audio_synth_operator_note_on(audio_synth_operator_t *op,
   op->active = true;
 }
 
-void audio_synth_voice_note_on(audio_synth_voice_t *voice, uint8_t patch_idx, uint8_t note_number,
-                               uint8_t velocity)
+void PLATFORM_TIME_CRITICAL_FUNC(audio_synth_voice_note_on)(
+    audio_synth_voice_t *voice, uint8_t patch_idx, uint8_t note_number,
+    uint8_t velocity)
 {
   voice->note_number = note_number;
   voice->patch_idx = patch_idx;
   voice->on_at = platform_now_us();
+  voice->active_op_mask = 0;
   audio_synth_patch_config_t *patch = &voice->synth->patches[patch_idx];
 
   q1x15 velocity_ratio = q1x15_mag(velocity, 190); // scale velocity down (actual cap is 127)
@@ -172,6 +178,8 @@ void audio_synth_voice_note_on(audio_synth_voice_t *voice, uint8_t patch_idx, ui
     audio_synth_operator_t *op = &voice->ops[op_idx];
     audio_synth_operator_set_config(op, patch->ops[op_idx]);
     audio_synth_operator_note_on(op, note_number, velocity_ratio);
+    if (op->level != Q1X15_ZERO && op->env.stage != 4)
+      voice->active_op_mask |= (uint8_t)(1u << op_idx);
   }
 }
 
@@ -244,6 +252,7 @@ static void audio_synth_operator_panic(audio_synth_operator_t *op)
 {
   op->level = Q1X15_ZERO;
   op->active = false;
+  op->env.stage = 4;
 }
 
 void audio_synth_voice_panic(audio_synth_voice_t *voice)
@@ -253,9 +262,11 @@ void audio_synth_voice_panic(audio_synth_voice_t *voice)
     audio_synth_operator_t *op = &voice->ops[op_idx];
     audio_synth_operator_panic(op);
   }
+  voice->active_op_mask = 0;
 }
 
-static q1x15 audio_synth_operator_update_env(audio_synth_operator_t *op)
+static q1x15 PLATFORM_TIME_CRITICAL_FUNC(audio_synth_operator_update_env)(
+    audio_synth_operator_t *op)
 {
   audio_synth_env_state_t *env = &op->env;
   if (env->stage == 4)
@@ -283,70 +294,83 @@ static q1x15 audio_synth_operator_update_env(audio_synth_operator_t *op)
     }
   }
 
-  return q1x15_mul(op->level, q1x31_to_q1x15(env->level));
+  return q1x15_mul(op->level, (q1x15)(env->level >> 16));
 }
 
-static inline q1x15
-audio_synth_operator_sample_additive(audio_synth_operator_t *op,
-                                     q1x15 previous)
+static void PLATFORM_TIME_CRITICAL_FUNC(audio_synth_operator_fill_buffer_active)(
+    audio_synth_operator_t *op, q1x15 *buffer, uint32_t buffer_size)
 {
-  q1x15 mult = audio_synth_operator_update_env(op);
-  q1x15 value = LUT_SINE[lut_key(op->phase)];
-  op->phase += op->d_phase;
-  return q1x15_add(previous, q1x15_mul(value, mult));
-}
-
-static inline q1x15
-audio_synth_operator_sample_freq_mod(audio_synth_operator_t *op,
-                                     q1x15 previous)
-{
-  q1x15 mult = audio_synth_operator_update_env(op);
-  q1x15 value = LUT_SINE[lut_key(op->phase)];
-  int mod = (int32_t)previous << 15;
-  op->phase += op->d_phase + mod;
-  return q1x15_mul(value, mult);
-}
-
-static void audio_synth_operator_fill_buffer(audio_synth_operator_t *op,
-                                             q1x15 *buffer,
-                                             uint32_t buffer_size)
-{
-  if (op->env.stage == 4 || op->level == Q1X15_ZERO)
-  {
-    if (op->config.mode == AUDIO_SYNTH_OP_MODE_FREQ_MOD)
-    {
-      // freq mod operator overwrites buffer, so we clear it if we skip
-      // work
-      memset(buffer, 0, buffer_size * sizeof(q1x15));
-    }
-    return;
-  }
+  uint32_t phase = op->phase;
+  uint32_t d_phase = op->d_phase;
 
   switch (op->config.mode)
   {
   case AUDIO_SYNTH_OP_MODE_ADDITIVE:
-    for (uint32_t i = 0; i < buffer_size; i++)
-      buffer[i] = audio_synth_operator_sample_additive(op, buffer[i]);
-    break;
-  case AUDIO_SYNTH_OP_MODE_FREQ_MOD:
-    for (uint32_t i = 0; i < buffer_size; i++)
-      buffer[i] = audio_synth_operator_sample_freq_mod(op, buffer[i]);
+  {
+    if (op->env.stage == 2)
+    {
+      op->env.level = op->env.stages[2].level;
+      q1x15 mult = q1x15_mul(op->level, (q1x15)(op->env.level >> 16));
+      for (uint32_t i = 0; i < buffer_size; i++)
+      {
+        q1x15 value = LUT_SINE[lut_key(phase)];
+        phase += d_phase;
+        buffer[i] = q1x15_add_unchecked(buffer[i], q1x15_mul(value, mult));
+      }
+    }
+    else
+    {
+      for (uint32_t i = 0; i < buffer_size; i++)
+      {
+        q1x15 mult = audio_synth_operator_update_env(op);
+        q1x15 value = LUT_SINE[lut_key(phase)];
+        phase += d_phase;
+        buffer[i] = q1x15_add_unchecked(buffer[i], q1x15_mul(value, mult));
+      }
+    }
     break;
   }
+  case AUDIO_SYNTH_OP_MODE_FREQ_MOD:
+  {
+    if (op->env.stage == 2)
+    {
+      op->env.level = op->env.stages[2].level;
+      q1x15 mult = q1x15_mul(op->level, (q1x15)(op->env.level >> 16));
+      for (uint32_t i = 0; i < buffer_size; i++)
+      {
+        q1x15 previous = buffer[i];
+        q1x15 value = LUT_SINE[lut_key(phase)];
+        int mod = (int32_t)previous << 15;
+        phase += d_phase + mod;
+        buffer[i] = q1x15_mul(value, mult);
+      }
+    }
+    else
+    {
+      for (uint32_t i = 0; i < buffer_size; i++)
+      {
+        q1x15 previous = buffer[i];
+        q1x15 mult = audio_synth_operator_update_env(op);
+        q1x15 value = LUT_SINE[lut_key(phase)];
+        int mod = (int32_t)previous << 15;
+        phase += d_phase + mod;
+        buffer[i] = q1x15_mul(value, mult);
+      }
+    }
+    break;
+  }
+  }
+
+  op->phase = phase;
 }
 
 static inline bool audio_synth_voice_is_silent(const audio_synth_voice_t *voice)
 {
-  for (int op_idx = 0; op_idx < AUDIO_SYNTH_OPERATOR_COUNT; op_idx++)
-  {
-    if (voice->ops[op_idx].env.stage != 4)
-      return false;
-  }
-  return true;
+  return voice->active_op_mask == 0;
 }
 
-void audio_synth_voice_fill_buffer(audio_synth_voice_t *voice, q1x15 *buffer,
-                                   uint32_t buffer_size)
+void PLATFORM_TIME_CRITICAL_FUNC(audio_synth_voice_fill_buffer)(
+    audio_synth_voice_t *voice, q1x15 *buffer, uint32_t buffer_size)
 {
   memset(buffer, 0, buffer_size * sizeof(q1x15));
 
@@ -356,16 +380,19 @@ void audio_synth_voice_fill_buffer(audio_synth_voice_t *voice, q1x15 *buffer,
 
   for (int op_idx = 0; op_idx < AUDIO_SYNTH_OPERATOR_COUNT; op_idx++)
   {
-    audio_synth_operator_fill_buffer(&voice->ops[op_idx], buffer, buffer_size);
-  }
-}
+    audio_synth_operator_t *op = &voice->ops[op_idx];
+    uint8_t op_bit = (uint8_t)(1u << op_idx);
 
-static inline void _merge_drafts(q1x15 *out, q1x15 *in, uint32_t buffer_size)
-{
-  // add draft to the buffer (hard clip at 1.0/-1.0)
-  for (uint32_t i = 0; i < buffer_size; i++)
-  {
-    out[i] = q1x15_add(out[i], in[i]);
+    if (!(voice->active_op_mask & op_bit))
+    {
+      if (op->config.mode == AUDIO_SYNTH_OP_MODE_FREQ_MOD)
+        memset(buffer, 0, buffer_size * sizeof(q1x15));
+      continue;
+    }
+
+    audio_synth_operator_fill_buffer_active(op, buffer, buffer_size);
+    if (op->env.stage == 4 || op->level == Q1X15_ZERO)
+      voice->active_op_mask &= (uint8_t)~op_bit;
   }
 }
 
@@ -374,8 +401,8 @@ static inline q1x15 hard_limit_q17x15(int32_t x_q17_15)
   return q1x15_clamp_s32(x_q17_15);
 }
 
-void audio_synth_fill_buffer(audio_synth_t *synth, audio_buffer_t buffer,
-                             uint32_t buffer_size)
+void PLATFORM_TIME_CRITICAL_FUNC(audio_synth_fill_buffer)(
+    audio_synth_t *synth, audio_buffer_t buffer, uint32_t buffer_size)
 {
   // lock the config
   platform_mutex_lock(synth->mutex);
@@ -389,20 +416,7 @@ void audio_synth_fill_buffer(audio_synth_t *synth, audio_buffer_t buffer,
     messages_processed++;
   }
 
-  static q1x15 *draft_voice = NULL;
-  static uint32_t draft_size = 0;
-  if (draft_size < buffer_size)
-  {
-    if (draft_voice == NULL)
-    {
-      draft_voice = malloc(buffer_size * sizeof(q1x15));
-    }
-    else
-    {
-      draft_voice = realloc(draft_voice, buffer_size * sizeof(q1x15));
-    }
-    draft_size = buffer_size;
-  }
+  assert(buffer_size <= AUDIO_SYNTH_DRAFT_BUFFER_SIZE);
 
   // misuse 32bit buffer as a 16bit mono buffer with room for overflow (so we
   // can clip later)
@@ -594,10 +608,13 @@ void audio_synth_reset_voices(audio_synth_t *synth)
   for (int voice_idx = 0; voice_idx < AUDIO_SYNTH_VOICE_COUNT; voice_idx++)
   {
     audio_synth_voice_t *voice = &synth->voices[voice_idx];
+    voice->active_op_mask = 0;
+    voice->note_number = -1;
     for (int op_idx = 0; op_idx < AUDIO_SYNTH_OPERATOR_COUNT; op_idx++)
     {
       audio_synth_operator_set_config(&voice->ops[op_idx],
                                       audio_synth_operator_config_default);
+      audio_synth_operator_panic(&voice->ops[op_idx]);
     }
   }
 }

@@ -166,6 +166,7 @@ typedef struct audio_synth_operator_t
 typedef struct audio_synth_voice_t
 {
   audio_synth_operator_t ops[AUDIO_SYNTH_OPERATOR_COUNT];
+  uint8_t active_op_mask;
 
   int8_t note_number;    // active midi note. -1 = none
   platform_time_t on_at; // time when note was turned on
@@ -227,6 +228,8 @@ void audio_synth_enqueue(audio_synth_t *synth, audio_synth_message_t *msg);
 // fill a buffer with samples from the synthesizer
 void audio_synth_fill_buffer(audio_synth_t *synth, audio_buffer_t buffer,
                              uint32_t buffer_size);
+
+
 // set a patch configuration
 void audio_synth_patch_config_set(audio_synth_t *synth, uint8_t patch_idx,
                                   audio_synth_patch_config_t config);

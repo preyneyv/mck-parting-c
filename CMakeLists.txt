@@ -72,6 +72,7 @@ target_link_libraries(shared PUBLIC
     u8g2
     qrcodegen
     m
+    pico_platform
 )
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake")
