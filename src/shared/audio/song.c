@@ -189,7 +189,10 @@ void audio_song_player_play(audio_song_player_t *player,
     return;
   }
 
-  audio_song_player_stop(player, true);
+  // A fresh player has no playback state to clean up. Avoid placing a PANIC
+  // ahead of the new song's time-zero events in that case.
+  if (player->song != NULL)
+    audio_song_player_stop(player, true);
 
   player->song = song;
   player->playing = true;

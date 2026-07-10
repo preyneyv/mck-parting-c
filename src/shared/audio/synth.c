@@ -462,13 +462,9 @@ void PLATFORM_TIME_CRITICAL_FUNC(audio_synth_fill_buffer)(
 
 void audio_synth_panic(audio_synth_t *synth)
 {
-  // remove all pending messages from the queue
-  audio_synth_message_t msg;
-  while (platform_queue_try_pop(synth->msg_queue, &msg))
-  {
-    // do nothing, just dequeue
-  }
-
+  // PANIC is an ordered queue barrier. Messages before it belong to the old
+  // playback session; messages after it may already belong to a newly-started
+  // song and must not be discarded.
   for (int voice_idx = 0; voice_idx < AUDIO_SYNTH_VOICE_COUNT; voice_idx++)
   {
     audio_synth_voice_panic(&synth->voices[voice_idx]);
