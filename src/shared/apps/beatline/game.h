@@ -160,6 +160,7 @@ void beatline_game_finish(beatline_state_t *st);
 int32_t beatline_game_time_signed(const beatline_state_t *st);
 uint32_t beatline_game_time(const beatline_state_t *st);
 beatline_song_timing_t beatline_song_timing(const beatline_state_t *st);
+beatline_song_timing_t beatline_song_timing_from_asset(const audio_song_asset_t *song);
 beatline_rank_t beatline_game_rank(const beatline_state_t *st);
 const char *beatline_grade_str(beatline_grade_t grade);
 const char *beatline_rank_str(beatline_rank_t rank);

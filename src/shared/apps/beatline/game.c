@@ -14,7 +14,7 @@
 #define BEATLINE_NOTE_C4 60
 #define BEATLINE_NOTE_CS4 61
 
-static beatline_song_timing_t beatline_song_timing_from_asset(const audio_song_asset_t *song)
+beatline_song_timing_t beatline_song_timing_from_asset(const audio_song_asset_t *song)
 {
     beatline_song_timing_t timing = {
         .quarter_ticks = 500.0f,

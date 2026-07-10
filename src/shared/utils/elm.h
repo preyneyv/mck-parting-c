@@ -303,3 +303,40 @@ static inline elm_t elm_btn(elm_t *parent, vec2_t pos, const char *label, elm_al
 
   return child;
 }
+
+// Fixed-width button driven by one physical input. Useful for layouts where
+// the screen is spatially paired with the device's left and right buttons.
+static inline elm_t elm_btn_input(elm_t *parent, vec2_t pos, uint16_t width,
+                                  const char *label, elm_align_t align,
+                                  button_id_t button, bool *pressed)
+{
+  const uint8_t padding = 3;
+  const uint16_t height = 8 + padding * 2;
+  u8g2_t *u8g2 = parent->u8g2;
+
+  u8g2_SetDrawColor(u8g2, 1);
+  u8g2_SetFont(u8g2, u8g2_font_5x7_mr);
+
+  elm_t child = elm_child_aligned(parent, pos, width, height, align);
+  elm_rounded_frame(&child, vec2(0, 0), width, height, 3);
+
+  uint16_t label_width = u8g2_GetStrWidth(u8g2, label);
+  elm_str(&child, vec2((width - label_width) / 2, 7 + padding), label);
+
+  float ratio = engine_button_held_ratio(button);
+  if (ratio > 0.f)
+  {
+    float draw_ratio = ease_out_cubic(ratio);
+    uint16_t fill_width = (uint16_t)((width - 1) * draw_ratio);
+    u8g2_SetDrawColor(u8g2, 2);
+    if (button == BUTTON_RIGHT)
+      elm_box(&child, vec2(width - 1 - fill_width, 1), fill_width, height - 2);
+    else
+      elm_box(&child, vec2(1, 1), fill_width, height - 2);
+  }
+
+  if (pressed != NULL)
+    *pressed = ratio >= 1.f;
+
+  return child;
+}

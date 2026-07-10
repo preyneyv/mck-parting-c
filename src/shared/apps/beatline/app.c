@@ -23,12 +23,11 @@ static beatline_state_t state;
 // Track Selection Screen
 // ============================================================
 
-#define SELECT_CARD_W (DISP_WIDTH - 2)
-#define SELECT_CARD_H (DISP_HEIGHT - 2)
-#define SELECT_CARD_GAP 0
+#define SELECT_CARD_W 112
+#define SELECT_CARD_H 47
+#define SELECT_CARD_GAP 4
 #define SELECT_CARD_Y 1
-#define SELECT_HOLD_BOX_W 78
-#define SELECT_HOLD_BOX_H 11
+#define SELECT_HOLD_BOX_W 57
 
 static const int16_t SELECT_SCROLL_MARGIN =
     (DISP_WIDTH - SELECT_CARD_W) / 2;
@@ -70,7 +69,8 @@ static void select_enter(void)
     select_retarget(true);
 }
 
-static void select_draw_centered_trimmed(u8g2_t *u8g2, int16_t y, const char *txt,
+static void select_draw_centered_trimmed(u8g2_t *u8g2, int16_t center_x,
+                                         int16_t y, const char *txt,
                                          int16_t max_w)
 {
     char buf[48];
@@ -98,7 +98,7 @@ static void select_draw_centered_trimmed(u8g2_t *u8g2, int16_t y, const char *tx
     }
 
     uint16_t w = u8g2_GetStrWidth(u8g2, buf);
-    int16_t x = (DISP_WIDTH - (int16_t)w) / 2;
+    int16_t x = center_x - (int16_t)w / 2;
     u8g2_DrawStr(u8g2, x, y, buf);
 }
 
@@ -161,67 +161,69 @@ static void select_frame(void)
     elm_t root = elm_root(u8g2, VEC2_Z);
 
     u8g2_SetDrawColor(u8g2, 1);
-    char idx_buf[12];
-    snprintf(idx_buf, sizeof(idx_buf), "%u/%u", (unsigned)(state.selected_track + 1),
-             (unsigned)BEATLINE_TRACK_COUNT);
-    u8g2_SetFont(u8g2, u8g2_font_5x7_tr);
-    elm_str(&root, vec2(DISP_WIDTH - u8g2_GetStrWidth(u8g2, idx_buf) - 2, 8), idx_buf);
 
-    const beatline_chart_t *t = &beatline_tracks[state.selected_track];
-    int16_t card_x = 1;
-    int16_t card_y = SELECT_CARD_Y;
-
-    // Full-screen song panel.
-    u8g2_SetDrawColor(u8g2, 1);
-    u8g2_DrawRFrame(u8g2, card_x, card_y, SELECT_CARD_W, SELECT_CARD_H, 3);
-
-    // compact hold-to-start box near the bottom of the panel
-    int16_t hold_x = (DISP_WIDTH - SELECT_HOLD_BOX_W) / 2;
-    int16_t hold_y = DISP_HEIGHT - SELECT_HOLD_BOX_H - 4;
-    u8g2_DrawRFrame(u8g2, hold_x, hold_y, SELECT_HOLD_BOX_W, SELECT_HOLD_BOX_H, 2);
-
-    // hold fill
-    if (sel.fill_w > 0)
+    // Song cards move as a carousel, matching the launcher interaction.
+    for (uint8_t i = 0; i < BEATLINE_TRACK_COUNT; i++)
     {
-        u8g2_SetDrawColor(u8g2, 2); // XOR
-        if (sel.fill_btn == BUTTON_RIGHT)
-            u8g2_DrawBox(u8g2, hold_x + SELECT_HOLD_BOX_W - 1 - sel.fill_w, hold_y + 1,
-                         sel.fill_w, SELECT_HOLD_BOX_H - 2);
-        else
-            u8g2_DrawBox(u8g2, hold_x + 1, hold_y + 1, sel.fill_w, SELECT_HOLD_BOX_H - 2);
+        const beatline_chart_t *track = &beatline_tracks[i];
+        int16_t card_x = (int16_t)(sel.scroll_offset + select_card_x(i));
+        int16_t center_x = card_x + SELECT_CARD_W / 2;
+        elm_t card = elm_child(&root, vec2(card_x, SELECT_CARD_Y));
+
         u8g2_SetDrawColor(u8g2, 1);
-    }
+        elm_rounded_frame(&card, VEC2_Z, SELECT_CARD_W, SELECT_CARD_H, 3);
+        u8g2_SetFont(u8g2, u8g2_font_6x10_tf);
+        elm_str(&card, vec2(6, 27), "<");
+        elm_str(&card, vec2(SELECT_CARD_W - 12, 27), ">");
 
-    // title + metadata
-    u8g2_SetFont(u8g2, u8g2_font_6x10_tf);
-    select_draw_centered_trimmed(u8g2, 20, t->title, DISP_WIDTH - 8);
+        u8g2_SetFont(u8g2, u8g2_font_6x10_tf);
+        select_draw_centered_trimmed(u8g2, center_x, 17, track->title,
+                                     SELECT_CARD_W - 28);
 
-    beatline_song_timing_t timing = beatline_song_timing(&state);
-    uint32_t bpm = (timing.bpm_q8 + 128u) / 256u;
+        if (track->display_info != NULL)
+        {
+            u8g2_SetFont(u8g2, u8g2_font_5x7_tr);
+            select_draw_centered_trimmed(u8g2, center_x, 29,
+                                         track->display_info,
+                                         SELECT_CARD_W - 28);
+        }
 
-    char bpm_buf[20];
-    snprintf(bpm_buf, sizeof(bpm_buf), "%lu BPM", (unsigned long)bpm);
-    u8g2_SetFont(u8g2, u8g2_font_5x7_tr);
-    select_draw_centered_trimmed(u8g2, 33, bpm_buf, DISP_WIDTH - 8);
-
-    if (t->display_info != NULL)
-    {
+        beatline_song_timing_t timing =
+            beatline_song_timing_from_asset(track->song);
+        uint32_t bpm = (timing.bpm_q8 + 128u) / 256u;
+        char bpm_buf[20];
+        snprintf(bpm_buf, sizeof(bpm_buf), "%lu BPM", (unsigned long)bpm);
         u8g2_SetFont(u8g2, u8g2_font_4x6_tf);
-        select_draw_centered_trimmed(u8g2, 40, t->display_info, DISP_WIDTH - 8);
+        select_draw_centered_trimmed(u8g2, center_x, 40, bpm_buf,
+                                     SELECT_CARD_W - 16);
     }
 
-    u8g2_SetFont(u8g2, u8g2_font_4x6_tf);
-    if (sel.fill_w > 0)
-    {
-        const char *hold_txt =
-            (sel.fill_btn == BUTTON_RIGHT) ? "HOLD TO START: HARD" : "HOLD TO START: NORMAL";
-        select_draw_centered_trimmed(u8g2, hold_y + 8, hold_txt, SELECT_HOLD_BOX_W - 6);
-    }
-    else
-    {
-        select_draw_centered_trimmed(u8g2, hold_y + 8, "HOLD L:NORM R:HARD", SELECT_HOLD_BOX_W - 6);
-    }
+    // Two half-screen controls mirror the two physical buttons.
+    const uint16_t choice_w = (DISP_WIDTH - 3) / 2;
+    const uint16_t choice_h = 14;
+    elm_t normal_btn = elm_child_aligned(&root, vec2(0, DISP_HEIGHT),
+                                         choice_w, choice_h,
+                                         ELM_ALIGN_BOTTOM_LEFT);
+    elm_t hard_btn = elm_child_aligned(&root, vec2(DISP_WIDTH, DISP_HEIGHT),
+                                       choice_w, choice_h,
+                                       ELM_ALIGN_BOTTOM_RIGHT);
 
+    // Inset badges preserve the complete button outline while distinguishing
+    // the physical inputs from the difficulty labels. Draw them before the
+    // buttons so the native XOR hold fill also inverts the badges.
+    u8g2_SetDrawColor(u8g2, 1);
+    elm_rounded_box(&normal_btn, vec2(2, 2), 10, 10, 2);
+    elm_rounded_box(&hard_btn, vec2(choice_w - 12, 2), 10, 10, 2);
+    u8g2_SetDrawColor(u8g2, 0);
+    u8g2_SetFont(u8g2, u8g2_font_5x7_mr);
+    elm_str(&normal_btn, vec2(5, 10), "L");
+    elm_str(&hard_btn, vec2(choice_w - 9, 10), "R");
+    u8g2_SetDrawColor(u8g2, 1);
+
+    elm_btn_input(&root, vec2(0, DISP_HEIGHT), choice_w,
+                  "NORMAL", ELM_ALIGN_BOTTOM_LEFT, BUTTON_LEFT, NULL);
+    elm_btn_input(&root, vec2(DISP_WIDTH, DISP_HEIGHT), choice_w,
+                  "   HARD", ELM_ALIGN_BOTTOM_RIGHT, BUTTON_RIGHT, NULL);
     // LED ramp during hold
     if (sel.fill_w > 0)
     {
@@ -639,6 +641,8 @@ static void results_frame(void)
     elm_btn(&root, vec2(126, 62), "MENU", ELM_ALIGN_BOTTOM_RIGHT, &pressed);
     if (pressed)
     {
+        // Do not let the press that dismissed results become a hold-to-play.
+        engine_buttons_reset();
         beatline_game_init(&state);
         select_enter();
         return;
