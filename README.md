@@ -19,12 +19,14 @@ cmake -GNinja ..
 ninja
 ```
 
+This defaults to a `Release` build, enabling the compiler's optimized release flags. For a debug build, pass `-DCMAKE_BUILD_TYPE=Debug` when configuring.
+
 ### Host (macOS)
 
 ```sh
 mkdir build_host
 cd build_host
-cmake -GNinja -DPICO_PLATFORM=host ..
+cmake -GNinja -DPICO_PLATFORM=host -DCMAKE_BUILD_TYPE=Release ..
 ninja
 ```
 

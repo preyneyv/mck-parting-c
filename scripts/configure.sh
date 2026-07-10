@@ -8,10 +8,10 @@ cd ..
 # create build directory for device
 mkdir build
 cd build
-cmake -GNinja -DPICO_BOARD=none ..
+cmake -GNinja -DPICO_BOARD=none -DCMAKE_BUILD_TYPE=Release ..
 
 # create build directory for host
 cd ..
 mkdir build_host
 cd build_host
-cmake -GNinja -DPICO_BOARD=none -DPICO_PLATFORM=host ..
+cmake -GNinja -DPICO_BOARD=none -DPICO_PLATFORM=host -DCMAKE_BUILD_TYPE=Release ..
