@@ -23,7 +23,10 @@ static const uint32_t SM_CLKDIV_FRAC = (SYS_CLOCK_HZ % SM_BCLK) * 256 / SM_BCLK;
 // todo: stop clocking bclk / lrck when not playing audio for power saving
 
 // Shared state
-static const uint32_t SILENT_BUFFER[AUDIO_BUFFER_SIZE] = {0};
+/* DMA masters are not paused by multicore flash lockout. Keep the fallback
+ * source in SRAM so an audio underrun cannot make DMA touch XIP while core 0
+ * is erasing or programming cartridge flash. */
+static uint32_t SILENT_BUFFER[AUDIO_BUFFER_SIZE];
 static audio_buffer_pool_t pool;
 static int dma_channel;
 

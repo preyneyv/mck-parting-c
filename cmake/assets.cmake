@@ -1,36 +1,46 @@
-# Asset generation for apps
-# - Alias src/shared/apps/<app>/... to build/shared/apps/<app>/... for includes
+# Asset generation for cartridges
+# - Alias src/cartridges/<name>/... to build/cartridges/<name>/... for includes
 # - Convert .rpp files to .mid and .h files
 # - Convert .aseprite files to .h files
 
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
-find_package(Reaper)
-find_package(Aseprite)
+option(PRISM_ASSET_AUTHORING "Enable REAPER/Aseprite asset export targets" OFF)
 
-# src/shared/apps/<app>/... can include build/shared/apps/<app>/...
-foreach(SRC IN LISTS SHARED_SOURCES)
-    string(REGEX MATCH "^src/shared/apps/([^/]+)/" _ "${SRC}")
+# Host builds consume the generated headers committed alongside their source
+# assets. Launching GUI authoring tools during a simulator build is both
+# unnecessary and unreliable (especially REAPER's single-instance automation).
+if(PRISM_ASSET_AUTHORING AND NOT PICO_PLATFORM STREQUAL "host")
+    find_package(Reaper)
+    find_package(Aseprite)
+endif()
+
+# src/cartridges/<name>/... can include build/cartridges/<name>/...
+foreach(SRC IN LISTS CARTRIDGE_SOURCES)
+    string(REGEX MATCH "^src/cartridges/([^/]+)/" _ "${SRC}")
     if(CMAKE_MATCH_1)
         set(APP_NAME "${CMAKE_MATCH_1}")
         set_source_files_properties(${SRC} PROPERTIES
-            INCLUDE_DIRECTORIES "${CMAKE_CURRENT_BINARY_DIR}/shared/apps/${APP_NAME}"
+            INCLUDE_DIRECTORIES "${CMAKE_CURRENT_BINARY_DIR}/cartridges/${APP_NAME}"
         )
     endif()
 endforeach()
 
 
 # sound asset exports (.rpp -> .mid -> song .h)
-if(Reaper_FOUND)
+if(PRISM_ASSET_AUTHORING AND Reaper_FOUND)
     message(STATUS "REAPER found: ${REAPER_EXECUTABLE}")
+    # REAPER is effectively single-instance. Parallel exports can deadlock as
+    # several CLI processes contend for the same GUI instance.
+    set_property(GLOBAL APPEND PROPERTY JOB_POOLS reaper_export_pool=1)
 
     file(GLOB_RECURSE APP_RPP_FILES CONFIGURE_DEPENDS
-        "${CMAKE_CURRENT_SOURCE_DIR}/src/shared/apps/*/sounds/*.rpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/cartridges/*/sounds/*.rpp"
     )
     set(GENERATED_SOUND_HEADERS "")
 
     foreach(RPP IN LISTS APP_RPP_FILES)
         file(RELATIVE_PATH RPP_REL_APPS
-            "${CMAKE_CURRENT_SOURCE_DIR}/src/shared/apps"
+            "${CMAKE_CURRENT_SOURCE_DIR}/src/cartridges"
             "${RPP}"
         )
         string(REPLACE "\\" "/" RPP_REL_APPS "${RPP_REL_APPS}")
@@ -42,8 +52,8 @@ if(Reaper_FOUND)
 
         set(APP_NAME "${CMAKE_MATCH_1}")
         set(SOUND_REL_NOEXT "${CMAKE_MATCH_2}")
-        set(OUT_BASE "${CMAKE_CURRENT_SOURCE_DIR}/src/shared/apps/${APP_NAME}/sounds/${SOUND_REL_NOEXT}")
-        set(OUT_GEN_BASE "${CMAKE_CURRENT_BINARY_DIR}/shared/apps/${APP_NAME}/sounds/${SOUND_REL_NOEXT}")
+        set(OUT_BASE "${CMAKE_CURRENT_SOURCE_DIR}/src/cartridges/${APP_NAME}/sounds/${SOUND_REL_NOEXT}")
+        set(OUT_GEN_BASE "${CMAKE_CURRENT_BINARY_DIR}/cartridges/${APP_NAME}/sounds/${SOUND_REL_NOEXT}")
         set(OUT_HEADER "${OUT_BASE}.h")
         set(OUT_MID "${OUT_GEN_BASE}.mid")
 
@@ -55,7 +65,7 @@ if(Reaper_FOUND)
         get_filename_component(OUT_DIR "${OUT_BASE}" DIRECTORY)
 
         add_custom_command(
-            OUTPUT "${OUT_HEADER}" "${OUT_MID}"
+            OUTPUT "${OUT_HEADER}"
             COMMAND ${CMAKE_COMMAND} -E make_directory "${OUT_DIR}"
             COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_CURRENT_SOURCE_DIR}/scripts/rea_midi_export.py"
@@ -68,31 +78,33 @@ if(Reaper_FOUND)
             "${CMAKE_CURRENT_SOURCE_DIR}/scripts/rea_midi_export.py"
             "${CMAKE_CURRENT_SOURCE_DIR}/scripts/rea_midi_export.lua"
             VERBATIM
+            JOB_POOL reaper_export_pool
             COMMENT "Generate sound header from ${RPP_REL_APPS}"
         )
 
         list(APPEND GENERATED_SOUND_HEADERS "${OUT_HEADER}")
     endforeach()
 
-    add_custom_target(generate_sounds ALL DEPENDS ${GENERATED_SOUND_HEADERS})
-    add_dependencies(shared generate_sounds)
-else()
+    # Generated headers are committed. Regeneration is an explicit authoring
+    # action so ordinary firmware builds never launch REAPER unexpectedly.
+    add_custom_target(generate_sounds DEPENDS ${GENERATED_SOUND_HEADERS})
+elseif(PRISM_ASSET_AUTHORING AND NOT PICO_PLATFORM STREQUAL "host")
     message(WARNING "REAPER not found. Sound assets will not be generated.")
 endif()
 
 
 # sprite asset exports (.aseprite -> .h)
-if(Aseprite_FOUND)
+if(PRISM_ASSET_AUTHORING AND Aseprite_FOUND)
     message(STATUS "Aseprite found: ${ASEPRITE_EXECUTABLE}")
 
     file(GLOB_RECURSE APP_ASE_FILES CONFIGURE_DEPENDS
-        "${CMAKE_CURRENT_SOURCE_DIR}/src/shared/apps/*/sprites/*.aseprite"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/cartridges/*/sprites/*.aseprite"
     )
     set(GENERATED_SPRITE_HEADERS "")
 
     foreach(ASE IN LISTS APP_ASE_FILES)
         file(RELATIVE_PATH ASE_REL_APPS
-            "${CMAKE_CURRENT_SOURCE_DIR}/src/shared/apps"
+            "${CMAKE_CURRENT_SOURCE_DIR}/src/cartridges"
             "${ASE}"
         )
         string(REPLACE "\\" "/" ASE_REL_APPS "${ASE_REL_APPS}")
@@ -104,7 +116,7 @@ if(Aseprite_FOUND)
 
         set(APP_NAME "${CMAKE_MATCH_1}")
         set(SPRITE_REL_NOEXT "${CMAKE_MATCH_2}")
-        set(OUT_BASE "${CMAKE_CURRENT_SOURCE_DIR}/src/shared/apps/${APP_NAME}/sprites/${SPRITE_REL_NOEXT}")
+        set(OUT_BASE "${CMAKE_CURRENT_SOURCE_DIR}/src/cartridges/${APP_NAME}/sprites/${SPRITE_REL_NOEXT}")
         set(OUT_HEADER "${OUT_BASE}.h")
 
         add_custom_command(
@@ -123,8 +135,7 @@ if(Aseprite_FOUND)
         list(APPEND GENERATED_SPRITE_HEADERS "${OUT_HEADER}")
     endforeach()
 
-    add_custom_target(generate_sprites ALL DEPENDS ${GENERATED_SPRITE_HEADERS})
-    add_dependencies(shared generate_sprites)
-else()
+    add_custom_target(generate_sprites DEPENDS ${GENERATED_SPRITE_HEADERS})
+elseif(PRISM_ASSET_AUTHORING AND NOT PICO_PLATFORM STREQUAL "host")
     message(WARNING "Aseprite not found. Sprite assets will not be generated.")
 endif()

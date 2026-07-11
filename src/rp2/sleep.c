@@ -17,6 +17,7 @@
 #include <platform/time.h>
 
 #include "config.h"
+#include "management.h"
 
 static critical_section_t g_sleep_critical_section;
 static bool g_sleep_init = false;
@@ -136,27 +137,69 @@ static void platform_sleep_until_interrupt(void)
   critical_section_exit(&g_sleep_critical_section);
 }
 
-void platform_sleep_enter(void)
+static platform_input_mask_t first_button(platform_input_mask_t mask)
+{
+  if (mask & PLATFORM_INPUT_LEFT)
+    return PLATFORM_INPUT_LEFT;
+  if (mask & PLATFORM_INPUT_RIGHT)
+    return PLATFORM_INPUT_RIGHT;
+  if (mask & PLATFORM_INPUT_MENU)
+    return PLATFORM_INPUT_MENU;
+  return 0;
+}
+
+platform_wake_result_t platform_sleep_enter(uint32_t quick_wake_ms)
 {
   while (platform_input_read_mask() & (PLATFORM_INPUT_LEFT | PLATFORM_INPUT_RIGHT | PLATFORM_INPUT_MENU))
   {
     platform_task();
+    /* A remote button may be the input keeping this loop alive. Consume
+     * WebUSB releases here instead of waiting for the sleep loop below. */
+    management_sleep_task();
     platform_sleep_ms(5);
   }
 
   platform_peripheral_read_inputs();
   platform_power_state_t power = platform_peripheral_get_power_state();
 
+  /* Keep clocks running briefly after an automatic sleep. This gives an
+   * immediate "oops" press a cheap fast path and avoids needing an RTC to
+   * measure elapsed time while the RP2040 is dormant. */
+  platform_time_t quick_wake_until =
+      platform_now_us() + (platform_time_t)quick_wake_ms * 1000u;
+  while (quick_wake_ms != 0 && !platform_time_reached(quick_wake_until))
+  {
+    platform_task();
+    if (tud_midi_available() || tud_cdc_available() ||
+        management_sleep_task())
+      return (platform_wake_result_t){0};
+    platform_input_mask_t mask = platform_input_read_mask();
+    if (mask != 0)
+      return (platform_wake_result_t){
+          .confirmation_required = false,
+          .wake_button = first_button(mask),
+      };
+    platform_sleep_ms(5);
+  }
+  platform_peripheral_read_inputs();
+  power = platform_peripheral_get_power_state();
+
   if (power.plugged_in)
   {
     while (1)
     {
       platform_task();
+      if (tud_midi_available() || tud_cdc_available() ||
+          management_sleep_task())
+        return (platform_wake_result_t){0};
+
       platform_input_mask_t mask = platform_input_read_mask();
-      if (mask & (PLATFORM_INPUT_LEFT | PLATFORM_INPUT_RIGHT | PLATFORM_INPUT_MENU))
-      {
-        break;
-      }
+      if (mask & (PLATFORM_INPUT_LEFT | PLATFORM_INPUT_RIGHT |
+                  PLATFORM_INPUT_MENU))
+        return (platform_wake_result_t){
+            .confirmation_required = true,
+            .wake_button = first_button(mask),
+        };
 
       power = platform_peripheral_get_power_state();
       if (!power.plugged_in)
@@ -164,15 +207,20 @@ void platform_sleep_enter(void)
         break;
       }
 
-      if (tud_midi_available() || tud_cdc_available() || tud_vendor_available())
-      {
-        break;
-      }
-
+      /* MIDI and plaintext serial remain explicit wake sources. WebUSB is
+       * serviced in place so its heartbeat and mirror bookkeeping cannot
+       * produce a spurious wake cycle. */
       platform_sleep_ms(5);
     }
-    return;
+    return (platform_wake_result_t){0};
   }
 
   platform_sleep_until_interrupt();
+  platform_peripheral_read_inputs();
+  power = platform_peripheral_get_power_state();
+  platform_input_mask_t mask = platform_input_read_mask();
+  return (platform_wake_result_t){
+      .confirmation_required = !power.plugged_in && mask != 0,
+      .wake_button = first_button(mask),
+  };
 }

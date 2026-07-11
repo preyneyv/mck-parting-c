@@ -3,6 +3,7 @@
 #include <shared/engine.h>
 #include <shared/audio/synth.h>
 #include <shared/audio/midi.h>
+#include <shared/os/midi_mode.h>
 
 static void handle_sysex(uint8_t *data, int len)
 {
@@ -120,11 +121,18 @@ void midi_task(void)
 {
     uint8_t packet[4];
 
+    if (!tud_mounted())
+    {
+        prism_midi_mode_usb_disconnected();
+        sysex_len = 0;
+        return;
+    }
+
     while (tud_midi_available())
     {
         // printf("midi_task: checking for MIDI data...\n");
         tud_midi_packet_read(packet);
-        engine_mark_input();
+        prism_midi_mode_enter();
 
         uint8_t cin = packet[0] & 0x0F;
         uint8_t status = packet[1];

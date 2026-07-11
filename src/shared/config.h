@@ -28,3 +28,10 @@ static const uint32_t DISP_PIX = DISP_WIDTH * DISP_HEIGHT;
 //// POWER MANAGEMENT ////
 // Auto-sleep after this many milliseconds of no input.
 #define AUTO_SLEEP_TIMEOUT_MS 30000
+// Smoothly fade display and LED output during the final idle interval.
+#define AUTO_SLEEP_FADE_MS 3000
+
+/* Flash-safe multicore lockout may legitimately wait up to one second for the
+ * audio core. Storage loops feed the watchdog per sector/page, so this window
+ * catches real hangs without resetting during a valid lockout handshake. */
+#define WATCHDOG_TIMEOUT_MS 2500

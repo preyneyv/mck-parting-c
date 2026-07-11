@@ -26,23 +26,24 @@
     {
       "label": "rp2: bootsel",
       "type": "process",
-      "command": "${env:HOME}/.pico-sdk/picotool/2.1.1/picotool/picotool",
-      "args": ["reboot", "-f", "-u"],
+      "command": "pwsh",
+      "args": ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "${workspaceFolder}/scripts/bootsel.ps1"],
       "problemMatcher": [],
       "windows": {
-        "command": "${env:USERPROFILE}/.pico-sdk/picotool/2.1.1/picotool/picotool.exe"
+        "command": "powershell.exe"
       }
     },
     {
       "label": "rp2: run",
       "type": "process",
-      "command": "${env:HOME}/.pico-sdk/picotool/2.1.1/picotool/picotool",
+      "command": "${env:HOME}/.pico-sdk/picotool/2.2.0/picotool/picotool",
       "args": ["load", "${command:raspberry-pi-pico.launchTargetPath}", "-fx"],
       "problemMatcher": [],
       "windows": {
-        "command": "${env:USERPROFILE}/.pico-sdk/picotool/2.1.1/picotool/picotool.exe"
+        "command": "${env:USERPROFILE}/.pico-sdk/picotool/2.2.0/picotool/picotool.exe"
       },
-      "dependsOn": ["rp2: bootsel"],
+      "dependsOn": ["rp2: compile", "rp2: bootsel"],
+      "dependsOrder": "sequence",
       "group": {
         "kind": "build",
         "isDefault": true
@@ -73,6 +74,11 @@
       "group": "build",
       "command": "${userHome}/.pico-sdk/ninja/v1.12.1/ninja",
       "args": ["-C", "${workspaceFolder}/build_host"],
+      "options": {
+        "env": {
+          "Path": "C:\\msys64\\mingw64\\bin;${env:PATH}"
+        }
+      },
       "problemMatcher": "$gcc",
       "windows": {
         "command": "${env:USERPROFILE}/.pico-sdk/ninja/v1.12.1/ninja.exe"

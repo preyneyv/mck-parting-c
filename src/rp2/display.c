@@ -11,6 +11,7 @@ static struct
 {
   u8g2_t u8g2;
   bool enabled;
+  uint8_t contrast;
 } g_display;
 
 static uint8_t _byte_cb(u8x8_t *u8x8, uint8_t msg, uint8_t arg_int,
@@ -92,6 +93,7 @@ static uint8_t _gpio_and_delay_cb(u8x8_t *u8x8, uint8_t msg, uint8_t arg_int,
 
 void platform_display_init(void) {
   g_display.enabled = false;
+  g_display.contrast = 255;
 
   u8g2_t *u8g2 = &g_display.u8g2;
   u8g2_Setup_sh1107_64x128_f(u8g2, U8G2_R1, _byte_cb, _gpio_and_delay_cb);
@@ -115,7 +117,15 @@ static void display_on(void) {
   u8g2_ClearBuffer(u8g2);
   u8g2_SendBuffer(u8g2);
   u8g2_SetPowerSave(u8g2, 0);
-  u8g2_SetContrast(u8g2, 255);
+  u8g2_SetContrast(u8g2, g_display.contrast);
+}
+
+void platform_display_set_contrast(uint8_t contrast) {
+  if (g_display.contrast == contrast)
+    return;
+  g_display.contrast = contrast;
+  if (g_display.enabled)
+    u8g2_SetContrast(&g_display.u8g2, contrast);
 }
 
 static void display_off(void) {

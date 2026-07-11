@@ -2,6 +2,7 @@
 
 #include <stdint.h>
 #include <stdlib.h>
+#include <qrcodegen.h>
 
 #define LEADERBOARD_QR_VERSION 4
 #define LEADERBOARD_QR_SIZE (qrcodegen_BUFFER_LEN_FOR_VERSION(LEADERBOARD_QR_VERSION))

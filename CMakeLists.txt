@@ -50,7 +50,39 @@ endif()
 add_subdirectory(lib/u8g2)
 add_subdirectory(lib/qrcodegen)
 
-# --- shared lib ---
+# --- Prism cartridge SDK ---
+add_library(prism_cartridge_headers INTERFACE)
+target_include_directories(prism_cartridge_headers INTERFACE
+    ${CMAKE_CURRENT_LIST_DIR}/src
+    ${CMAKE_CURRENT_LIST_DIR}/lib/u8g2/csrc
+    ${CMAKE_CURRENT_LIST_DIR}/lib/qrcodegen
+)
+add_library(prism_sdk INTERFACE)
+target_link_libraries(prism_sdk INTERFACE prism_cartridge_headers)
+target_link_libraries(prism_sdk INTERFACE u8g2 qrcodegen m)
+
+# Cartridges are compiled as their own target. They are bundled into the
+# firmware today, but only consume the public Prism SDK boundary.
+set(CARTRIDGE_SOURCES
+    src/cartridges/_full_test/app.c
+    src/cartridges/dummy/app.c
+)
+if(PICO_PLATFORM STREQUAL "host")
+    list(APPEND CARTRIDGE_SOURCES
+        src/cartridges/bongocat/app.c
+        src/cartridges/morse/app.c
+        src/cartridges/asteroids/app.c
+        src/cartridges/beatline/app.c
+        src/cartridges/beatline/chart.c
+        src/cartridges/beatline/game.c
+    )
+endif()
+add_library(prism_cartridges OBJECT ${CARTRIDGE_SOURCES})
+target_link_libraries(prism_cartridges PRIVATE prism_sdk)
+include(${CMAKE_CURRENT_LIST_DIR}/cmake/cartridge_boundary.cmake)
+prism_check_cartridge_boundary(${CMAKE_CURRENT_LIST_DIR}/src/cartridges)
+
+# --- OS and shared runtime ---
 set(SHARED_SOURCES
     src/shared/audio/buffer.c
     src/shared/audio/synth.c
@@ -59,32 +91,31 @@ set(SHARED_SOURCES
     src/shared/leaderboard/leaderboard.c
     src/shared/anim.c
     src/shared/engine.c
-    src/shared/apps/_launcher/app.c
-    src/shared/apps/_full_test/app.c
-    src/shared/apps/bongocat/app.c
-    src/shared/apps/dummy/app.c
-    src/shared/apps/morse/app.c
-    # src/shared/apps/rhythm/app.c
-    # src/shared/apps/rhythm/tracker.c
-    src/shared/apps/asteroids/app.c
-    src/shared/apps/beatline/app.c
-    src/shared/apps/beatline/chart.c
-    src/shared/apps/beatline/game.c
+    src/shared/os/launcher/app.c
+    src/shared/os/cartridge_runtime.c
+    src/shared/os/cartridge_registry.c
+    src/shared/os/settings.c
+    src/shared/os/midi_mode.c
+    $<TARGET_OBJECTS:prism_cartridges>
 )
 add_library(shared STATIC ${SHARED_SOURCES})
 target_include_directories(shared PRIVATE ${CMAKE_CURRENT_LIST_DIR}/src)
 target_link_libraries(shared PUBLIC
+    prism_sdk
     u8g2
     qrcodegen
     m
-    pico_platform
 )
+if(NOT PICO_PLATFORM STREQUAL "host")
+    target_link_libraries(shared PUBLIC pico_platform)
+endif()
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake")
 include(${CMAKE_CURRENT_LIST_DIR}/cmake/assets.cmake)
 
 if(PICO_PLATFORM STREQUAL "host")
     # --- host build ---
+    target_compile_definitions(shared PUBLIC PICO_ON_DEVICE=0)
     add_executable(mck-parting-c
         src/host/main.c
         src/host/audio.c
@@ -96,6 +127,8 @@ if(PICO_PLATFORM STREQUAL "host")
         src/host/system.c
         src/host/identity.c
         src/host/peripheral.c
+        src/host/persistence.c
+        src/host/cartridge.c
         src/host/sleep.c
         src/host/sync.c
     )
@@ -108,32 +141,17 @@ if(PICO_PLATFORM STREQUAL "host")
     # target_compile_options(mck-parting-c PRIVATE -ffast-math)
 
     find_package(Threads REQUIRED)
-    find_package(SDL2 REQUIRED CONFIG REQUIRED COMPONENTS SDL2)
-
-    # Find libsoundio manually
-    find_path(SOUNDIO_INCLUDE_DIR
-        NAMES soundio/soundio.h
-        PATHS /opt/homebrew/include /usr/local/include
-    )
-    find_library(SOUNDIO_LIBRARY
-        NAMES soundio
-        PATHS /opt/homebrew/lib /usr/local/lib
-    )
-
-    if(NOT SOUNDIO_INCLUDE_DIR OR NOT SOUNDIO_LIBRARY)
-        message(FATAL_ERROR "libsoundio not found. Install with: brew install libsoundio")
-    endif()
+    # Link SDL statically so the host simulator is a clone-and-run executable.
+    find_package(SDL2 CONFIG REQUIRED)
 
     target_link_libraries(mck-parting-c PRIVATE
         shared
-        SDL2::SDL2
+        SDL2::SDL2-static
         Threads::Threads
-        ${SOUNDIO_LIBRARY}
-        pico_stdlib
     )
-    target_include_directories(mck-parting-c PRIVATE
-        ${SOUNDIO_INCLUDE_DIR}
-    )
+    if(MINGW)
+        target_link_options(mck-parting-c PRIVATE -static -static-libgcc)
+    endif()
 
 
 
@@ -156,6 +174,10 @@ else()
     add_executable(mck-parting-c
         src/rp2/main.c
         src/rp2/midi.c
+        src/rp2/management.c
+        src/rp2/cartridge_storage.c
+        src/rp2/cartridge.c
+        src/rp2/cartridge_call.S
         src/rp2/platform.c
         src/rp2/input.c
         src/rp2/sleep.c
@@ -165,13 +187,16 @@ else()
         src/rp2/display.c
         src/rp2/audio.c
         src/rp2/peripheral.c
+        src/rp2/persistence.c
         src/rp2/leds.c
         src/rp2/sync.c
         src/rp2/usb_descriptors.c
     )
 
     target_compile_definitions(mck-parting-c PUBLIC
-        PICO_STDIO_USB_ENABLE_RESET_VIA_VENDOR_INTERFACE=1
+        # The sole vendor-class interface belongs to Prism management. Picotool
+        # can still reboot through the CDC baud-rate convention.
+        PICO_STDIO_USB_ENABLE_RESET_VIA_VENDOR_INTERFACE=0
         PICO_STDIO_USB_ENABLE_RESET_VIA_BAUD_RATE=1
         PICO_STDIO_USB_ENABLE_IRQ_BACKGROUND_TASK=1
         PICO_STDIO_USB_ENABLE_TINYUSB_INIT=1
@@ -207,4 +232,82 @@ else()
     pico_set_program_name(mck-parting-c "mck-parting-c")
     pico_set_program_version(mck-parting-c "0.1")
     pico_add_extra_outputs(mck-parting-c)
+
+    # Keep one real installable package in the main build as an end-to-end SDK
+    # fixture.  The standalone hello repository uses this same CMake helper.
+    set(PRISM_SDK_ROOT ${CMAKE_CURRENT_LIST_DIR})
+    include(${CMAKE_CURRENT_LIST_DIR}/cmake/PrismCartridge.cmake)
+    prism_add_installable_cartridge(hello_cartridge
+        UUID "7e537f9b-9314-4e27-a0b1-219f48ff88d4"
+        ENTRY cartridge_hello
+        SOURCES
+            ${CMAKE_CURRENT_LIST_DIR}/examples/hello-cartridge/app.c
+        INCLUDE_DIRECTORIES
+            ${CMAKE_CURRENT_LIST_DIR}/examples/hello-cartridge
+        OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/hello.prism
+    )
+
+    prism_add_installable_cartridge(bongocat_cartridge
+        UUID "7af8d2af-50cb-4e4b-a203-5efa9bdd61e6"
+        ENTRY cartridge_bongocat
+        SOURCES
+            ${CMAKE_CURRENT_LIST_DIR}/src/cartridges/bongocat/app.c
+        INCLUDE_DIRECTORIES
+            ${CMAKE_CURRENT_LIST_DIR}/src/cartridges/bongocat
+        OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/bongocat.prism
+    )
+
+    prism_add_installable_cartridge(morse_cartridge
+        UUID "05650047-0614-4ff4-8d46-e34fc28b3fd9"
+        ENTRY cartridge_morse
+        SOURCES
+            ${CMAKE_CURRENT_LIST_DIR}/src/cartridges/morse/app.c
+        INCLUDE_DIRECTORIES
+            ${CMAKE_CURRENT_LIST_DIR}/src/cartridges/morse
+        OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/morse.prism
+    )
+
+    prism_add_installable_cartridge(asteroids_cartridge
+        UUID "43b03ee8-80f2-4e53-a8fe-e09a5cd04c75"
+        ENTRY cartridge_asteroids
+        SOURCES
+            ${CMAKE_CURRENT_LIST_DIR}/src/cartridges/asteroids/app.c
+        INCLUDE_DIRECTORIES
+            ${CMAKE_CURRENT_LIST_DIR}/src/cartridges/asteroids
+        OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/asteroids.prism
+    )
+
+    prism_add_installable_cartridge(beatline_cartridge
+        UUID "36ea78d2-ca5e-4bed-bd9b-c4e90dca4c26"
+        ENTRY cartridge_beatline
+        SOURCES
+            ${CMAKE_CURRENT_LIST_DIR}/src/cartridges/beatline/app.c
+            ${CMAKE_CURRENT_LIST_DIR}/src/cartridges/beatline/chart.c
+            ${CMAKE_CURRENT_LIST_DIR}/src/cartridges/beatline/game.c
+        INCLUDE_DIRECTORIES
+            ${CMAKE_CURRENT_LIST_DIR}/src/cartridges/beatline
+        OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/beatline.prism
+    )
+
+    set(DEFAULT_CARTRIDGE_ASM ${CMAKE_CURRENT_BINARY_DIR}/default_cartridges.S)
+    add_custom_command(
+        OUTPUT ${DEFAULT_CARTRIDGE_ASM}
+        COMMAND ${Python3_EXECUTABLE}
+                ${CMAKE_CURRENT_LIST_DIR}/scripts/embed_default_cartridges.py
+                --output ${DEFAULT_CARTRIDGE_ASM}
+                bongocat=${bongocat_cartridge_PRISM_FILE}
+                morse=${morse_cartridge_PRISM_FILE}
+                asteroids=${asteroids_cartridge_PRISM_FILE}
+                beatline=${beatline_cartridge_PRISM_FILE}
+        DEPENDS
+            ${bongocat_cartridge_PRISM_FILE}
+            ${morse_cartridge_PRISM_FILE}
+            ${asteroids_cartridge_PRISM_FILE}
+            ${beatline_cartridge_PRISM_FILE}
+            ${CMAKE_CURRENT_LIST_DIR}/scripts/embed_default_cartridges.py
+        VERBATIM
+        COMMENT "Embedding default Prism cartridges"
+    )
+    set_source_files_properties(${DEFAULT_CARTRIDGE_ASM} PROPERTIES GENERATED TRUE)
+    target_sources(mck-parting-c PRIVATE ${DEFAULT_CARTRIDGE_ASM})
 endif()

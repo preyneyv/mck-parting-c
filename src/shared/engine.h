@@ -73,6 +73,7 @@ typedef struct
   app_t *app;
 
   uint8_t volume;
+  uint8_t brightness;
 } engine_t;
 
 extern engine_t g_engine;
@@ -81,10 +82,16 @@ void engine_run_forever();
 void engine_set_app(app_t *app);
 void engine_buttons_reset(); // reset button state until next press
 void engine_enter_sleep();
+void engine_wake();
 void engine_pause(bool skip_animation);
 void engine_resume();
 void engine_set_volume(int8_t level);
 void engine_change_volume(int8_t direction);
+void engine_set_brightness(int8_t level);
+void engine_change_brightness(int8_t direction);
+uint8_t engine_brightness_scale(void);
+uint8_t engine_output_brightness_scale(void);
+color_t engine_led_output_color(uint8_t led);
 void engine_mark_input();
 
 static inline button_t *engine_button_from_id(button_id_t button_id)

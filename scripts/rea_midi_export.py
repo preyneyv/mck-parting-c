@@ -485,7 +485,7 @@ def emit_song_header(symbol: str, source_rpp: str, model: Dict[str, object]) -> 
         "",
         "#pragma once",
         "",
-        "#include <shared/audio/song.h>",
+        "#include <prism/audio.h>",
         "",
         f"static const audio_song_header_t {symbol}_header = {{",
         f"    .bpm_q8 = {int(model['bpm_q8'])}u,",

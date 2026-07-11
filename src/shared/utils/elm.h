@@ -6,7 +6,6 @@
 #include <u8g2.h>
 #include <qrcodegen.h>
 
-#include <shared/engine.h>
 #include <shared/utils/vec.h>
 #include <stdio.h>
 #include <shared/utils/misc.h>
@@ -253,7 +252,9 @@ static inline elm_t elm_qrcode(elm_t *parent, vec2_t pos,
   return child;
 }
 
-static inline elm_t elm_btn(elm_t *parent, vec2_t pos, const char *label, elm_align_t align, bool *pressed)
+static inline elm_t elm_btn(elm_t *parent, vec2_t pos, const char *label,
+                            elm_align_t align, float ratio_l, float ratio_r,
+                            bool *pressed)
 {
   const uint8_t padding = 3;
   u8g2_t *u8g2 = parent->u8g2;
@@ -269,8 +270,6 @@ static inline elm_t elm_btn(elm_t *parent, vec2_t pos, const char *label, elm_al
   elm_rounded_frame(&child, vec2(0, 0), width, height, 3);
   elm_str(&child, vec2(padding, 7 + padding), label);
 
-  float ratio_l = engine_button_held_ratio(BUTTON_LEFT);
-  float ratio_r = engine_button_held_ratio(BUTTON_RIGHT);
   float ratio;
   bool fill_from_right = false;
   if (ratio_l > ratio_r)
@@ -308,7 +307,8 @@ static inline elm_t elm_btn(elm_t *parent, vec2_t pos, const char *label, elm_al
 // the screen is spatially paired with the device's left and right buttons.
 static inline elm_t elm_btn_input(elm_t *parent, vec2_t pos, uint16_t width,
                                   const char *label, elm_align_t align,
-                                  button_id_t button, bool *pressed)
+                                  float ratio, bool fill_from_right,
+                                  bool *pressed)
 {
   const uint8_t padding = 3;
   const uint16_t height = 8 + padding * 2;
@@ -323,13 +323,12 @@ static inline elm_t elm_btn_input(elm_t *parent, vec2_t pos, uint16_t width,
   uint16_t label_width = u8g2_GetStrWidth(u8g2, label);
   elm_str(&child, vec2((width - label_width) / 2, 7 + padding), label);
 
-  float ratio = engine_button_held_ratio(button);
   if (ratio > 0.f)
   {
     float draw_ratio = ease_out_cubic(ratio);
     uint16_t fill_width = (uint16_t)((width - 1) * draw_ratio);
     u8g2_SetDrawColor(u8g2, 2);
-    if (button == BUTTON_RIGHT)
+    if (fill_from_right)
       elm_box(&child, vec2(width - 1 - fill_width, 1), fill_width, height - 2);
     else
       elm_box(&child, vec2(1, 1), fill_width, height - 2);

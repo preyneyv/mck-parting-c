@@ -176,6 +176,10 @@ void platform_display_set_enabled(bool enabled) {
   (void)enabled;
 }
 
+void platform_display_set_contrast(uint8_t contrast) {
+  (void)contrast;
+}
+
 u8g2_t *platform_display_get_u8g2(void) {
   return &g_u8g2;
 }

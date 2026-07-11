@@ -8,10 +8,20 @@
 #endif
 
 platform_time_t platform_now_us(void) {
+#ifdef _WIN32
+  static LARGE_INTEGER frequency;
+  LARGE_INTEGER counter;
+  if (frequency.QuadPart == 0)
+    QueryPerformanceFrequency(&frequency);
+  QueryPerformanceCounter(&counter);
+  return (platform_time_t)((counter.QuadPart * 1000000ULL) /
+                           frequency.QuadPart);
+#else
   struct timespec ts;
   timespec_get(&ts, TIME_UTC);
   return ((platform_time_t)ts.tv_sec * 1000000ULL) +
          ((platform_time_t)ts.tv_nsec / 1000ULL);
+#endif
 }
 
 void platform_sleep_us(uint32_t us) {
