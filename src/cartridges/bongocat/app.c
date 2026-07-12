@@ -29,9 +29,12 @@ static void enter(prism_t *prism)
 
 static void tick(prism_t *prism)
 {
-  if (prism_button_edge(prism, PRISM_BUTTON_LEFT))
+  static const uint8_t notes[] = {50, 57};
+  for (prism_button_t button = PRISM_BUTTON_LEFT;
+       button <= PRISM_BUTTON_RIGHT; ++button)
   {
-    if (prism_button_pressed(prism, PRISM_BUTTON_LEFT))
+    uint8_t note_number = notes[button - PRISM_BUTTON_LEFT];
+    if (prism_button_keydown(prism, button))
     {
       audio_synth_enqueue(prism_synth(prism),
                           &(audio_synth_message_t){
@@ -39,41 +42,20 @@ static void tick(prism_t *prism)
                               .data.note_on =
                                   {
                                       .patch_idx = 0,
-                                      .note_number = 50,
+                                      .note_number = note_number,
                                       .velocity = 100,
                                   },
                           });
     }
-    else
+    if (prism_button_keyup(prism, button))
     {
       audio_synth_enqueue(prism_synth(prism),
                           &(audio_synth_message_t){
                               .type = AUDIO_SYNTH_MESSAGE_NOTE_OFF,
-                              .data.note_off = {.patch_idx = 0, .note_number = 50},
-                          });
-    }
-  }
-  if (prism_button_edge(prism, PRISM_BUTTON_RIGHT))
-  {
-    if (prism_button_pressed(prism, PRISM_BUTTON_RIGHT))
-    {
-      audio_synth_enqueue(prism_synth(prism),
-                          &(audio_synth_message_t){
-                              .type = AUDIO_SYNTH_MESSAGE_NOTE_ON,
-                              .data.note_on =
-                                  {
-                                      .patch_idx = 0,
-                                      .note_number = 57,
-                                      .velocity = 100,
-                                  },
-                          });
-    }
-    else
-    {
-      audio_synth_enqueue(prism_synth(prism),
-                          &(audio_synth_message_t){
-                              .type = AUDIO_SYNTH_MESSAGE_NOTE_OFF,
-                              .data.note_off = {.patch_idx = 0, .note_number = 57},
+                              .data.note_off = {
+                                  .patch_idx = 0,
+                                  .note_number = note_number,
+                              },
                           });
     }
   }
@@ -85,7 +67,7 @@ static void frame(prism_t *prism)
   u8g2_SetDrawColor(u8g2, 1);
   bool left = prism_button_pressed(prism, PRISM_BUTTON_LEFT);
   bool right = prism_button_pressed(prism, PRISM_BUTTON_RIGHT);
-  bool breathe = (prism_ticks(prism) / 500) % 2;
+  bool breathe = (prism_millis(prism) / 500) % 2;
 
   const uint8_t *cat = cat_idle_0_bits;
   if (left && right)
@@ -107,5 +89,13 @@ static void frame(prism_t *prism)
   u8g2_DrawXBM(u8g2, 0, 0, 128, 64, cat);
 }
 
-PRISM_CARTRIDGE(cartridge_bongocat, 0, "bongocat", "bongocat", icon__0_bits,
-                PRISM_CARTRIDGE_FLAG_NONE, 0, enter, tick, frame, NULL, NULL, NULL);
+PRISM_CARTRIDGE(cartridge_bongocat,
+    .id = "dev.preyneyv.prism.bongocat",
+    .name = "bongocat",
+    .version = 1,
+    .tick_divider = 4,
+    .icon = icon__0_bits,
+    .enter = enter,
+    .tick = tick,
+    .frame = frame,
+);

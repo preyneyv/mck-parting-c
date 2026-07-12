@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 REASCRIPT_PATH = Path(__file__).resolve().with_name("rea_midi_export.lua")
+ENGINE_TICK_RATE = 960
 
 subprocs: List[subprocess.Popen] = []
 atexit.register(lambda: [p.kill() for p in subprocs if p.poll() is None])
@@ -16,9 +17,10 @@ atexit.register(lambda: [p.kill() for p in subprocs if p.poll() is None])
 
 def write_text_if_changed(path: Path, content: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    if path.exists() and path.read_text(encoding="utf-8") == content:
+    encoded = content.encode("utf-8")
+    if path.exists() and path.read_bytes() == encoded:
         return
-    path.write_text(content, encoding="utf-8")
+    path.write_bytes(encoded)
 
 
 def sanitize_symbol(raw: str) -> str:
@@ -291,6 +293,22 @@ def build_tempo_segments(
     return seg_ticks, seg_cum_us, seg_tempo_us_per_qn
 
 
+def tick_to_us(
+    tick: int,
+    seg_ticks: List[int],
+    seg_cum_us: List[float],
+    seg_tempo_us_per_qn: List[int],
+    division: int,
+) -> float:
+    idx = bisect.bisect_right(seg_ticks, tick) - 1
+    if idx < 0:
+        idx = 0
+    us = seg_cum_us[idx] + ((tick - seg_ticks[idx]) * seg_tempo_us_per_qn[idx]) / float(
+        division
+    )
+    return us
+
+
 def tick_to_ms(
     tick: int,
     seg_ticks: List[int],
@@ -298,13 +316,19 @@ def tick_to_ms(
     seg_tempo_us_per_qn: List[int],
     division: int,
 ) -> int:
-    idx = bisect.bisect_right(seg_ticks, tick) - 1
-    if idx < 0:
-        idx = 0
-    us = seg_cum_us[idx] + ((tick - seg_ticks[idx]) * seg_tempo_us_per_qn[idx]) / float(
-        division
-    )
+    us = tick_to_us(tick, seg_ticks, seg_cum_us, seg_tempo_us_per_qn, division)
     return int(round(us / 1000.0))
+
+
+def tick_to_engine_tick(
+    tick: int,
+    seg_ticks: List[int],
+    seg_cum_us: List[float],
+    seg_tempo_us_per_qn: List[int],
+    division: int,
+) -> int:
+    us = tick_to_us(tick, seg_ticks, seg_cum_us, seg_tempo_us_per_qn, division)
+    return int(round(us * ENGINE_TICK_RATE / 1_000_000.0))
 
 
 def default_patch_ops() -> List[Dict[str, int]]:
@@ -360,6 +384,9 @@ def build_song_model(
     for ev in events:
         tick = int(ev["tick"])
         time_ms = tick_to_ms(tick, seg_ticks, seg_cum_us, seg_tempo_us_per_qn, division)
+        time_tick = tick_to_engine_tick(
+            tick, seg_ticks, seg_cum_us, seg_tempo_us_per_qn, division
+        )
 
         if ev["kind"] == "sysex":
             parsed = parse_prism_set_patch_sysex(bytes(ev["raw"]))
@@ -380,6 +407,7 @@ def build_song_model(
                 song_events.append(
                     {
                         "time_ms": time_ms,
+                        "time_tick": time_tick,
                         "etype": "note_on",
                         "patch_idx": channel,
                         "note_number": note,
@@ -390,6 +418,7 @@ def build_song_model(
                 song_events.append(
                     {
                         "time_ms": time_ms,
+                        "time_tick": time_tick,
                         "etype": "note_off",
                         "patch_idx": channel,
                         "note_number": note,
@@ -405,6 +434,7 @@ def build_song_model(
                 song_events.append(
                     {
                         "time_ms": time_ms,
+                        "time_tick": time_tick,
                         "etype": "tempo",
                         "us_per_quarter": us_per_quarter,
                     }
@@ -415,6 +445,7 @@ def build_song_model(
                 song_events.append(
                     {
                         "time_ms": time_ms,
+                        "time_tick": time_tick,
                         "etype": "timesig",
                         "numerator": numerator,
                         "denominator": denominator,
@@ -456,6 +487,15 @@ def build_song_model(
     )
     if song_events:
         duration_ms = max(duration_ms, int(song_events[-1]["time_ms"]))
+    duration_ticks = tick_to_engine_tick(
+        int(song_end_tick),
+        seg_ticks,
+        seg_cum_us,
+        seg_tempo_us_per_qn,
+        division,
+    )
+    if song_events:
+        duration_ticks = max(duration_ticks, int(song_events[-1]["time_tick"]))
 
     first_tempo = next((e for e in song_events if e["etype"] == "tempo"), None)
     us_per_q = 500000 if first_tempo is None else int(first_tempo["us_per_quarter"])
@@ -469,6 +509,7 @@ def build_song_model(
         "patches": patch_defs_local,
         "events": song_events,
         "duration_ms": duration_ms,
+        "duration_ticks": duration_ticks,
         "bpm_q8": bpm_q8,
         "numerator": numerator,
         "denominator": denominator,
@@ -522,6 +563,12 @@ def emit_song_header(symbol: str, source_rpp: str, model: Dict[str, object]) -> 
         lines.append("            },")
         lines.append("        },")
         lines.append("    },")
+    lines.append("};")
+    lines.append("")
+
+    lines.append(f"static const uint32_t {symbol}_event_ticks[] = {{")
+    for ev in events:
+        lines.append(f"    {int(ev['time_tick'])}u,")
     lines.append("};")
     lines.append("")
 
@@ -586,7 +633,9 @@ def emit_song_header(symbol: str, source_rpp: str, model: Dict[str, object]) -> 
     lines.append(f"    .patch_count = {len(patches)}u,")
     lines.append(f"    .events = {symbol}_events,")
     lines.append(f"    .event_count = {len(events)}u,")
+    lines.append(f"    .event_ticks = {symbol}_event_ticks,")
     lines.append(f"    .duration_ms = {int(model['duration_ms'])}u,")
+    lines.append(f"    .duration_ticks = {int(model['duration_ticks'])}u,")
     lines.append("    .loop_start_ms = 0u,")
     lines.append("    .loop_end_ms = 0u,")
     lines.append("};")

@@ -2,17 +2,22 @@
 
 #include <stdint.h>
 
+#include <prism/graphics/display.h>
+#include <prism/types.h>
+
 #define PROJECT_NAME "prism"
+
+#ifndef PRISM_ENABLE_PERFORMANCE_LOGS
+#define PRISM_ENABLE_PERFORMANCE_LOGS 0
+#endif
 
 //// SYSTEM CONFIGURATION ////
 #define TARGET_FPS 120
 static const uint32_t TARGET_FRAME_INTERVAL_US = 1000000 / TARGET_FPS;
-#define TICK_RATE 1000 // 1000 ticks per second (tune if needed)
-static const uint32_t TICK_INTERVAL_US = 1000000 / TICK_RATE;
+_Static_assert(PRISM_ENGINE_TICK_RATE % TARGET_FPS == 0,
+               "engine tick rate must be divisible by the display rate");
 
 //// DISPLAY CONFIGURATION ////
-#define DISP_WIDTH 128
-#define DISP_HEIGHT 64
 static const uint32_t DISP_PIX = DISP_WIDTH * DISP_HEIGHT;
 
 //// AUDIO CONFIGURATION ////

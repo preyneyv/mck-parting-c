@@ -7,19 +7,14 @@
 #include "chart.h"
 #include "game.h"
 
-#ifndef BEATLINE_CARTRIDGE_APP_ID
-#define BEATLINE_CARTRIDGE_APP_ID 5
-#endif
-#ifndef BEATLINE_CARTRIDGE_SLUG
-#define BEATLINE_CARTRIDGE_SLUG "beatline"
+#ifndef BEATLINE_CARTRIDGE_ID
+#define BEATLINE_CARTRIDGE_ID "dev.preyneyv.prism.beatline"
 #endif
 #ifndef BEATLINE_CARTRIDGE_NAME
 #define BEATLINE_CARTRIDGE_NAME "beatline"
 #endif
 
 prism_t *beatline_prism;
-#define PRISM_CONTEXT beatline_prism
-#include <cartridges/compat.h>
 
 static beatline_state_t state;
 
@@ -41,7 +36,7 @@ static struct
     int32_t active_offset;
     int32_t scroll_offset;
     int32_t fill_w;
-    button_id_t fill_btn;
+    prism_button_t fill_btn;
     bool was_pressed;
     bool ignore_release;
 } sel;
@@ -63,8 +58,10 @@ static void select_retarget(bool instant)
         return;
     }
 
-    anim_to(&sel.active_offset, active, 150, ANIM_EASE_INOUT_QUAD, NULL, NULL);
-    anim_to(&sel.scroll_offset, scroll, 150, ANIM_EASE_INOUT_QUAD, NULL, NULL);
+    prism_anim_to(beatline_prism, &sel.active_offset, active, 150,
+                  PRISM_ANIM_EASE_INOUT_QUAD, NULL, NULL);
+    prism_anim_to(beatline_prism, &sel.scroll_offset, scroll, 150,
+                  PRISM_ANIM_EASE_INOUT_QUAD, NULL, NULL);
 }
 
 static void select_enter(void)
@@ -109,14 +106,14 @@ static void select_draw_centered_trimmed(u8g2_t *u8g2, int16_t center_x,
 static void select_tick(void)
 {
     // handle hold-to-select
-    button_id_t btn = engine_button_get_pressed_first();
-    if (btn != BUTTON_NONE)
+    prism_button_t btn = prism_button_first_pressed(beatline_prism);
+    if (btn != PRISM_BUTTON_NONE)
     {
-        float held = engine_button_held_ratio(btn);
+        float held = prism_button_hold_ratio(beatline_prism, btn);
         sel.ignore_release = held > 0.f;
         if (held > 0.f)
         {
-            anim_cancel(&sel.fill_w, false);
+            prism_anim_cancel(beatline_prism, &sel.fill_w, false);
             float eased = held * held * (3.f - 2.f * held); // smoothstep
             sel.fill_w = (int32_t)((SELECT_HOLD_BOX_W - 2) * eased);
             sel.fill_btn = btn;
@@ -124,44 +121,46 @@ static void select_tick(void)
         if (held >= 1.f)
         {
             beatline_difficulty_t difficulty =
-                (btn == BUTTON_RIGHT) ? BEATLINE_DIFFICULTY_HARD : BEATLINE_DIFFICULTY_NORMAL;
+                (btn == PRISM_BUTTON_RIGHT) ? BEATLINE_DIFFICULTY_HARD : BEATLINE_DIFFICULTY_NORMAL;
             beatline_game_select_track(&state, state.selected_track, difficulty);
             beatline_game_start_countdown(&state);
-            engine_buttons_reset();
+            prism_buttons_reset(beatline_prism);
             return;
         }
     }
 
     // handle scroll on release
-    if (BUTTON_KEYUP(BUTTON_LEFT))
+    if (prism_button_keyup(beatline_prism, PRISM_BUTTON_LEFT))
     {
-        anim_to(&sel.fill_w, 0, 100, ANIM_EASE_OUT_CUBIC, NULL, NULL);
+        prism_anim_to(beatline_prism, &sel.fill_w, 0, 100,
+                      PRISM_ANIM_EASE_OUT_CUBIC, NULL, NULL);
         if (!sel.ignore_release)
         {
             state.selected_track--;
             if (state.selected_track < 0)
                 state.selected_track = BEATLINE_TRACK_COUNT - 1;
             select_retarget(false);
-            prism_led_set(beatline_prism, LED_L, rgba(30, 30, 30, 255));
+            prism_led_set(beatline_prism, PRISM_LED_LEFT, rgba(30, 30, 30, 255));
         }
     }
-    if (BUTTON_KEYUP(BUTTON_RIGHT))
+    if (prism_button_keyup(beatline_prism, PRISM_BUTTON_RIGHT))
     {
-        anim_to(&sel.fill_w, 0, 100, ANIM_EASE_OUT_CUBIC, NULL, NULL);
+        prism_anim_to(beatline_prism, &sel.fill_w, 0, 100,
+                      PRISM_ANIM_EASE_OUT_CUBIC, NULL, NULL);
         if (!sel.ignore_release)
         {
             state.selected_track++;
             if (state.selected_track >= BEATLINE_TRACK_COUNT)
                 state.selected_track = 0;
             select_retarget(false);
-            prism_led_set(beatline_prism, LED_R, rgba(30, 30, 30, 255));
+            prism_led_set(beatline_prism, PRISM_LED_RIGHT, rgba(30, 30, 30, 255));
         }
     }
 }
 
 static void select_frame(void)
 {
-    u8g2_t *u8g2 = platform_display_get_u8g2();
+    u8g2_t *u8g2 = prism_display(beatline_prism);
     elm_t root = elm_root(u8g2, VEC2_Z);
 
     u8g2_SetDrawColor(u8g2, 1);
@@ -237,10 +236,10 @@ static void select_frame(void)
     {
         float ratio = (float)sel.fill_w / (float)(SELECT_HOLD_BOX_W - 2);
         uint8_t brightness = (uint8_t)(ratio * 255);
-        if (sel.fill_btn == BUTTON_LEFT)
-            prism_led_set(beatline_prism, LED_L, rgba(brightness, brightness, brightness, 255));
+        if (sel.fill_btn == PRISM_BUTTON_LEFT)
+            prism_led_set(beatline_prism, PRISM_LED_LEFT, rgba(brightness, brightness, brightness, 255));
         else
-            prism_led_set(beatline_prism, LED_R, rgba(brightness, brightness, brightness, 255));
+            prism_led_set(beatline_prism, PRISM_LED_RIGHT, rgba(brightness, brightness, brightness, 255));
     }
 }
 
@@ -251,7 +250,7 @@ static void select_frame(void)
 static float scroll_px_per_tick(void)
 {
     // Fixed scroll speed for all songs/difficulties.
-    return 70.0f / 1000.0f;
+    return 70.0f / PRISM_ENGINE_TICK_RATE;
 }
 
 static float chart_quarter_ticks(void)
@@ -513,7 +512,7 @@ static void play_set_leds(void)
 {
     for (uint8_t lane = 0; lane < 2; lane++)
     {
-        uint8_t led = (lane == BEATLINE_LANE_LEFT) ? LED_L : LED_R;
+        uint8_t led = (lane == BEATLINE_LANE_LEFT) ? PRISM_LED_LEFT : PRISM_LED_RIGHT;
 
         if (state.feedback[lane].until_tick == 0)
             continue;
@@ -546,16 +545,17 @@ static void play_set_leds(void)
         if (!state.hold_state[lane].holding)
             continue;
 
-        uint8_t led = (lane == BEATLINE_LANE_LEFT) ? LED_L : LED_R;
+        uint8_t led = (lane == BEATLINE_LANE_LEFT) ? PRISM_LED_LEFT : PRISM_LED_RIGHT;
         // slow pulse: sine-like using tick
-        uint8_t bri = 80 + (uint8_t)(80.f * led_sine_pulse(prism_ticks(beatline_prism), 0.006f));
+        uint8_t bri = 80 + (uint8_t)(80.f * led_sine_pulse(
+            prism_millis(beatline_prism), 0.006f));
         prism_led_set(beatline_prism, led, rgba(0, bri, bri, 255));
     }
 }
 
 static void play_frame(void)
 {
-    u8g2_t *u8g2 = platform_display_get_u8g2();
+    u8g2_t *u8g2 = prism_display(beatline_prism);
     elm_t root = elm_root(u8g2, VEC2_Z);
 
     u8g2_SetDrawColor(u8g2, 1);
@@ -582,12 +582,12 @@ static void play_frame(void)
         if (beat_interval == 0)
             beat_interval = 1;
         uint32_t since_beat = prism_ticks(beatline_prism) - (state.countdown_next_tick - beat_interval);
-        if (since_beat < 100)
+        if (since_beat < 96)
         {
             // Brighter flash on the last count-in beat.
             uint8_t bri = (state.countdown_beat == 1) ? 255 : 120;
-            prism_led_set(beatline_prism, LED_L, rgba(bri, bri, bri, 255));
-            prism_led_set(beatline_prism, LED_R, rgba(bri, bri, bri, 255));
+            prism_led_set(beatline_prism, PRISM_LED_LEFT, rgba(bri, bri, bri, 255));
+            prism_led_set(beatline_prism, PRISM_LED_RIGHT, rgba(bri, bri, bri, 255));
         }
     }
 }
@@ -596,63 +596,101 @@ static void play_frame(void)
 // Results Screen
 // ============================================================
 
+static void results_format_score(char *buf, size_t buf_size, uint32_t score)
+{
+    char digits[16];
+    snprintf(digits, sizeof(digits), "%lu", (unsigned long)score);
+
+    size_t digit_count = strlen(digits);
+    size_t out = 0;
+    for (size_t i = 0; i < digit_count && out + 1 < buf_size; i++)
+    {
+        size_t remaining = digit_count - i;
+        if (i > 0 && remaining % 3 == 0 && out + 2 < buf_size)
+            buf[out++] = ',';
+        buf[out++] = digits[i];
+    }
+    buf[out] = '\0';
+}
+
 static void results_frame(void)
 {
-    u8g2_t *u8g2 = platform_display_get_u8g2();
+    u8g2_t *u8g2 = prism_display(beatline_prism);
     elm_t root = elm_root(u8g2, VEC2_Z);
 
     u8g2_SetDrawColor(u8g2, 1);
 
-    // title and rank
-    u8g2_SetFont(u8g2, u8g2_font_6x10_tf);
-    elm_str(&root, vec2(0, 10), "RESULTS");
+    // Keep the result data in a fixed left column and reserve the right rail
+    // for sharing/dismissal controls.
+    const int16_t rail_x = 84;
+    elm_vline(&root, vec2(rail_x, 0), DISP_HEIGHT);
+
+    // Song and difficulty identify which chart produced the result.
     u8g2_SetFont(u8g2, u8g2_font_5x7_tr);
-    elm_str(&root, vec2(0, 18), state.chart->title);
+    select_draw_centered_trimmed(u8g2, rail_x / 2, 7,
+                                 state.chart->title, rail_x - 4);
+    const char *difficulty =
+        state.selected_difficulty == BEATLINE_DIFFICULTY_HARD
+            ? "HARD"
+            : "NORMAL";
+    select_draw_centered_trimmed(u8g2, rail_x / 2, 15,
+                                 difficulty, rail_x - 4);
+    elm_hline(&root, vec2(2, 18), rail_x - 5);
 
+    // Rank badge and score are the primary result.
     const char *rank = beatline_rank_str(beatline_game_rank(&state));
-    u8g2_SetFont(u8g2, u8g2_font_7x14_mr);
-    uint16_t rw = u8g2_GetStrWidth(u8g2, rank);
-    elm_str(&root, vec2(70 - rw, 16), rank);
+    u8g2_SetDrawColor(u8g2, 1);
+    elm_rounded_box(&root, vec2(1, 20), 14, 15, 3);
+    u8g2_SetDrawColor(u8g2, 0);
+    u8g2_SetFont(u8g2, u8g2_font_7x14B_mr);
+    uint16_t rank_w = u8g2_GetStrWidth(u8g2, rank);
+    elm_str(&root, vec2(1 + (14 - rank_w) / 2, 33), rank);
+    u8g2_SetDrawColor(u8g2, 1);
 
-    // stat column (left)
+    char score[16];
+    results_format_score(score, sizeof(score), state.score);
+    u8g2_SetFont(u8g2, u8g2_font_6x10_tf);
+    elm_str(&root, vec2(19, 32), score);
+
+    // Supporting stats use fixed rows so the values remain easy to scan.
     u8g2_SetFont(u8g2, u8g2_font_5x7_tr);
     char buf[32];
 
-    snprintf(buf, sizeof(buf), "S:%lu", (unsigned long)state.score);
-    elm_str(&root, vec2(0, 29), buf);
+    snprintf(buf, sizeof(buf), "max combo %u", state.max_combo);
+    elm_str(&root, vec2(1, 42), buf);
 
-    snprintf(buf, sizeof(buf), "MAX:%u", state.max_combo);
-    elm_str(&root, vec2(0, 38), buf);
-
-    snprintf(buf, sizeof(buf), "P:%u G:%u",
+    snprintf(buf, sizeof(buf), "P %-3u G %u",
              state.grade_counts[BEATLINE_GRADE_PERFECT],
              state.grade_counts[BEATLINE_GRADE_GOOD]);
-    elm_str(&root, vec2(0, 47), buf);
+    elm_str(&root, vec2(1, 51), buf);
 
-    snprintf(buf, sizeof(buf), "B:%u M:%u",
+    snprintf(buf, sizeof(buf), "B %-3u M %u",
              state.grade_counts[BEATLINE_GRADE_BAD],
              state.grade_counts[BEATLINE_GRADE_MISS]);
-    elm_str(&root, vec2(0, 56), buf);
+    elm_str(&root, vec2(1, 60), buf);
 
-    // leaderboard QR (right)
+    // Leaderboard QR and menu control occupy the utility rail.
     if (state.qr_ready)
     {
-        elm_qrcode(&root, vec2(127 - 3, 3), ELM_ALIGN_TOP_RIGHT, state.qr_code, 2, 1);
+        elm_qrcode(&root, vec2(127, 2), ELM_ALIGN_TOP_RIGHT,
+                   state.qr_code, 2, 1);
     }
     else
     {
         u8g2_SetFont(u8g2, u8g2_font_5x7_tr);
-        elm_str(&root, vec2(84, 34), "QR ERR");
+        const char *error = "QR ERR";
+        uint16_t error_w = u8g2_GetStrWidth(u8g2, error);
+        elm_str(&root, vec2(106 - error_w / 2, 24), error);
     }
 
     bool pressed = false;
-    elm_btn(&root, vec2(126, 62), "MENU", ELM_ALIGN_BOTTOM_RIGHT,
+    elm_btn(&root, vec2(106, 63), "MENU", ELM_ALIGN_BOTTOM_CENTER,
             prism_button_hold_ratio(beatline_prism, PRISM_BUTTON_LEFT),
             prism_button_hold_ratio(beatline_prism, PRISM_BUTTON_RIGHT), &pressed);
     if (pressed)
     {
         // Do not let the press that dismissed results become a hold-to-play.
-        engine_buttons_reset();
+        prism_buttons_reset(beatline_prism);
         beatline_game_init(&state);
         select_enter();
         return;
@@ -706,7 +744,7 @@ static void resume(prism_t *prism)
 {
     beatline_prism = prism;
     if (state.screen == BEATLINE_SCREEN_PLAY)
-        audio_song_player_resume(&state.song_player, prism_ticks(beatline_prism));
+        audio_song_player_resume(&state.song_player, prism_millis(beatline_prism));
 }
 
 static void leave(prism_t *prism)
@@ -715,6 +753,16 @@ static void leave(prism_t *prism)
     audio_song_player_stop(&state.song_player, true);
 }
 
-PRISM_CARTRIDGE(cartridge_beatline, BEATLINE_CARTRIDGE_APP_ID,
-                BEATLINE_CARTRIDGE_SLUG, BEATLINE_CARTRIDGE_NAME, icon__0_bits,
-                PRISM_CARTRIDGE_FLAG_NONE, 0, enter, tick, frame, pause, resume, leave);
+PRISM_CARTRIDGE(cartridge_beatline,
+    .id = BEATLINE_CARTRIDGE_ID,
+    .name = BEATLINE_CARTRIDGE_NAME,
+    .version = 1,
+    .tick_divider = 4,
+    .icon = icon__0_bits,
+    .enter = enter,
+    .tick = tick,
+    .frame = frame,
+    .pause = pause,
+    .resume = resume,
+    .leave = leave,
+);

@@ -73,9 +73,9 @@ void anim_init(void) {
 }
 
 // Start/overwrite: animate *out from its current value to 'to' over
-// 'duration_ticks'
+// 'duration_ms'.
 static int _anim_to_impl(volatile int32_t *out, int32_t to,
-                         uint32_t duration_ticks, anim_ease_t ease,
+                         uint32_t duration_ms, anim_ease_t ease,
                          anim_done_fn on_done, void *ctx, bool is_sys) {
   int idx = find_slot_by_ptr(out);
   if (idx < 0)
@@ -95,7 +95,7 @@ static int _anim_to_impl(volatile int32_t *out, int32_t to,
   s->ctx = ctx;
   s->is_sys = is_sys;
 
-  if (duration_ticks == 0u) {
+  if (duration_ms == 0u) {
     *s->out = s->end;
     s->active = 0;
     if (s->on_done)
@@ -103,20 +103,20 @@ static int _anim_to_impl(volatile int32_t *out, int32_t to,
     return idx;
   }
 
-  s->p_q16 = 0u;
-  s->dp_q16 = q16_from_ratio(1u, duration_ticks); // ≈ (1<<16)/duration
+  s->elapsed_us = 0u;
+  s->duration_ms = duration_ms;
   s->active = 1;
   return idx;
 }
 
-int anim_to(volatile int32_t *out, int32_t to, uint32_t duration_ticks,
+int anim_to(volatile int32_t *out, int32_t to, uint32_t duration_ms,
             anim_ease_t ease, anim_done_fn on_done, void *ctx) {
-  return _anim_to_impl(out, to, duration_ticks, ease, on_done, ctx, false);
+  return _anim_to_impl(out, to, duration_ms, ease, on_done, ctx, false);
 }
 
-int anim_sys_to(volatile int32_t *out, int32_t to, uint32_t duration_ticks,
+int anim_sys_to(volatile int32_t *out, int32_t to, uint32_t duration_ms,
                 anim_ease_t ease, anim_done_fn on_done, void *ctx) {
-  return _anim_to_impl(out, to, duration_ticks, ease, on_done, ctx, true);
+  return _anim_to_impl(out, to, duration_ms, ease, on_done, ctx, true);
 }
 
 void anim_cancel(volatile int32_t *out, int snap_to_end) {
@@ -131,7 +131,7 @@ void anim_cancel(volatile int32_t *out, int snap_to_end) {
   s->active = 0;
 }
 
-void anim_tick(void) {
+void anim_tick_us(uint32_t elapsed_us) {
   for (int i = 0; i < ANIM_MAX; ++i) {
     anim_slot_t *s = &g_anim.slots[i];
     if (!s->active)
@@ -140,12 +140,11 @@ void anim_tick(void) {
       // if paused, skip non-sys animations
       continue;
 
-    uint32_t p = s->p_q16;
-    // advance progress
-    uint32_t p_next = p + s->dp_q16;
-    if (p_next >= 65536u)
-      p_next = 65536u;
-    s->p_q16 = p_next;
+    s->elapsed_us += elapsed_us;
+    uint64_t duration_us = (uint64_t)s->duration_ms * 1000u;
+    uint32_t p_next = s->elapsed_us >= duration_us
+                          ? 65536u
+                          : (uint32_t)((s->elapsed_us << 16) / duration_us);
 
     // eased progress
     uint32_t e = anim_apply_ease(s->ease, p_next);

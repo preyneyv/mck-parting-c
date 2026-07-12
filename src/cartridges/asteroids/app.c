@@ -11,8 +11,6 @@
 #include "sprites/icon.h"
 
 static prism_t *app_prism;
-#define PRISM_CONTEXT app_prism
-#include <cartridges/compat.h>
 
 // --- Tunables ---
 static const float SHIP_RADIUS = 4.0f;
@@ -62,7 +60,6 @@ static const uint32_t SFX_ENGINE_UPDATE_MS = 70;
 
 static const uint8_t SFX_ENGINE_NOTE_MIN = 30;
 static const uint8_t SFX_ENGINE_NOTE_MAX = 54;
-static const uint8_t SFX_ENGINE_OVERTONE_VELOCITY = 88;
 
 enum
 {
@@ -209,12 +206,12 @@ static void play_song(const audio_song_asset_t *song, bool preserve_progress)
             .loop = loop,
             .restart_if_playing = true,
         },
-        prism_ticks(app_prism));
+        prism_millis(app_prism));
 
     if (preserve_progress)
     {
         uint32_t seek_ms = song_time_from_progress_ratio(song, loop, progress);
-        audio_song_player_seek(&bgm_player, seek_ms, prism_ticks(app_prism));
+        audio_song_player_seek(&bgm_player, seek_ms, prism_millis(app_prism));
     }
 }
 
@@ -230,7 +227,7 @@ static void play_gameover_song(bool preserve_progress)
 
 static inline uint32_t now_ms()
 {
-    return prism_ticks(app_prism); // tick is 1000 Hz
+    return prism_millis(app_prism);
 }
 
 static inline float clampf(float v, float lo, float hi)
@@ -338,8 +335,6 @@ static void sfx_update_engine(float speed, uint32_t now)
     float speed_ratio = clampf(speed / BOOST_MAX_SPEED, 0.0f, 1.0f);
     uint8_t target_note = (uint8_t)(SFX_ENGINE_NOTE_MIN +
                                     (SFX_ENGINE_NOTE_MAX - SFX_ENGINE_NOTE_MIN) * speed_ratio);
-    uint8_t target_velocity = SFX_ENGINE_OVERTONE_VELOCITY;
-
     // Speed drone stays on regardless of accelerating/decelerating.
     if (!state.sfx_overtone_on)
     {
@@ -646,7 +641,7 @@ static void finish_game()
     if (state.results_ready)
         return;
 
-    engine_buttons_reset();
+    prism_buttons_reset(app_prism);
     state.game_over = true;
     state.results_ready = true;
     state.game_over_at_ms = now_ms();
@@ -666,7 +661,8 @@ static void finish_game()
     stats[6] = (uint8_t)((distance >> 16) & 0xFF);
     stats[7] = (uint8_t)((distance >> 24) & 0xFF);
 
-    leaderboard_get_qrcode(2, stats, sizeof(stats), state.qr_code);
+    prism_leaderboard_qrcode(app_prism, 2, stats, sizeof(stats),
+                             state.qr_code);
 }
 
 static void reset_state()
@@ -775,9 +771,9 @@ static void spawn_asteroid(uint32_t current_ms)
 static void update_ship(float dt_s, uint32_t dt_ms)
 {
     int8_t input = 0;
-    if (BUTTON_PRESSED(BUTTON_LEFT))
+    if (prism_button_pressed(app_prism, PRISM_BUTTON_LEFT))
         input -= 1;
-    if (BUTTON_PRESSED(BUTTON_RIGHT))
+    if (prism_button_pressed(app_prism, PRISM_BUTTON_RIGHT))
         input += 1;
 
     state.angular_vel += (float)input * ANGULAR_ACCEL * dt_s;
@@ -786,7 +782,8 @@ static void update_ship(float dt_s, uint32_t dt_ms)
 
     vec2f_t forward = (vec2f_t){.x = cosf(state.angle), .y = sinf(state.angle)};
 
-    bool boosting = BUTTON_PRESSED(BUTTON_LEFT) && BUTTON_PRESSED(BUTTON_RIGHT);
+    bool boosting = prism_button_pressed(app_prism, PRISM_BUTTON_LEFT) &&
+                    prism_button_pressed(app_prism, PRISM_BUTTON_RIGHT);
     float speed = vec2f_len(state.vel);
     float accel = 0.0f;
     if (boosting)
@@ -882,7 +879,6 @@ static void update_asteroids(float dt_s, uint32_t current_ms)
         if (fabsf(dx) > COLLISION_CHECK_RANGE || fabsf(dy) > COLLISION_CHECK_RANGE)
             continue;
 
-        // collision check (asteroid circle vs ship triangle)
         vec2f_t nose, p1, p2;
         ship_triangle(state.pos, state.angle, 1.0f, &nose, &p1, &p2);
         if (circle_triangle_overlap(a->pos, (float)a->r, nose, p1, p2))
@@ -954,8 +950,8 @@ static void render_leds()
         uint32_t elapsed = t_ms - state.game_over_at_ms;
         if (elapsed >= LED_GAME_OVER_ANIM_MS)
         {
-            prism_led_set(app_prism, LED_L, left);
-            prism_led_set(app_prism, LED_R, right);
+            prism_led_set(app_prism, PRISM_LED_LEFT, left);
+            prism_led_set(app_prism, PRISM_LED_RIGHT, right);
             return;
         }
 
@@ -966,13 +962,14 @@ static void render_leds()
         bool on = (phase < phase_count) && ((phase % 2u) == 0u);
         color_t c = on ? color_cap(rgba(255, 0, 0, 255), LED_BRIGHTNESS_CAP)
                        : rgba(0, 0, 0, 255);
-        prism_led_set(app_prism, LED_L, c);
-        prism_led_set(app_prism, LED_R, c);
+        prism_led_set(app_prism, PRISM_LED_LEFT, c);
+        prism_led_set(app_prism, PRISM_LED_RIGHT, c);
         return;
     }
 
     // Priority 3 base layer: boost white/blue glow with interruptible release fade.
-    bool boosting = BUTTON_PRESSED(BUTTON_LEFT) && BUTTON_PRESSED(BUTTON_RIGHT);
+    bool boosting = prism_button_pressed(app_prism, PRISM_BUTTON_LEFT) &&
+                    prism_button_pressed(app_prism, PRISM_BUTTON_RIGHT);
     float speed = vec2f_len(state.vel);
     state.led_speed_smooth += (speed - state.led_speed_smooth) * 0.15f;
     float boost_ratio = clampf(state.led_speed_smooth / BOOST_MAX_SPEED, 0.0f, 1.0f);
@@ -1019,8 +1016,8 @@ static void render_leds()
         }
     }
 
-    prism_led_set(app_prism, LED_L, left);
-    prism_led_set(app_prism, LED_R, right);
+    prism_led_set(app_prism, PRISM_LED_LEFT, left);
+    prism_led_set(app_prism, PRISM_LED_RIGHT, right);
 }
 
 static void tick(prism_t *prism)
@@ -1042,7 +1039,8 @@ static void tick(prism_t *prism)
     }
 
     update_ship(dt_s, dt_ms);
-    if (BUTTON_PRESSED(BUTTON_LEFT) && BUTTON_PRESSED(BUTTON_RIGHT))
+    if (prism_button_pressed(app_prism, PRISM_BUTTON_LEFT) &&
+        prism_button_pressed(app_prism, PRISM_BUTTON_RIGHT))
         update_trail(now, vec2f_len(state.vel));
 
     float speed = vec2f_len(state.vel);
@@ -1089,7 +1087,8 @@ static void draw_ship(u8g2_t *u8g2)
                       (int16_t)p1.x, (int16_t)p1.y,
                       (int16_t)p2.x, (int16_t)p2.y);
 
-    if (BUTTON_PRESSED(BUTTON_LEFT) && BUTTON_PRESSED(BUTTON_RIGHT))
+    if (prism_button_pressed(app_prism, PRISM_BUTTON_LEFT) &&
+        prism_button_pressed(app_prism, PRISM_BUTTON_RIGHT))
     {
         vec2f_t forward = (vec2f_t){.x = cosf(state.angle), .y = sinf(state.angle)};
         vec2f_t tail_w = vec2f_add_local(state.pos, vec2f_scale(forward, -(SHIP_RADIUS + 2.0f)));
@@ -1312,7 +1311,7 @@ static void frame(prism_t *prism)
     app_prism = prism;
     render_leds();
 
-    u8g2_t *u8g2 = platform_display_get_u8g2();
+    u8g2_t *u8g2 = prism_display(app_prism);
     u8g2_SetDrawColor(u8g2, 1);
 
     if (state.game_over)
@@ -1359,5 +1358,16 @@ static void leave(prism_t *prism)
     audio_song_player_stop(&bgm_player, true);
 }
 
-PRISM_CARTRIDGE(cartridge_asteroids, 2, "asteroids", "asteroids", icon__0_bits,
-                PRISM_CARTRIDGE_FLAG_NONE, 0, enter, tick, frame, pause, resume, leave);
+PRISM_CARTRIDGE(cartridge_asteroids,
+    .id = "dev.preyneyv.prism.asteroids",
+    .name = "asteroids",
+    .version = 1,
+    .tick_divider = 4,
+    .icon = icon__0_bits,
+    .enter = enter,
+    .tick = tick,
+    .frame = frame,
+    .pause = pause,
+    .resume = resume,
+    .leave = leave,
+);

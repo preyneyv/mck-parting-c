@@ -33,6 +33,13 @@ static void frame(prism_t *prism)
   u8g2_DrawStr(u8g2, (128 - width) / 2, 42, count);
 }
 
-PRISM_CARTRIDGE(cartridge_hello, 0x1000, "hello", "hello", hello_icon,
-                PRISM_CARTRIDGE_FLAG_NONE, sizeof(hello_state_t),
-                NULL, tick, frame, NULL, NULL, NULL);
+PRISM_CARTRIDGE(cartridge_hello,
+    .id = "dev.preyneyv.prism.hello",
+    .name = "hello",
+    .version = 1,
+    .tick_divider = 8,
+    .icon = hello_icon,
+    .state_size = sizeof(hello_state_t),
+    .tick = tick,
+    .frame = frame,
+);

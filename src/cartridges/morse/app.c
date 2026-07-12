@@ -1,6 +1,5 @@
-// todo: pause / resume for timer
-
 #include <ctype.h>
+#include <inttypes.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -9,8 +8,12 @@
 #include "sprites/icon.h"
 
 static prism_t *app_prism;
-#define PRISM_CONTEXT app_prism
-#include <cartridges/compat.h>
+
+static void set_both_leds(color_t color)
+{
+  prism_led_set(app_prism, PRISM_LED_LEFT, color);
+  prism_led_set(app_prism, PRISM_LED_RIGHT, color);
+}
 
 // top 200 english words (199 because i removed "I")
 // https://github.com/monkeytypegame/monkeytype/blob/10130d73481ce1277a13845c0b1810aa77d47c11/frontend/static/languages/english.json
@@ -92,7 +95,7 @@ enum
   WORD_LOOKAHEAD = 5,
   TARGET_MORSE_COUNT = 16,
   TARGET_MORSE_LENGTH = 5,
-  INITIAL_T = 100,
+  INITIAL_T_MS = 100,
   DURATION_MS = 30000, // 30 seconds
   MORSE_LED_EVENT_DOT_MS = 120,
   MORSE_LED_EVENT_DASH_MS = 180,
@@ -123,7 +126,7 @@ typedef struct
 
   bool started;
   bool finished;
-  platform_time_t started_at;
+  prism_time_t started_at;
   struct
   {
     uint32_t letters;
@@ -151,12 +154,22 @@ static state_t *state;
 static void _set_led_event(morse_led_event_t event, uint32_t duration_ms)
 {
   state->led_event = event;
-  state->led_event_until_tick = prism_ticks(app_prism) + duration_ms;
+  state->led_event_until_tick =
+      prism_ticks(app_prism) + prism_ticks_from_ms(duration_ms);
 }
 
-static stats_t get_stats()
+static stats_t get_stats(void)
 {
-  uint32_t elapsed_ms = (uint32_t)(platform_time_diff_us(state->started_at, platform_now_us()) / 1000);
+  if (!state->started)
+  {
+    return (stats_t){
+        .remaining_s = DURATION_MS / 1000,
+        .accuracy = 100,
+    };
+  }
+
+  uint32_t elapsed_ms = (uint32_t)(prism_time_diff_us(
+      app_prism, state->started_at, prism_now_us(app_prism)) / 1000);
   if (state->finished)
     elapsed_ms = DURATION_MS;
 
@@ -166,17 +179,10 @@ static stats_t get_stats()
   uint32_t letters = state->stats.letters;
   uint32_t errors = state->stats.errors;
 
-  uint32_t cpm = (letters * 60000) / (elapsed_ms);
+  uint32_t cpm = elapsed_ms > 0 ? (letters * 60000) / elapsed_ms : 0;
   uint32_t accuracy = (letters + errors) > 0
                           ? (letters * 100) / (letters + errors)
                           : 100;
-
-  if (!state->started)
-  {
-    cpm = 0;
-    accuracy = 100;
-    remaining_s = DURATION_MS / 1000;
-  }
 
   return (stats_t){
       .remaining_s = remaining_s,
@@ -221,13 +227,10 @@ static void _update_current_word()
 
 static void _finish_game();
 
-static void _start_game()
+static void _start_game(void)
 {
-  if (state != NULL)
-    free(state);
-
-  state = calloc(1, sizeof(state_t));
-  state->T = INITIAL_T;
+  memset(state, 0, sizeof(*state));
+  state->T = prism_ticks_from_ms(INITIAL_T_MS);
 
   state->last_edge_tick = prism_ticks(app_prism);
   state->input_len = 0;
@@ -244,7 +247,7 @@ static void _start_game()
 static void enter(prism_t *prism)
 {
   app_prism = prism;
-  // setup audio synth
+  state = prism->state;
   audio_synth_patch_config_t patch = audio_synth_patch_config_default;
   patch.ops[0].level = q1x15_f(.5f);
   patch.ops[0].env = (audio_synth_env_config_t){
@@ -260,23 +263,25 @@ static void enter(prism_t *prism)
 
 static void tick_game()
 {
-  uint32_t dt = prism_ticks(app_prism) - state->last_edge_tick;
-  if (BUTTON_KEYDOWN(BUTTON_LEFT))
+  if (prism_button_keydown(app_prism, PRISM_BUTTON_LEFT))
   {
     _start_game();
   }
 
-  if (BUTTON_KEYDOWN(BUTTON_RIGHT))
+  if (prism_button_keydown(app_prism, PRISM_BUTTON_RIGHT))
   {
+    uint32_t edge_tick =
+        prism_button_keydown_tick(app_prism, PRISM_BUTTON_RIGHT);
+    uint32_t dt = edge_tick - state->last_edge_tick;
     if (!state->started)
     {
       state->started = true;
       state->finished = false;
-      state->started_at = platform_now_us();
+      state->started_at = prism_now_us(app_prism);
     }
 
     // begin mark (end gap)
-    state->last_edge_tick = prism_ticks(app_prism);
+    state->last_edge_tick = edge_tick;
 
     if (dt < 2 * state->T)
     {
@@ -296,11 +301,13 @@ static void tick_game()
                 },
         });
   }
-  else if (BUTTON_KEYUP(BUTTON_RIGHT))
+  else if (prism_button_keyup(app_prism, PRISM_BUTTON_RIGHT))
   {
     // end mark (begin gap)
-    uint32_t dt = prism_ticks(app_prism) - state->last_edge_tick;
-    state->last_edge_tick = prism_ticks(app_prism);
+    uint32_t edge_tick =
+        prism_button_keyup_tick(app_prism, PRISM_BUTTON_RIGHT);
+    uint32_t dt = edge_tick - state->last_edge_tick;
+    state->last_edge_tick = edge_tick;
 
     char symbol = 0;
     if (dt > 2 * state->T)
@@ -386,7 +393,7 @@ static void tick_results()
 
 static void _finish_game()
 {
-  engine_buttons_reset();
+  prism_buttons_reset(app_prism);
 
   state->finished = true;
   audio_synth_enqueue(
@@ -410,10 +417,8 @@ static void _finish_game()
   stats[6] = (uint8_t)((state->stats.errors >> 16) & 0xFF);
   stats[7] = (uint8_t)((state->stats.errors >> 24) & 0xFF);
 
-  leaderboard_get_qrcode(
-      1,
-      &stats,
-      sizeof(stats), state->qr_code);
+  prism_leaderboard_qrcode(app_prism, 1, stats, sizeof(stats),
+                           state->qr_code);
 }
 
 static void tick(prism_t *prism)
@@ -427,8 +432,8 @@ static void tick(prism_t *prism)
   {
     tick_game();
 
-    // check for time up
-    uint32_t elapsed_ms = (uint32_t)(platform_time_diff_us(state->started_at, platform_now_us()) / 1000);
+    uint32_t elapsed_ms = (uint32_t)(prism_time_diff_us(
+        app_prism, state->started_at, prism_now_us(app_prism)) / 1000);
     if (state->started && elapsed_ms >= DURATION_MS)
     {
       _finish_game();
@@ -517,10 +522,9 @@ static void _frame_current_input(u8g2_t *u8g2, elm_t *root)
   elm_t ctx = elm_child(root, vec2(33, 0));
 
   uint32_t dt = prism_ticks(app_prism) - state->last_edge_tick;
-  bool pressed = BUTTON_PRESSED(BUTTON_RIGHT);
+  bool pressed = prism_button_pressed(app_prism, PRISM_BUTTON_RIGHT);
 
   char draft = dt > 2 * state->T ? '-' : '.';
-  // elm_frame(&ctx, vec2(0, 4), 61, 4);
   elm_hline(&ctx, vec2(0, 6), 61);
   if (pressed)
   {
@@ -556,16 +560,18 @@ static void _frame_stats(u8g2_t *u8g2, elm_t *root)
   char stats_buffer[64];
 
   elm_t ctx = elm_child(root, vec2(0, 0));
-  snprintf(stats_buffer, sizeof(stats_buffer), "%d", stats.cpm / 5);
+  snprintf(stats_buffer, sizeof(stats_buffer), "%" PRIu32, stats.cpm / 5);
   elm_str(&ctx, vec2(0, 0), stats_buffer);
 
-  snprintf(stats_buffer, sizeof(stats_buffer), "%d", stats.errors);
+  snprintf(stats_buffer, sizeof(stats_buffer), "%" PRIu32, stats.errors);
   elm_str(&ctx, vec2(28 + 5, 0), stats_buffer);
 
-  snprintf(stats_buffer, sizeof(stats_buffer), "%3d%%", stats.accuracy);
+  snprintf(stats_buffer, sizeof(stats_buffer), "%3" PRIu32 "%%",
+           stats.accuracy);
   elm_str(&ctx, vec2(100 - 28 - 8, 0), stats_buffer);
 
-  snprintf(stats_buffer, sizeof(stats_buffer), "%3ds", stats.remaining_s);
+  snprintf(stats_buffer, sizeof(stats_buffer), "%3" PRIu32 "s",
+           stats.remaining_s);
   elm_str(&ctx, vec2(100, 0), stats_buffer);
 
   u8g2_SetFont(u8g2, u8g2_font_5x7_tr);
@@ -578,7 +584,7 @@ static void _frame_stats(u8g2_t *u8g2, elm_t *root)
 
 static void frame_game()
 {
-  u8g2_t *u8g2 = platform_display_get_u8g2();
+  u8g2_t *u8g2 = prism_display(app_prism);
   elm_t root = elm_root(u8g2, VEC2_Z);
 
   elm_t ctx = elm_child(&root, vec2(0, 0));
@@ -612,29 +618,27 @@ static void elm_score(elm_t *parent, vec2_t pos, const char *label, const char *
 
 static void frame_results()
 {
-  u8g2_t *u8g2 = platform_display_get_u8g2();
+  u8g2_t *u8g2 = prism_display(app_prism);
   elm_t root = elm_root(u8g2, VEC2_Z);
 
   u8g2_SetDrawColor(u8g2, 1);
   u8g2_SetFont(u8g2, u8g2_font_7x14_mr);
 
-  char results_buffer[64];
   stats_t stats = get_stats();
 
   char stat_buffer[16];
-  snprintf(stat_buffer, sizeof(stat_buffer), "%d", stats.cpm / 5);
+  snprintf(stat_buffer, sizeof(stat_buffer), "%" PRIu32, stats.cpm / 5);
   elm_score(&root, vec2(0, 0), "WPM", stat_buffer);
 
-  snprintf(stat_buffer, sizeof(stat_buffer), "%d", stats.cpm);
+  snprintf(stat_buffer, sizeof(stat_buffer), "%" PRIu32, stats.cpm);
   elm_score(&root, vec2(40, 0), "CPM", stat_buffer);
 
-  snprintf(stat_buffer, sizeof(stat_buffer), "%d", stats.errors);
+  snprintf(stat_buffer, sizeof(stat_buffer), "%" PRIu32, stats.errors);
   elm_score(&root, vec2(0, 27), "ERR", stat_buffer);
 
-  snprintf(stat_buffer, sizeof(stat_buffer), "%d%%", stats.accuracy);
+  snprintf(stat_buffer, sizeof(stat_buffer), "%" PRIu32 "%%", stats.accuracy);
   elm_score(&root, vec2(40, 27), "ACC", stat_buffer);
 
-  // draw QR code
   elm_qrcode(&root, vec2(128 - 5, 5), ELM_ALIGN_TOP_RIGHT, state->qr_code, 2, 1);
 
   u8g2_SetFont(u8g2, u8g2_font_5x7_tr);
@@ -644,7 +648,7 @@ static void frame_results()
           prism_button_hold_ratio(app_prism, PRISM_BUTTON_RIGHT), &pressed);
   if (pressed)
   {
-    engine_buttons_reset();
+    prism_buttons_reset(app_prism);
     _start_game();
   }
 }
@@ -653,8 +657,8 @@ static void _frame_leds()
 {
   if (state->finished)
   {
-    uint8_t b = 50 + (uint8_t)(70.f * led_sine_pulse(prism_ticks(app_prism), 0.01f));
-    led_set_both(rgba(0, b, 0, 255));
+    uint8_t b = 50 + (uint8_t)(70.f * led_sine_pulse(prism_millis(app_prism), 0.01f));
+    set_both_leds(rgba(0, b, 0, 255));
     return;
   }
 
@@ -669,16 +673,16 @@ static void _frame_leds()
       switch (state->led_event)
       {
       case MORSE_LED_EVENT_DOT:
-        led_set_both(rgba(255, 255, 255, 255));
+        set_both_leds(rgba(255, 255, 255, 255));
         return;
       case MORSE_LED_EVENT_DASH:
-        led_set_both(rgba(0, 180, 255, 255));
+        set_both_leds(rgba(0, 180, 255, 255));
         return;
       case MORSE_LED_EVENT_OK:
-        led_set_both(rgba(0, 255, 0, 255));
+        set_both_leds(rgba(0, 255, 0, 255));
         return;
       case MORSE_LED_EVENT_ERR:
-        led_set_both(rgba(255, 0, 0, 255));
+        set_both_leds(rgba(255, 0, 0, 255));
         return;
       case MORSE_LED_EVENT_NONE:
       default:
@@ -687,29 +691,30 @@ static void _frame_leds()
     }
   }
 
-  if (BUTTON_PRESSED(BUTTON_RIGHT))
+  if (prism_button_pressed(app_prism, PRISM_BUTTON_RIGHT))
   {
     uint32_t dt = prism_ticks(app_prism) - state->last_edge_tick;
     bool dash = dt > 2 * state->T;
-    led_set_both(dash ? rgba(0, 120, 200, 255) : rgba(130, 130, 130, 255));
+    set_both_leds(dash ? rgba(0, 120, 200, 255)
+                       : rgba(130, 130, 130, 255));
     return;
   }
 
   stats_t stats = get_stats();
   if (state->started && stats.remaining_s <= 5)
   {
-    uint8_t b = 30 + (uint8_t)(120.f * led_sine_pulse(prism_ticks(app_prism), 0.02f));
-    led_set_both(rgba(b, b / 3, 0, 255));
+    uint8_t b = 30 + (uint8_t)(120.f * led_sine_pulse(prism_millis(app_prism), 0.02f));
+    set_both_leds(rgba(b, b / 3, 0, 255));
     return;
   }
 
   if (!state->started)
   {
-    led_set_both(rgba(0, 35, 35, 255));
+    set_both_leds(rgba(0, 35, 35, 255));
     return;
   }
 
-  led_set_both(rgba(0, 20, 0, 255));
+  set_both_leds(rgba(0, 20, 0, 255));
 }
 
 static void frame(prism_t *prism)
@@ -730,10 +735,19 @@ static void frame(prism_t *prism)
 static void leave(prism_t *prism)
 {
   (void)prism;
-  if (state != NULL)
-    free(state);
   state = NULL;
+  app_prism = NULL;
 }
 
-PRISM_CARTRIDGE(cartridge_morse, 1, "morse", "morse", icon__0_bits,
-                PRISM_CARTRIDGE_FLAG_NONE, 0, enter, tick, frame, NULL, NULL, leave);
+PRISM_CARTRIDGE(cartridge_morse,
+    .id = "dev.preyneyv.prism.morse",
+    .name = "morse",
+    .version = 1,
+    .tick_divider = 4,
+    .icon = icon__0_bits,
+    .state_size = sizeof(state_t),
+    .enter = enter,
+    .tick = tick,
+    .frame = frame,
+    .leave = leave,
+);

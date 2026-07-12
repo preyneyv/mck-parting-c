@@ -3,13 +3,10 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define PRISM_CONTEXT beatline_prism
-#include <cartridges/compat.h>
-
-#ifndef BEATLINE_CARTRIDGE_APP_ID
-#define BEATLINE_CARTRIDGE_APP_ID 5
+#ifndef BEATLINE_LEADERBOARD_APP_ID
+#define BEATLINE_LEADERBOARD_APP_ID 5
 #endif
-#define BEATLINE_APP_ID BEATLINE_CARTRIDGE_APP_ID
+#define BEATLINE_APP_ID BEATLINE_LEADERBOARD_APP_ID
 
 #define BEATLINE_NOTE_C3 48
 #define BEATLINE_NOTE_CS3 49
@@ -19,8 +16,8 @@
 beatline_song_timing_t beatline_song_timing_from_asset(const audio_song_asset_t *song)
 {
     beatline_song_timing_t timing = {
-        .quarter_ticks = 500.0f,
-        .beat_ticks = 500.0f,
+        .quarter_ticks = 480.0f,
+        .beat_ticks = 480.0f,
         .bpm_q8 = 120u * 256u,
         .numerator = 4,
         .denominator = 4,
@@ -37,7 +34,9 @@ beatline_song_timing_t beatline_song_timing_from_asset(const audio_song_asset_t 
     }
 
     if (timing.bpm_q8 > 0)
-        timing.quarter_ticks = (60000.0f * 256.0f) / (float)timing.bpm_q8;
+        timing.quarter_ticks =
+            (60.0f * PRISM_ENGINE_TICK_RATE * 256.0f) /
+            (float)timing.bpm_q8;
 
     if (song != NULL && song->events != NULL)
     {
@@ -50,8 +49,12 @@ beatline_song_timing_t beatline_song_timing_from_asset(const audio_song_asset_t 
             if (ev->type == AUDIO_SONG_EVENT_TEMPO &&
                 ev->data.tempo.us_per_quarter > 0)
             {
-                timing.quarter_ticks = (float)ev->data.tempo.us_per_quarter / 1000.0f;
-                timing.bpm_q8 = (uint32_t)((60000.0f * 256.0f) / timing.quarter_ticks + 0.5f);
+                timing.quarter_ticks =
+                    (float)ev->data.tempo.us_per_quarter *
+                    PRISM_ENGINE_TICK_RATE / 1000000.0f;
+                timing.bpm_q8 = (uint32_t)(
+                    (60.0f * PRISM_ENGINE_TICK_RATE * 256.0f) /
+                    timing.quarter_ticks + 0.5f);
             }
             else if (ev->type == AUDIO_SONG_EVENT_TIMESIG)
             {
@@ -114,7 +117,9 @@ static void beatline_generate_notes_from_song(beatline_state_t *st)
                 continue;
 
             uint8_t note = event->data.note_on.note_number;
-            uint32_t t = event->time_ms;
+            uint32_t t = song->event_ticks != NULL
+                             ? song->event_ticks[i]
+                             : prism_ticks_from_ms(event->time_ms);
 
             if (note == BEATLINE_NOTE_C3 || note == BEATLINE_NOTE_C4)
             {
@@ -150,7 +155,9 @@ static void beatline_generate_notes_from_song(beatline_state_t *st)
                 continue;
 
             int8_t note = event->data.note_off.note_number;
-            uint32_t t = event->time_ms;
+            uint32_t t = song->event_ticks != NULL
+                             ? song->event_ticks[i]
+                             : prism_ticks_from_ms(event->time_ms);
 
             if (note == BEATLINE_NOTE_CS3 && left_hold_active)
             {
@@ -231,7 +238,9 @@ static void beatline_generate_notes_from_song(beatline_state_t *st)
             st->generated_last_note_tick = end_tick;
     }
 
-    st->generated_duration_ticks = song->duration_ms;
+    st->generated_duration_ticks = song->duration_ticks != 0
+                                       ? song->duration_ticks
+                                       : prism_ticks_from_ms(song->duration_ms);
     if (st->generated_last_note_tick > st->generated_duration_ticks)
         st->generated_duration_ticks = st->generated_last_note_tick;
 }
@@ -242,7 +251,7 @@ static audio_song_event_action_t beatline_song_event_hook(
     void *user)
 {
     (void)player;
-    const beatline_state_t *st = (const beatline_state_t *)user;
+    (void)user;
     // filter out note events on rhythm patches (0 = normal, 1 = hard)
 
     if (event->type == AUDIO_SONG_EVENT_NOTE_ON &&
@@ -267,6 +276,14 @@ int32_t beatline_game_time_signed(const beatline_state_t *st)
     if (st->game_start_tick == 0)
         return 0;
     return (int32_t)(prism_ticks(beatline_prism) - st->game_start_tick) + st->av_offset_ticks;
+}
+
+static int32_t beatline_game_time_at_tick(const beatline_state_t *st,
+                                          uint32_t tick)
+{
+    if (st->game_start_tick == 0)
+        return 0;
+    return (int32_t)(tick - st->game_start_tick) + st->av_offset_ticks;
 }
 
 uint32_t beatline_game_time(const beatline_state_t *st)
@@ -450,7 +467,7 @@ void beatline_game_start_play(beatline_state_t *st)
             .loop = false,
             .restart_if_playing = true,
         },
-        prism_ticks(beatline_prism));
+        prism_millis(beatline_prism));
 }
 
 // --- Judgment ---
@@ -515,9 +532,11 @@ static beatline_grade_t judge_timing(int32_t delta_ticks)
     return BEATLINE_GRADE_MISS;
 }
 
-static void try_hit_lane(beatline_state_t *st, uint8_t lane)
+static void try_hit_lane(beatline_state_t *st, uint8_t lane,
+                         uint32_t input_tick)
 {
-    uint32_t game_time = beatline_game_time(st);
+    int32_t signed_game_time = beatline_game_time_at_tick(st, input_tick);
+    uint32_t game_time = signed_game_time < 0 ? 0u : (uint32_t)signed_game_time;
 
     // scan for the closest unjudged note in this lane within the BAD window
     int32_t best_delta = INT32_MAX;
@@ -594,8 +613,6 @@ static void process_misses(beatline_state_t *st)
 
 static void process_holds(beatline_state_t *st)
 {
-    uint32_t game_time = beatline_game_time(st);
-
     for (uint8_t lane = 0; lane < 2; lane++)
     {
         if (!st->hold_state[lane].holding)
@@ -605,12 +622,22 @@ static void process_holds(beatline_state_t *st)
         const beatline_note_t *n = &st->generated_notes[idx];
         uint32_t end_tick = n->hit_tick + n->hold_duration;
 
-        button_id_t btn = (lane == BEATLINE_LANE_LEFT) ? BUTTON_LEFT : BUTTON_RIGHT;
+        prism_button_t btn = (lane == BEATLINE_LANE_LEFT)
+                                 ? PRISM_BUTTON_LEFT
+                                 : PRISM_BUTTON_RIGHT;
 
-        if (!BUTTON_PRESSED(btn))
+        uint32_t sample_tick = prism_button_keyup(beatline_prism, btn)
+                                   ? prism_button_keyup_tick(beatline_prism, btn)
+                                   : prism_ticks(beatline_prism);
+        int32_t signed_game_time =
+            beatline_game_time_at_tick(st, sample_tick);
+        uint32_t game_time =
+            signed_game_time < 0 ? 0u : (uint32_t)signed_game_time;
+
+        if (!prism_button_pressed(beatline_prism, btn))
         {
             // released early — if significantly early, penalize
-            if (game_time + 80 < end_tick)
+            if (game_time + 77 < end_tick)
             {
                 // override grade to BAD
                 st->note_grades[idx] = BEATLINE_GRADE_BAD;
@@ -638,7 +665,7 @@ void beatline_game_tick(beatline_state_t *st)
     // Count-in pre-roll: block input/judging until the 4 beats elapse.
     if (st->countdown_beat > 0)
     {
-        audio_song_player_tick(&st->song_player, prism_ticks(beatline_prism));
+        audio_song_player_tick(&st->song_player, prism_millis(beatline_prism));
         if (prism_ticks(beatline_prism) >= st->countdown_next_tick)
         {
             st->countdown_beat--;
@@ -657,13 +684,17 @@ void beatline_game_tick(beatline_state_t *st)
     }
 
     // advance song
-    audio_song_player_tick(&st->song_player, prism_ticks(beatline_prism));
+    audio_song_player_tick(&st->song_player, prism_millis(beatline_prism));
 
     // handle input
-    if (BUTTON_KEYDOWN(BUTTON_LEFT))
-        try_hit_lane(st, BEATLINE_LANE_LEFT);
-    if (BUTTON_KEYDOWN(BUTTON_RIGHT))
-        try_hit_lane(st, BEATLINE_LANE_RIGHT);
+    if (prism_button_keydown(beatline_prism, PRISM_BUTTON_LEFT))
+        try_hit_lane(st, BEATLINE_LANE_LEFT,
+                     prism_button_keydown_tick(beatline_prism,
+                                                PRISM_BUTTON_LEFT));
+    if (prism_button_keydown(beatline_prism, PRISM_BUTTON_RIGHT))
+        try_hit_lane(st, BEATLINE_LANE_RIGHT,
+                     prism_button_keydown_tick(beatline_prism,
+                                                PRISM_BUTTON_RIGHT));
 
     process_misses(st);
     process_holds(st);
@@ -685,7 +716,7 @@ void beatline_game_tick(beatline_state_t *st)
     {
         // wait a little after last note for feedback to show
         uint32_t last_note_tick = st->generated_last_note_tick;
-        if (game_time >= last_note_tick + 1500)
+        if (game_time >= last_note_tick + 1440)
             beatline_game_finish(st);
     }
 }
@@ -718,7 +749,8 @@ void beatline_game_finish(beatline_state_t *st)
     stats[11] = (uint8_t)((st->grade_counts[BEATLINE_GRADE_GOOD] >> 8) & 0xFF);
     stats[12] = (uint8_t)(st->grade_counts[BEATLINE_GRADE_BAD] & 0xFF);
     stats[13] = (uint8_t)(st->grade_counts[BEATLINE_GRADE_MISS] & 0xFF);
-    st->qr_ready = leaderboard_get_qrcode(BEATLINE_APP_ID, stats, sizeof(stats), st->qr_code);
+    st->qr_ready = prism_leaderboard_qrcode(
+        beatline_prism, BEATLINE_APP_ID, stats, sizeof(stats), st->qr_code);
 
-    engine_buttons_reset();
+    prism_buttons_reset(beatline_prism);
 }

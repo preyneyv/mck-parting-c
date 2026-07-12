@@ -21,13 +21,13 @@ typedef enum
 
 #define BEATLINE_GRADE_COUNT 4
 
-// Timing windows (±ticks around hit_tick)
-#define BEATLINE_WINDOW_PERFECT 60
-#define BEATLINE_WINDOW_GOOD 100
-#define BEATLINE_WINDOW_BAD 140
+// Timing windows around hit_tick, converted from authored milliseconds.
+#define BEATLINE_WINDOW_PERFECT 58
+#define BEATLINE_WINDOW_GOOD 96
+#define BEATLINE_WINDOW_BAD 135
 
 // Negative values delay game-time relative to wall clock to compensate output/input latency.
-#define BEATLINE_DEFAULT_AV_OFFSET_TICKS 20
+#define BEATLINE_DEFAULT_AV_OFFSET_TICKS 19
 
 // --- Scoring ---
 
@@ -74,9 +74,9 @@ typedef enum
 #define BEATLINE_MAX_NOTES 1024
 
 // Feedback display duration (ticks)
-#define BEATLINE_FEEDBACK_DURATION 300
+#define BEATLINE_FEEDBACK_DURATION 288
 // LED flash duration (ticks)
-#define BEATLINE_LED_DURATION 100
+#define BEATLINE_LED_DURATION 96
 
 // --- Game State ---
 

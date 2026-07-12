@@ -13,20 +13,14 @@
 
 typedef struct
 {
-  char name[32];       // app name
-  const uint8_t *icon; // app icon
-
-  // called when scene is entered. called after exit of previous scene.
+  char name[32];
+  const uint8_t *icon;
+  uint32_t tick_divider;
   void (*enter)(void);
-  // called every tick
   void (*tick)(void);
-  // called every frame
   void (*frame)(void);
-  // called when scene is paused (sleep or menu)
   void (*pause)(void);
-  // called when scene is resumed.
   void (*resume)(void);
-  // called when scene is leave. called before enter of next scene.
   void (*leave)(void);
 } app_t;
 
@@ -42,138 +36,58 @@ typedef struct
 {
   button_id_t id;
   platform_time_t pressed_at;
-  bool pressed; // true if button is currently pressed
-  bool edge;    // true if button was just transitioned this frame. will
-                // automatically be reset next tick or frame
-  bool ignore;  // true if press should be ignored until next release
+  bool pressed;
+  bool ignore;
+  bool keydown;
+  bool keyup;
+  bool app_keydown;
+  bool app_keyup;
+  uint32_t app_keydown_tick;
+  uint32_t app_keyup_tick;
 } button_t;
 
-typedef struct
-{
-  void (*on_frame_cb)(void);
-  void (*on_tick_cb)(void);
-
-  audio_synth_t synth;
-  color_t led_colors[LED_COUNT];
-
-  struct
-  {
-    button_t left;
-    button_t right;
-    button_t menu;
-  } buttons;
-
-  platform_time_t now;
-  platform_time_t next_tick_at;
-  platform_time_t next_frame_at;
-  platform_time_t last_input_at;
-  uint32_t tick;
-
-  bool paused;
-  app_t *app;
-
-  uint8_t volume;
-  uint8_t brightness;
-} engine_t;
-
-extern engine_t g_engine;
-void engine_init();
-void engine_run_forever();
+void engine_init(void);
+void engine_run_forever(void);
 void engine_set_app(app_t *app);
-void engine_buttons_reset(); // reset button state until next press
-void engine_enter_sleep();
-void engine_wake();
+bool engine_is_app(const app_t *app);
+void engine_buttons_reset(void);
+void engine_enter_sleep(void);
+void engine_wake(void);
 void engine_pause(bool skip_animation);
-void engine_resume();
+void engine_resume(void);
 void engine_set_volume(int8_t level);
 void engine_change_volume(int8_t direction);
+uint8_t engine_volume(void);
 void engine_set_brightness(int8_t level);
 void engine_change_brightness(int8_t direction);
+uint8_t engine_brightness(void);
 uint8_t engine_brightness_scale(void);
 uint8_t engine_output_brightness_scale(void);
-color_t engine_led_output_color(uint8_t led);
-void engine_mark_input();
+uint32_t engine_ticks(void);
+platform_time_t engine_now(void);
+audio_synth_t *engine_synth(void);
+void engine_led_set(uint8_t led, color_t color);
+color_t engine_led_color(uint8_t led);
+void engine_mark_input(void);
+void engine_set_frame_callback(void (*callback)(void));
+void engine_set_tick_callback(void (*callback)(void));
 
-static inline button_t *engine_button_from_id(button_id_t button_id)
-{
-  switch (button_id)
-  {
-  case BUTTON_LEFT:
-    return &g_engine.buttons.left;
-  case BUTTON_RIGHT:
-    return &g_engine.buttons.right;
-  case BUTTON_MENU:
-    return &g_engine.buttons.menu;
-  default:
-    return NULL;
-  }
-}
-
-static inline bool engine_button_keydown(button_id_t button_id)
-{
-  button_t *button = engine_button_from_id(button_id);
-  return button->pressed && button->edge;
-}
-
-static inline bool engine_button_keyup(button_id_t button_id)
-{
-  button_t *button = engine_button_from_id(button_id);
-  return !button->pressed && button->edge;
-}
-
-static inline bool engine_button_pressed(button_id_t button_id)
-{
-  button_t *button = engine_button_from_id(button_id);
-  return button->pressed;
-}
-
-static inline bool engine_button_released(button_id_t button_id)
-{
-  button_t *button = engine_button_from_id(button_id);
-  return !button->pressed;
-}
+bool engine_button_keydown(button_id_t button_id);
+bool engine_button_keyup(button_id_t button_id);
+bool engine_button_pressed(button_id_t button_id);
+bool engine_button_edge(button_id_t button_id);
+bool engine_button_app_keydown(button_id_t button_id);
+bool engine_button_app_keyup(button_id_t button_id);
+uint32_t engine_button_app_keydown_tick(button_id_t button_id);
+uint32_t engine_button_app_keyup_tick(button_id_t button_id);
+bool engine_button_released(button_id_t button_id);
+button_id_t engine_button_get_pressed_first(void);
+float engine_button_held_ratio(button_id_t button_id);
 
 #define BUTTON_KEYDOWN(button_id) engine_button_keydown(button_id)
 #define BUTTON_KEYUP(button_id) engine_button_keyup(button_id)
 #define BUTTON_PRESSED(button_id) engine_button_pressed(button_id)
 #define BUTTON_RELEASED(button_id) engine_button_released(button_id)
-
-static inline button_id_t engine_button_get_pressed_first()
-{
-  if (g_engine.buttons.left.pressed && g_engine.buttons.right.pressed)
-  {
-    if (platform_time_diff_us(g_engine.buttons.left.pressed_at,
-                              g_engine.buttons.right.pressed_at) < 0)
-      return BUTTON_RIGHT;
-    else
-      return BUTTON_LEFT;
-  }
-  if (g_engine.buttons.left.pressed)
-    return BUTTON_LEFT;
-  if (g_engine.buttons.right.pressed)
-    return BUTTON_RIGHT;
-  return BUTTON_NONE;
-}
-
-// helper functions for button holding
-static const int32_t ENGINE_BUTTON_HOLD_MS_TRIGGER = 300;
-static const int32_t ENGINE_BUTTON_HOLD_MS_CONFIRM = 1200;
-
-static inline float engine_button_held_ratio(button_id_t button_id)
-{
-  button_t *button = engine_button_from_id(button_id);
-  if (!button->pressed)
-    return 0.f;
-  int32_t ms = (int32_t)(platform_time_diff_us(button->pressed_at, g_engine.now) / 1000);
-  float held =
-      (ms - ENGINE_BUTTON_HOLD_MS_TRIGGER) /
-      (float)(ENGINE_BUTTON_HOLD_MS_CONFIRM - ENGINE_BUTTON_HOLD_MS_TRIGGER);
-  if (held < 0.f)
-    held = 0.f;
-  if (held > 1.f)
-    held = 1.f;
-  return held;
-}
 
 typedef struct
 {

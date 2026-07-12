@@ -3,19 +3,20 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-typedef uint64_t platform_time_t;
+#include <prism/types.h>
 
-#define PLATFORM_TIME_ZERO ((platform_time_t)0)
-#define PLATFORM_TIME_END ((platform_time_t)UINT64_MAX)
+typedef prism_time_t platform_time_t;
+
+#define PLATFORM_TIME_ZERO PRISM_TIME_ZERO
+#define PLATFORM_TIME_END PRISM_TIME_END
 
 platform_time_t platform_now_us(void);
 void platform_sleep_us(uint32_t us);
 void platform_sleep_ms(uint32_t ms);
 
-// Returns (to - from) in microseconds.
 static inline int64_t platform_time_diff_us(platform_time_t from,
                                             platform_time_t to) {
-  return (int64_t)(to - from);
+  return to >= from ? (int64_t)(to - from) : -(int64_t)(from - to);
 }
 
 static inline platform_time_t platform_time_add_ms(platform_time_t t,

@@ -30,7 +30,7 @@ static inline uint8_t beatline_difficulty_patch(beatline_difficulty_t difficulty
 // A single note in the chart. Sorted by hit_tick ascending.
 typedef struct
 {
-    uint32_t hit_tick;      // target judgment tick (ms, since tick rate=1000Hz)
+    uint32_t hit_tick;      // target judgment tick at PRISM_ENGINE_TICK_RATE
     uint8_t lane;           // BEATLINE_LANE_LEFT or BEATLINE_LANE_RIGHT
     uint8_t type;           // BEATLINE_NOTE_TAP or BEATLINE_NOTE_HOLD
     uint16_t hold_duration; // hold length in ticks (0 for taps)
