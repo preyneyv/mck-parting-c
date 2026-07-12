@@ -31,6 +31,11 @@ static uint8_t ring_read;
 static int dma_channel;
 static uint8_t pio_sm;
 static bool dma_using_ring_buffer;
+static audio_synth_t *playback_synth;
+
+#define AUDIO_BUFFER_BUDGET_US                                             \
+  ((AUDIO_BUFFER_SIZE * 1000000u + AUDIO_SAMPLE_RATE - 1u) /               \
+   AUDIO_SAMPLE_RATE)
 
 enum
 {
@@ -111,6 +116,9 @@ static void __isr audio_playback_write_dma_irq_handler(void)
   audio_buffer_t next_buffer = ring_acquire_read();
   if (next_buffer == NULL)
   {
+    if (dma_using_ring_buffer && playback_synth != NULL &&
+        audio_synth_analysis_enabled(playback_synth))
+      audio_synth_analysis_report_underrun(playback_synth);
     dma_channel_set_read_addr(dma_channel, silent_buffer, true);
     dma_using_ring_buffer = false;
   }
@@ -228,6 +236,7 @@ void audio_playback_init()
 
 void audio_playback_run_forever(audio_synth_t *synth)
 {
+  playback_synth = synth;
 #if PRISM_ENABLE_PERFORMANCE_LOGS
   TimingInstrumenter ti_synth;
   ti_init(&ti_synth);
@@ -254,7 +263,14 @@ void audio_playback_run_forever(audio_synth_t *synth)
 #if PRISM_ENABLE_PERFORMANCE_LOGS
     ti_start(&ti_synth);
 #endif
+    bool analysis_enabled = audio_synth_analysis_enabled(synth);
+    platform_time_t analysis_started_at =
+        analysis_enabled ? platform_now_us() : PLATFORM_TIME_ZERO;
     audio_synth_fill_buffer(synth, buffer, AUDIO_BUFFER_SIZE);
+    if (analysis_enabled &&
+        platform_time_diff_us(analysis_started_at, platform_now_us()) >
+            AUDIO_BUFFER_BUDGET_US)
+      audio_synth_analysis_report_late(synth);
 #if PRISM_ENABLE_PERFORMANCE_LOGS
     uint64_t elapsed_us = ti_stop(&ti_synth);
 #endif

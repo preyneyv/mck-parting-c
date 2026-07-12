@@ -292,6 +292,10 @@ static q1x15 PLATFORM_TIME_CRITICAL_FUNC(audio_synth_operator_update_env)(
       env->level = stage->level; // jump to target level
       env->evolution = 0;        // reset evolution
       env->stage++;              // move to next stage
+      /* A pluck has no sustain phase. Retire it as soon as decay reaches
+       * silence so the voice no longer consumes DSP or appears active. */
+      if (env->stage == 2 && env->level == Q1X31_ZERO)
+        env->stage = 4;
     }
   }
 
@@ -402,6 +406,64 @@ static inline q1x15 hard_limit_q17x15(int32_t x_q17_15)
   return q1x15_clamp_s32(x_q17_15);
 }
 
+static inline void audio_synth_analysis_publish_peak(audio_synth_t *synth,
+                                                     uint16_t peak)
+{
+  uint16_t current =
+      __atomic_load_n(&synth->analysis_peak, __ATOMIC_RELAXED);
+  while (current < peak &&
+         !__atomic_compare_exchange_n(&synth->analysis_peak, &current, peak,
+                                      true, __ATOMIC_RELAXED,
+                                      __ATOMIC_RELAXED))
+  {
+  }
+}
+
+static inline void audio_synth_message_queue_publish_peak(audio_synth_t *synth,
+                                                          uint16_t peak)
+{
+  uint16_t current =
+      __atomic_load_n(&synth->message_queue_peak, __ATOMIC_RELAXED);
+  while (current < peak &&
+         !__atomic_compare_exchange_n(&synth->message_queue_peak, &current,
+                                      peak, true, __ATOMIC_RELAXED,
+                                      __ATOMIC_RELAXED))
+  {
+  }
+}
+
+static inline void audio_synth_analysis_capture(audio_synth_t *synth,
+                                                int16_t sample)
+{
+  synth->analysis_samples[synth->analysis_write_index]
+                         [synth->analysis_write_offset++] = sample;
+  if (synth->analysis_write_offset < AUDIO_SYNTH_ANALYSIS_SAMPLE_COUNT)
+    return;
+
+  synth->analysis_generation++;
+  uint32_t published = (synth->analysis_generation << 1) |
+                       (uint32_t)synth->analysis_write_index;
+  __atomic_store_n(&synth->analysis_published, published, __ATOMIC_RELEASE);
+  synth->analysis_write_index ^= 1u;
+  synth->analysis_write_offset = 0;
+}
+
+static bool audio_synth_analysis_begin_buffer(audio_synth_t *synth)
+{
+  bool requested =
+      __atomic_load_n(&synth->analysis_requested, __ATOMIC_ACQUIRE);
+  if (requested == synth->analysis_active)
+    return requested;
+
+  synth->analysis_active = requested;
+  synth->analysis_write_index = 0;
+  synth->analysis_write_offset = 0;
+  synth->analysis_generation = 0;
+  __atomic_store_n(&synth->analysis_published, 0, __ATOMIC_RELEASE);
+  __atomic_store_n(&synth->analysis_peak, 0, __ATOMIC_RELAXED);
+  return requested;
+}
+
 void PLATFORM_TIME_CRITICAL_FUNC(audio_synth_fill_buffer)(
     audio_synth_t *synth, audio_buffer_t buffer, uint32_t buffer_size)
 {
@@ -413,6 +475,7 @@ void PLATFORM_TIME_CRITICAL_FUNC(audio_synth_fill_buffer)(
   while (messages_processed < AUDIO_SYNTH_MAX_MESSAGES_PER_BUFFER &&
          platform_queue_try_pop(synth->msg_queue, &msg))
   {
+    __atomic_fetch_sub(&synth->message_queue_depth, 1, __ATOMIC_RELAXED);
     audio_synth_handle_message(synth, &msg);
     messages_processed++;
   }
@@ -422,7 +485,7 @@ void PLATFORM_TIME_CRITICAL_FUNC(audio_synth_fill_buffer)(
   // misuse 32bit buffer as a 16bit mono buffer with room for overflow (so we
   // can clip later)
   memset(buffer, 0, buffer_size * sizeof(int32_t));
-  uint8_t active_voice_count = 0;
+  uint16_t active_voice_mask = 0;
   for (uint8_t voice_idx = 0; voice_idx < AUDIO_SYNTH_VOICE_COUNT;
        voice_idx++)
   {
@@ -430,7 +493,7 @@ void PLATFORM_TIME_CRITICAL_FUNC(audio_synth_fill_buffer)(
     if (audio_synth_voice_is_silent(voice))
       continue;
 
-    active_voice_count++;
+    active_voice_mask |= (uint16_t)(1u << voice_idx);
     audio_synth_voice_fill_buffer(voice, draft_voice, buffer_size);
     for (uint32_t i = 0; i < buffer_size; i++)
     {
@@ -442,13 +505,22 @@ void PLATFORM_TIME_CRITICAL_FUNC(audio_synth_fill_buffer)(
   // apply master level and write to output
   q1x15 master_level =
       __atomic_load_n(&synth->master_level, __ATOMIC_RELAXED);
-  if (active_voice_count == 0 || master_level == Q1X15_ZERO)
+  __atomic_store_n(&synth->active_voice_mask, active_voice_mask,
+                   __ATOMIC_RELEASE);
+  bool analysis_enabled = audio_synth_analysis_begin_buffer(synth);
+  if (active_voice_mask == 0 || master_level == Q1X15_ZERO)
   {
     // buffer is already zeroed; packed stereo zero frame is 0.
+    if (analysis_enabled)
+    {
+      for (uint32_t i = 0; i < buffer_size; i++)
+        audio_synth_analysis_capture(synth, 0);
+    }
     platform_mutex_unlock(synth->mutex);
     return;
   }
 
+  uint16_t output_peak = 0;
   for (uint32_t i = 0; i < buffer_size; i++)
   {
     int32_t sample = buffer[i];
@@ -457,7 +529,18 @@ void PLATFORM_TIME_CRITICAL_FUNC(audio_synth_fill_buffer)(
     // apply master level
     sample = q1x15_mul(master_level, sample);
     buffer[i] = audio_buffer_frame_from_mono((int16_t)sample);
+    if (analysis_enabled)
+    {
+      uint16_t magnitude = sample < 0 ? (uint16_t)(-sample)
+                                      : (uint16_t)sample;
+      if (magnitude > output_peak)
+        output_peak = magnitude;
+      audio_synth_analysis_capture(synth, (int16_t)sample);
+    }
   }
+
+  if (analysis_enabled)
+    audio_synth_analysis_publish_peak(synth, output_peak);
 
   platform_mutex_unlock(synth->mutex);
 }
@@ -469,6 +552,7 @@ static void audio_synth_panic_unlocked(audio_synth_t *synth)
   audio_synth_message_t message;
   while (platform_queue_try_pop(synth->msg_queue, &message))
   {
+    __atomic_fetch_sub(&synth->message_queue_depth, 1, __ATOMIC_RELAXED);
   }
 
   for (int voice_idx = 0; voice_idx < AUDIO_SYNTH_VOICE_COUNT; voice_idx++)
@@ -637,7 +721,21 @@ bool audio_synth_enqueue(audio_synth_t *synth,
 {
   if (synth == NULL || !audio_synth_message_is_valid(msg))
     return false;
-  return platform_queue_try_push(synth->msg_queue, msg);
+  /* Publish the depth first so the consumer can never pop an item before its
+   * matching increment becomes visible. Roll it back if the queue is full. */
+  uint16_t depth = (uint16_t)(__atomic_fetch_add(
+                                  &synth->message_queue_depth, 1,
+                                  __ATOMIC_RELAXED) +
+                              1u);
+  if (!platform_queue_try_push(synth->msg_queue, msg))
+  {
+    __atomic_fetch_sub(&synth->message_queue_depth, 1, __ATOMIC_RELAXED);
+    __atomic_fetch_add(&synth->message_queue_full_count, 1,
+                       __ATOMIC_RELAXED);
+    return false;
+  }
+  audio_synth_message_queue_publish_peak(synth, depth);
+  return true;
 }
 
 static void audio_synth_reset_voices_unlocked(audio_synth_t *synth)
@@ -684,4 +782,109 @@ void audio_synth_patch_config_set(audio_synth_t *synth, uint8_t patch_idx,
 void audio_synth_set_master_level(audio_synth_t *synth, q1x15 level)
 {
   __atomic_store_n(&synth->master_level, level, __ATOMIC_RELAXED);
+}
+
+void audio_synth_analysis_set_enabled(audio_synth_t *synth, bool enabled)
+{
+  if (synth == NULL)
+    return;
+  __atomic_store_n(&synth->analysis_requested, enabled, __ATOMIC_RELEASE);
+}
+
+uint16_t audio_synth_active_voice_mask(const audio_synth_t *synth)
+{
+  if (synth == NULL)
+    return 0;
+  return __atomic_load_n(&synth->active_voice_mask, __ATOMIC_ACQUIRE);
+}
+
+uint16_t audio_synth_analysis_take_peak(audio_synth_t *synth)
+{
+  if (synth == NULL)
+    return 0;
+  return __atomic_exchange_n(&synth->analysis_peak, 0, __ATOMIC_ACQ_REL);
+}
+
+bool audio_synth_analysis_snapshot(
+    const audio_synth_t *synth,
+    int16_t samples[AUDIO_SYNTH_ANALYSIS_SAMPLE_COUNT], uint32_t *sequence)
+{
+  if (synth == NULL || samples == NULL || sequence == NULL)
+    return false;
+
+  for (uint8_t attempt = 0; attempt < 3; attempt++)
+  {
+    uint32_t published =
+        __atomic_load_n(&synth->analysis_published, __ATOMIC_ACQUIRE);
+    if (published == 0 || published == *sequence)
+      return false;
+
+    uint8_t index = (uint8_t)(published & 1u);
+    memcpy(samples, synth->analysis_samples[index],
+           sizeof(synth->analysis_samples[index]));
+    if (__atomic_load_n(&synth->analysis_published, __ATOMIC_ACQUIRE) ==
+        published)
+    {
+      *sequence = published;
+      return true;
+    }
+  }
+  return false;
+}
+
+bool audio_synth_analysis_enabled(const audio_synth_t *synth)
+{
+  return synth != NULL &&
+         __atomic_load_n(&synth->analysis_requested, __ATOMIC_ACQUIRE);
+}
+
+uint16_t audio_synth_message_queue_depth(const audio_synth_t *synth)
+{
+  if (synth == NULL)
+    return 0;
+  return __atomic_load_n(&synth->message_queue_depth, __ATOMIC_RELAXED);
+}
+
+uint16_t audio_synth_message_queue_take_peak(audio_synth_t *synth)
+{
+  if (synth == NULL)
+    return 0;
+  uint16_t depth =
+      __atomic_load_n(&synth->message_queue_depth, __ATOMIC_RELAXED);
+  uint16_t peak = __atomic_exchange_n(&synth->message_queue_peak, depth,
+                                      __ATOMIC_ACQ_REL);
+  return peak > depth ? peak : depth;
+}
+
+uint32_t audio_synth_message_queue_full_count(const audio_synth_t *synth)
+{
+  if (synth == NULL)
+    return 0;
+  return __atomic_load_n(&synth->message_queue_full_count, __ATOMIC_RELAXED);
+}
+
+uint32_t audio_synth_analysis_late_count(const audio_synth_t *synth)
+{
+  if (synth == NULL)
+    return 0;
+  return __atomic_load_n(&synth->analysis_late_count, __ATOMIC_RELAXED);
+}
+
+uint32_t audio_synth_analysis_underrun_count(const audio_synth_t *synth)
+{
+  if (synth == NULL)
+    return 0;
+  return __atomic_load_n(&synth->analysis_underrun_count, __ATOMIC_RELAXED);
+}
+
+void audio_synth_analysis_report_late(audio_synth_t *synth)
+{
+  if (synth != NULL)
+    __atomic_fetch_add(&synth->analysis_late_count, 1, __ATOMIC_RELAXED);
+}
+
+void audio_synth_analysis_report_underrun(audio_synth_t *synth)
+{
+  if (synth != NULL)
+    __atomic_fetch_add(&synth->analysis_underrun_count, 1, __ATOMIC_RELAXED);
 }

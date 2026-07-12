@@ -7,6 +7,7 @@
 #include "synth.h"
 
 #define AUDIO_SYNTH_VOICE_COUNT 12
+#define AUDIO_SYNTH_ANALYSIS_SAMPLE_COUNT 1024
 #define AUDIO_SYNTH_LUT_RES 10
 #define AUDIO_SYNTH_LUT_SIZE (1 << AUDIO_SYNTH_LUT_RES)
 #define AUDIO_SYNTH_MESSAGE_QUEUE_SIZE 64
@@ -59,6 +60,20 @@ struct audio_synth_t
   audio_synth_patch_config_t patches[AUDIO_SYNTH_PATCH_COUNT];
   platform_queue_t *msg_queue;
   platform_mutex_t *mutex;
+  uint16_t message_queue_depth;
+  uint16_t message_queue_peak;
+  uint32_t message_queue_full_count;
+  uint16_t active_voice_mask;
+  uint16_t analysis_peak;
+  uint32_t analysis_late_count;
+  uint32_t analysis_underrun_count;
+  bool analysis_requested;
+  bool analysis_active;
+  uint8_t analysis_write_index;
+  uint16_t analysis_write_offset;
+  uint32_t analysis_generation;
+  uint32_t analysis_published;
+  int16_t analysis_samples[2][AUDIO_SYNTH_ANALYSIS_SAMPLE_COUNT];
 };
 
 void audio_synth_init(audio_synth_t *synth, float sample_rate,
@@ -68,3 +83,17 @@ void audio_synth_panic_sync(audio_synth_t *synth);
 void audio_synth_fill_buffer(audio_synth_t *synth, audio_buffer_t buffer,
                              uint32_t buffer_size);
 void audio_synth_set_master_level(audio_synth_t *synth, q1x15 level);
+void audio_synth_analysis_set_enabled(audio_synth_t *synth, bool enabled);
+uint16_t audio_synth_active_voice_mask(const audio_synth_t *synth);
+uint16_t audio_synth_analysis_take_peak(audio_synth_t *synth);
+bool audio_synth_analysis_snapshot(
+    const audio_synth_t *synth,
+    int16_t samples[AUDIO_SYNTH_ANALYSIS_SAMPLE_COUNT], uint32_t *sequence);
+bool audio_synth_analysis_enabled(const audio_synth_t *synth);
+uint16_t audio_synth_message_queue_depth(const audio_synth_t *synth);
+uint16_t audio_synth_message_queue_take_peak(audio_synth_t *synth);
+uint32_t audio_synth_message_queue_full_count(const audio_synth_t *synth);
+uint32_t audio_synth_analysis_late_count(const audio_synth_t *synth);
+uint32_t audio_synth_analysis_underrun_count(const audio_synth_t *synth);
+void audio_synth_analysis_report_late(audio_synth_t *synth);
+void audio_synth_analysis_report_underrun(audio_synth_t *synth);

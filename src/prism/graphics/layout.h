@@ -24,6 +24,14 @@ typedef enum
   ELM_ALIGN_BOTTOM_RIGHT,
 } elm_align_t;
 
+typedef struct
+{
+  uint8_t top;
+  uint8_t right;
+  uint8_t bottom;
+  uint8_t left;
+} elm_insets_t;
+
 static inline vec2_t elm_aligned_position(vec2_t pos, uint16_t w, uint16_t h,
                                           elm_align_t align)
 {
@@ -183,6 +191,36 @@ static inline elm_t elm_str(elm_t *parent, vec2_t pos, const char *str)
 {
   elm_t child = elm_child(parent, pos);
   u8g2_DrawStr(child.u8g2, child.pos.x, child.pos.y, str);
+  return child;
+}
+
+/* Draw measured text in a padded frame. When filled, XOR only the interior so
+ * the frame remains stable while the text becomes dark on a light field. The
+ * caller selects the font and supplies its pixel height. */
+static inline elm_t elm_boxed_text(elm_t *parent, vec2_t pos,
+                                   const char *text, elm_align_t align,
+                                   uint8_t text_height, elm_insets_t padding,
+                                   bool filled)
+{
+  u8g2_t *u8g2 = parent->u8g2;
+  uint16_t width = (uint16_t)(u8g2_GetStrWidth(u8g2, text) + padding.left +
+                              padding.right + 2u);
+  uint16_t height =
+      (uint16_t)(text_height + padding.top + padding.bottom + 2u);
+  elm_t child = elm_child_aligned(parent, pos, width, height, align);
+
+  u8g2_SetDrawColor(u8g2, 1);
+  elm_frame(&child, VEC2_Z, width, height);
+  elm_str(&child,
+          vec2((int16_t)(padding.left + 1u),
+               (int16_t)(padding.top + text_height + 1u)),
+          text);
+  if (filled && width > 2 && height > 2)
+  {
+    u8g2_SetDrawColor(u8g2, 2);
+    elm_box(&child, vec2(1, 1), width - 2u, height - 2u);
+    u8g2_SetDrawColor(u8g2, 1);
+  }
   return child;
 }
 
