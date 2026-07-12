@@ -11,7 +11,7 @@ write_l:
   jmp x-- write_l   side 0b10
 clock_r:
   set x, 14         side 0b01 ; 16 bit depth, -2 for timing
-  pull noblock      side 0b11
+  nop               side 0b11
 write_r:
   out pins, 1       side 0b01
   jmp x-- write_r   side 0b11

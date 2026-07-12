@@ -1,164 +1,141 @@
+#include <stdio.h>
+
 #include <tusb.h>
 
-#include <shared/engine.h>
-#include <shared/audio/synth.h>
 #include <shared/audio/midi.h>
+#include <shared/engine.h>
 #include <shared/os/midi_mode.h>
 
-static void handle_sysex(uint8_t *data, int len)
+enum
 {
+  MIDI_NOTE_OFF = 0x80,
+  MIDI_NOTE_ON = 0x90,
+  MIDI_CONTROL_CHANGE = 0xb0,
+  MIDI_ALL_SOUND_OFF = 120,
+  MIDI_ALL_NOTES_OFF = 123,
+  SYSEX_CAPACITY = 1024,
+};
 
-    audio_synth_sysex_cmd_t cmd;
-    if (!audio_synth_sysex_cmd_parse(data, len, &cmd))
-    {
-        printf("  [ERR] failed to parse sysex\n");
-        printf("SysEx (%d): ", len);
-        for (int i = 0; i < len; i++)
-            printf("%02X ", data[i]);
-        printf("\n");
-        return;
-    }
+static uint8_t sysex_buffer[SYSEX_CAPACITY];
+static size_t sysex_length;
+static bool sysex_overflow;
+static audio_synth_message_t pending_message;
+static bool message_pending;
 
-    switch (cmd.cmd)
-    {
-    case AUDIO_SYNTH_SYSEX_CMD_SET_PATCH:
-        // printf("  Set Patch SysEx: patch_idx=%d\n", cmd.data.set_patch.patch_idx);
-        audio_synth_patch_config_set(&g_engine.synth,
-                                     cmd.data.set_patch.patch_idx,
-                                     cmd.data.set_patch.patch);
-        break;
-    default:
-        printf("  [ERR] unknown sysex cmd %d\n", cmd.cmd);
-        break;
-    }
+static void handle_sysex(const uint8_t *data, size_t length)
+{
+  audio_synth_sysex_cmd_t command;
+  if (!audio_synth_sysex_cmd_parse(data, length, &command))
+  {
+    printf("midi: invalid sysex (%lu bytes)\n", (unsigned long)length);
+    return;
+  }
+
+  if (command.cmd == AUDIO_SYNTH_SYSEX_CMD_SET_PATCH)
+    audio_synth_patch_config_set(engine_synth(), command.data.set_patch.patch_idx,
+                                 command.data.set_patch.patch);
 }
 
-static void handle_midi(uint8_t status, uint8_t d1, uint8_t d2)
+static bool submit_message(const audio_synth_message_t *message)
 {
-    uint8_t type = status & 0xF0;
-    uint8_t ch = status & 0x0F;
-
-    switch (type)
-    {
-    case 0x90: // note on
-        if (d2 == 0)
-        {
-            // note on zero velocity = note off
-            audio_synth_enqueue(&g_engine.synth,
-                                &(audio_synth_message_t){
-                                    .type = AUDIO_SYNTH_MESSAGE_NOTE_OFF,
-                                    .data.note_off = {
-                                        .patch_idx = ch,
-                                        .note_number = d1,
-                                    }});
-            // printf("Note OFF   ch=%d note=%d vel=%d\n", ch + 1, d1, d2);
-        }
-        else
-        {
-            // note on >0 velocity
-            audio_synth_enqueue(&g_engine.synth,
-                                &(audio_synth_message_t){
-                                    .type = AUDIO_SYNTH_MESSAGE_NOTE_ON,
-                                    .data.note_on = {
-                                        .patch_idx = ch,
-                                        .note_number = d1,
-                                        .velocity = d2,
-                                    }});
-
-            // printf("Note ON   ch=%d note=%d vel=%d\n", ch + 1, d1, d2);
-        }
-        break;
-
-    case 0x80: // note off
-    {
-        // note off
-        audio_synth_enqueue(&g_engine.synth,
-                            &(audio_synth_message_t){
-                                .type = AUDIO_SYNTH_MESSAGE_NOTE_OFF,
-                                .data.note_off = {
-                                    .patch_idx = ch,
-                                    .note_number = d1,
-                                }});
-        // printf("Note OFF  ch=%d note=%d vel=%d\n", ch + 1, d1, d2);
-        break;
-    }
-
-    case 0xB0: // control change
-        if (d1 == 123)
-        {
-            // release all notes on patch
-            audio_synth_enqueue(&g_engine.synth,
-                                &(audio_synth_message_t){
-                                    .type = AUDIO_SYNTH_MESSAGE_NOTE_OFF,
-                                    .data.note_off = {
-                                        .patch_idx = ch,
-                                        .note_number = -1,
-                                    }});
-            // printf("All Notes Off ch=%d\n", ch + 1);
-        }
-        else if (d1 == 120)
-        {
-
-            audio_synth_enqueue(&g_engine.synth,
-                                &(audio_synth_message_t){
-                                    .type = AUDIO_SYNTH_MESSAGE_PANIC,
-                                    .data.panic = {}});
-            // printf("PANIC (All Sound Off) ch=%d\n", ch + 1);
-        }
-        break;
-
-    default:
-        break;
-    }
+  if (audio_synth_enqueue(engine_synth(), message))
+    return true;
+  pending_message = *message;
+  message_pending = true;
+  return false;
 }
 
-#define SYSEX_MAX 1024
+static bool enqueue_note(uint8_t type, uint8_t patch, int8_t note,
+                         uint8_t velocity)
+{
+  audio_synth_message_t message = {.type = type};
+  if (type == AUDIO_SYNTH_MESSAGE_NOTE_ON)
+  {
+    message.data.note_on.patch_idx = patch;
+    message.data.note_on.note_number = (uint8_t)note;
+    message.data.note_on.velocity = velocity;
+  }
+  else
+  {
+    message.data.note_off.patch_idx = patch;
+    message.data.note_off.note_number = note;
+  }
+  return submit_message(&message);
+}
 
-static uint8_t sysex_buf[SYSEX_MAX];
-static int sysex_len = 0;
+static bool handle_midi_message(uint8_t status, uint8_t data1, uint8_t data2)
+{
+  uint8_t type = status & 0xf0;
+  uint8_t channel = status & 0x0f;
+
+  switch (type)
+  {
+  case MIDI_NOTE_ON:
+    return enqueue_note(data2 == 0 ? AUDIO_SYNTH_MESSAGE_NOTE_OFF
+                                   : AUDIO_SYNTH_MESSAGE_NOTE_ON,
+                        channel, (int8_t)data1, data2);
+  case MIDI_NOTE_OFF:
+    return enqueue_note(AUDIO_SYNTH_MESSAGE_NOTE_OFF, channel, (int8_t)data1,
+                        0);
+  case MIDI_CONTROL_CHANGE:
+    if (data1 == MIDI_ALL_NOTES_OFF)
+      return enqueue_note(AUDIO_SYNTH_MESSAGE_NOTE_OFF, channel, -1, 0);
+    else if (data1 == MIDI_ALL_SOUND_OFF)
+    {
+      audio_synth_message_t panic = {.type = AUDIO_SYNTH_MESSAGE_PANIC};
+      return submit_message(&panic);
+    }
+    return true;
+  default:
+    return true;
+  }
+}
+
+static void append_sysex_packet(const uint8_t packet[4], uint8_t code)
+{
+  uint8_t byte_count = code == 0x5 ? 1 : code == 0x6 ? 2 : 3;
+  for (uint8_t i = 0; i < byte_count; ++i)
+  {
+    if (sysex_length < sizeof(sysex_buffer))
+      sysex_buffer[sysex_length++] = packet[i + 1];
+    else
+      sysex_overflow = true;
+  }
+
+  if (code == 0x4)
+    return;
+  if (!sysex_overflow)
+    handle_sysex(sysex_buffer, sysex_length);
+  sysex_length = 0;
+  sysex_overflow = false;
+}
 
 void midi_task(void)
 {
-    uint8_t packet[4];
+  if (!tud_mounted())
+  {
+    prism_midi_mode_usb_disconnected();
+    sysex_length = 0;
+    sysex_overflow = false;
+    message_pending = false;
+    return;
+  }
 
-    if (!tud_mounted())
-    {
-        prism_midi_mode_usb_disconnected();
-        sysex_len = 0;
-        return;
-    }
+  if (message_pending)
+  {
+    if (!audio_synth_enqueue(engine_synth(), &pending_message))
+      return;
+    message_pending = false;
+  }
 
-    while (tud_midi_available())
-    {
-        // printf("midi_task: checking for MIDI data...\n");
-        tud_midi_packet_read(packet);
-        prism_midi_mode_enter();
-
-        uint8_t cin = packet[0] & 0x0F;
-        uint8_t status = packet[1];
-
-        // ---------- SysEx ----------
-        if (cin >= 0x4 && cin <= 0x7)
-        {
-            int bytes = 3;
-            if (cin == 0x5)
-                bytes = 1;
-            if (cin == 0x6)
-                bytes = 2;
-
-            for (int i = 0; i < bytes && sysex_len < SYSEX_MAX; i++)
-                sysex_buf[sysex_len++] = packet[1 + i];
-
-            if (cin != 0x4) // end of sysex
-            {
-                handle_sysex(sysex_buf, sysex_len);
-                sysex_len = 0;
-            }
-
-            continue;
-        }
-
-        // ---------- regular midi ----------
-        handle_midi(status, packet[2], packet[3]);
-    }
+  uint8_t packet[4];
+  while (tud_midi_available() && tud_midi_packet_read(packet))
+  {
+    prism_midi_mode_enter();
+    uint8_t code = packet[0] & 0x0f;
+    if (code >= 0x4 && code <= 0x7)
+      append_sysex_packet(packet, code);
+    else if (!handle_midi_message(packet[1], packet[2], packet[3]))
+      return;
+  }
 }

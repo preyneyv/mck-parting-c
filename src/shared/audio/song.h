@@ -94,8 +94,12 @@ typedef struct
 
   const audio_song_event_t *events;
   uint32_t event_count;
+  /* Optional engine-rate timestamps generated alongside events for games
+   * that need sub-millisecond chart alignment. */
+  const uint32_t *event_ticks;
 
   uint32_t duration_ms;
+  uint32_t duration_ticks;
   uint32_t loop_start_ms;
   uint32_t loop_end_ms; // 0 = use duration_ms
 } audio_song_asset_t;
@@ -141,6 +145,9 @@ struct audio_song_player_t
   uint32_t song_time_ms;
   uint32_t last_engine_ms;
   uint32_t next_event_idx;
+
+  bool pending_event_hooked;
+  audio_song_event_action_t pending_event_action;
 
   audio_song_event_hook_desc_t hook;
 };

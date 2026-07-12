@@ -2,7 +2,7 @@
 
 #include <platform/display.h>
 #include <shared/engine.h>
-#include <shared/utils/elm.h>
+#include <prism/graphics/layout.h>
 
 #include "midi_mode.h"
 
@@ -37,7 +37,7 @@ static app_t app_midi_mode = {
     .frame = frame,
 };
 
-bool prism_midi_mode_active(void) { return g_engine.app == &app_midi_mode; }
+bool prism_midi_mode_active(void) { return engine_is_app(&app_midi_mode); }
 
 void prism_midi_mode_enter(void)
 {

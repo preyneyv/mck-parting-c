@@ -3,7 +3,7 @@
 #include <SDL.h>
 #include <stdbool.h>
 
-#include <shared/audio/synth.h>
+#include <shared/audio/synth_internal.h>
 #include <shared/config.h>
 
 #include "config.h"
@@ -41,8 +41,16 @@ void audio_playback_run_forever(audio_synth_t *synth)
     SDL_Delay(1000);
 }
 
-void audio_playback_set_enabled(bool enabled)
+void audio_playback_suspend(void)
 {
   if (audio_device != 0)
-    SDL_PauseAudioDevice(audio_device, enabled ? 0 : 1);
+    SDL_PauseAudioDevice(audio_device, 1);
+}
+
+void audio_playback_set_enabled(bool enabled) { (void)enabled; }
+
+void audio_playback_resume(void)
+{
+  if (audio_device != 0)
+    SDL_PauseAudioDevice(audio_device, 0);
 }

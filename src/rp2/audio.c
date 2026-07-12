@@ -1,36 +1,81 @@
-#include <stdio.h>
-
 #include <hardware/dma.h>
 #include <hardware/pio.h>
+#include <hardware/sync.h>
+
+#include "config.h"
 
 #include <shared/audio/buffer.h>
-#include <shared/audio/synth.h>
+#include <shared/audio/synth_internal.h>
+#if PRISM_ENABLE_PERFORMANCE_LOGS
+#include <stdio.h>
 #include <shared/utils/timing.h>
+#endif
 
 #include "audio.h"
 #include "audio.pio.h"
-#include "config.h"
 
-// Math for PIO frequency calculations
-static const uint32_t BCLK_HZ =
-    AUDIO_SAMPLE_RATE * AUDIO_BIT_DEPTH * 2; // 2 channels
-static const uint32_t LRCK_HZ = AUDIO_SAMPLE_RATE;
-static const uint32_t SM_BCLK = BCLK_HZ; // 2 clocks per bit
+static const uint32_t SM_CLOCK_HZ =
+    AUDIO_SAMPLE_RATE * AUDIO_BIT_DEPTH * 2u * 2u;
 
-static const uint32_t SM_CLKDIV_INT = SYS_CLOCK_HZ / SM_BCLK;
-static const uint32_t SM_CLKDIV_FRAC = (SYS_CLOCK_HZ % SM_BCLK) * 256 / SM_BCLK;
+static const uint32_t SM_CLKDIV_INT = SYS_CLOCK_HZ / SM_CLOCK_HZ;
+static const uint32_t SM_CLKDIV_FRAC =
+    (SYS_CLOCK_HZ % SM_CLOCK_HZ) * 256 / SM_CLOCK_HZ;
 
-// todo: stop clocking bclk / lrck when not playing audio for power saving
-
-// Shared state
 /* DMA masters are not paused by multicore flash lockout. Keep the fallback
  * source in SRAM so an audio underrun cannot make DMA touch XIP while core 0
  * is erasing or programming cartridge flash. */
-static uint32_t SILENT_BUFFER[AUDIO_BUFFER_SIZE];
-static audio_buffer_pool_t pool;
+static uint32_t silent_buffer[AUDIO_BUFFER_SIZE];
+static uint32_t audio_buffers[AUDIO_BUFFER_RING_SLOTS][AUDIO_BUFFER_SIZE];
+static uint8_t ring_write;
+static uint8_t ring_read;
 static int dma_channel;
+static uint8_t pio_sm;
+static bool dma_using_ring_buffer;
 
-// initialize pio state machine for i2s
+enum
+{
+  AUDIO_RUNNING,
+  AUDIO_SUSPEND_REQUESTED,
+  AUDIO_SUSPENDED,
+  AUDIO_RESUME_REQUESTED,
+};
+
+static uint8_t audio_state = AUDIO_RUNNING;
+
+static inline uint8_t ring_next(uint8_t index)
+{
+  return (uint8_t)((index + 1u) & (AUDIO_BUFFER_RING_SLOTS - 1u));
+}
+
+static audio_buffer_t ring_acquire_write(void)
+{
+  uint8_t write = __atomic_load_n(&ring_write, __ATOMIC_RELAXED);
+  uint8_t next = ring_next(write);
+  while (next == __atomic_load_n(&ring_read, __ATOMIC_ACQUIRE))
+    __wfi();
+  return audio_buffers[write];
+}
+
+static void ring_commit_write(void)
+{
+  uint8_t write = __atomic_load_n(&ring_write, __ATOMIC_RELAXED);
+  __atomic_store_n(&ring_write, ring_next(write), __ATOMIC_RELEASE);
+}
+
+static audio_buffer_t ring_acquire_read(void)
+{
+  uint8_t read = __atomic_load_n(&ring_read, __ATOMIC_RELAXED);
+  if (read == __atomic_load_n(&ring_write, __ATOMIC_ACQUIRE))
+    return NULL;
+  return audio_buffers[read];
+}
+
+static void ring_commit_read(void)
+{
+  uint8_t read = __atomic_load_n(&ring_read, __ATOMIC_RELAXED);
+  __atomic_store_n(&ring_read, ring_next(read), __ATOMIC_RELEASE);
+}
+
 static void audio_playback_write_pio_init(PIO pio, uint8_t sm)
 {
   int offset = pio_add_program(pio, &audio_playback_write_program);
@@ -58,33 +103,24 @@ static void audio_playback_write_pio_init(PIO pio, uint8_t sm)
 
 static void __isr audio_playback_write_dma_irq_handler(void)
 {
-  // clear the interrupt
   dma_hw->ints0 = 1u << dma_channel;
 
-  static bool using_pool_buffer = false;
+  if (dma_using_ring_buffer)
+    ring_commit_read();
 
-  if (using_pool_buffer)
-  {
-    // return borrowed buffer to pool
-    audio_buffer_pool_commit_read(&pool);
-  }
-  // get next buffer if available, otherwise use silent buffer
-  audio_buffer_t next_buffer = audio_buffer_pool_acquire_read(&pool, false);
+  audio_buffer_t next_buffer = ring_acquire_read();
   if (next_buffer == NULL)
   {
-    // no buffer available, use silent buffer
-    printf("pop!\n");
-    dma_channel_set_read_addr(dma_channel, SILENT_BUFFER, true);
-    using_pool_buffer = false;
+    dma_channel_set_read_addr(dma_channel, silent_buffer, true);
+    dma_using_ring_buffer = false;
   }
   else
   {
     dma_channel_set_read_addr(dma_channel, next_buffer, true);
-    using_pool_buffer = true;
+    dma_using_ring_buffer = true;
   }
 }
 
-// initialize dma for copying into pio tx fifo
 static void audio_playback_write_dma_init(PIO pio, uint8_t sm)
 {
   dma_channel = dma_claim_unused_channel(true);
@@ -94,8 +130,7 @@ static void audio_playback_write_dma_init(PIO pio, uint8_t sm)
   channel_config_set_read_increment(&c, true);
   channel_config_set_write_increment(&c, false);
 
-  // read from silent buffer first (will be swapped after first write)
-  dma_channel_configure(dma_channel, &c, &pio->txf[sm], SILENT_BUFFER,
+  dma_channel_configure(dma_channel, &c, &pio->txf[sm], silent_buffer,
                         AUDIO_BUFFER_SIZE, false);
 
   dma_channel_set_irq0_enabled(dma_channel, true);
@@ -105,57 +140,139 @@ static void audio_playback_write_dma_init(PIO pio, uint8_t sm)
   dma_channel_start(dma_channel);
 }
 
+static void audio_hardware_suspend(void)
+{
+  dma_channel_set_irq0_enabled(dma_channel, false);
+  pio_sm_set_enabled(AUDIO_I2S_PIO, pio_sm, false);
+  dma_channel_abort(dma_channel);
+  dma_hw->ints0 = 1u << dma_channel;
+  dma_using_ring_buffer = false;
+  __atomic_store_n(&ring_read, 0, __ATOMIC_RELAXED);
+  __atomic_store_n(&ring_write, 0, __ATOMIC_RELAXED);
+}
+
+static void audio_hardware_resume(void)
+{
+  pio_sm_clear_fifos(AUDIO_I2S_PIO, pio_sm);
+  pio_sm_restart(AUDIO_I2S_PIO, pio_sm);
+  pio_sm_clkdiv_restart(AUDIO_I2S_PIO, pio_sm);
+
+  dma_channel_set_read_addr(dma_channel, silent_buffer, false);
+  dma_channel_set_trans_count(dma_channel, AUDIO_BUFFER_SIZE, false);
+  dma_hw->ints0 = 1u << dma_channel;
+  dma_channel_set_irq0_enabled(dma_channel, true);
+  dma_channel_start(dma_channel);
+  pio_sm_set_enabled(AUDIO_I2S_PIO, pio_sm, true);
+}
+
+static void __no_inline_not_in_flash_func(audio_core_park)(void)
+{
+  uint32_t interrupts = save_and_disable_interrupts();
+  __atomic_store_n(&audio_state, AUDIO_SUSPENDED, __ATOMIC_RELEASE);
+  __sev();
+  while (__atomic_load_n(&audio_state, __ATOMIC_ACQUIRE) !=
+         AUDIO_RESUME_REQUESTED)
+    __wfe();
+  restore_interrupts(interrupts);
+}
+
+static void audio_core_suspend(void)
+{
+  audio_hardware_suspend();
+  audio_core_park();
+  audio_hardware_resume();
+  __atomic_store_n(&audio_state, AUDIO_RUNNING, __ATOMIC_RELEASE);
+  __sev();
+}
+
+static bool audio_suspend_requested(void)
+{
+  return __atomic_load_n(&audio_state, __ATOMIC_ACQUIRE) ==
+         AUDIO_SUSPEND_REQUESTED;
+}
+
 void audio_playback_set_enabled(bool enabled)
 {
   gpio_put(AUDIO_I2S_EN, enabled);
 }
 
-// setup DMA and PIO for audio playback
-static void audio_playback_begin() {}
+void audio_playback_suspend(void)
+{
+  gpio_put(AUDIO_I2S_EN, false);
+  __atomic_store_n(&audio_state, AUDIO_SUSPEND_REQUESTED, __ATOMIC_RELEASE);
+  while (__atomic_load_n(&audio_state, __ATOMIC_ACQUIRE) != AUDIO_SUSPENDED)
+    __wfe();
+}
+
+void audio_playback_resume(void)
+{
+  __atomic_store_n(&audio_state, AUDIO_RESUME_REQUESTED, __ATOMIC_RELEASE);
+  __sev();
+  while (__atomic_load_n(&audio_state, __ATOMIC_ACQUIRE) != AUDIO_RUNNING)
+    __wfe();
+  gpio_put(AUDIO_I2S_EN, true);
+}
 
 void audio_playback_init()
 {
   gpio_init(AUDIO_I2S_EN);
   gpio_set_dir(AUDIO_I2S_EN, GPIO_OUT);
-  audio_playback_set_enabled(true);
+  gpio_put(AUDIO_I2S_EN, true);
 
-  audio_buffer_pool_init(&pool, AUDIO_BUFFER_POOL_SIZE, AUDIO_BUFFER_SIZE);
+  pio_sm = pio_claim_unused_sm(AUDIO_I2S_PIO, true);
 
-  uint8_t sm = pio_claim_unused_sm(AUDIO_I2S_PIO, true);
-
-  audio_playback_write_pio_init(AUDIO_I2S_PIO, sm);
-  audio_playback_write_dma_init(AUDIO_I2S_PIO, sm);
+  audio_playback_write_pio_init(AUDIO_I2S_PIO, pio_sm);
+  audio_playback_write_dma_init(AUDIO_I2S_PIO, pio_sm);
+  __atomic_store_n(&audio_state, AUDIO_RUNNING, __ATOMIC_RELEASE);
 }
 
 void audio_playback_run_forever(audio_synth_t *synth)
 {
-  // todo: pause and resume when sleep, no audio, etc. good power saving to be
-  // had.
+#if PRISM_ENABLE_PERFORMANCE_LOGS
   TimingInstrumenter ti_synth;
+  ti_init(&ti_synth);
 
-  int i = 0;
-  int buf_per_sec = AUDIO_SAMPLE_RATE / AUDIO_BUFFER_SIZE;
-  float ms_per_buf = 1000.0f / (float)buf_per_sec;
+  uint32_t buffers_since_log = 0;
+  const uint32_t buffers_per_second = AUDIO_SAMPLE_RATE / AUDIO_BUFFER_SIZE;
+  const float buffer_budget_ms = 1000.0f / (float)buffers_per_second;
+#endif
+
   while (true)
   {
-    audio_buffer_t buffer = audio_buffer_pool_acquire_write(&pool, true);
-    ti_start(&ti_synth);
-    audio_synth_fill_buffer(synth, buffer, pool.buffer_size);
-    uint64_t elapsed = ti_stop(&ti_synth);
-    audio_buffer_pool_commit_write(&pool);
+    if (audio_suspend_requested())
+    {
+      audio_core_suspend();
+      continue;
+    }
 
-    if (elapsed > ms_per_buf * 1000)
+    audio_buffer_t buffer = ring_acquire_write();
+    if (audio_suspend_requested())
+    {
+      audio_core_suspend();
+      continue;
+    }
+#if PRISM_ENABLE_PERFORMANCE_LOGS
+    ti_start(&ti_synth);
+#endif
+    audio_synth_fill_buffer(synth, buffer, AUDIO_BUFFER_SIZE);
+#if PRISM_ENABLE_PERFORMANCE_LOGS
+    uint64_t elapsed_us = ti_stop(&ti_synth);
+#endif
+    ring_commit_write();
+
+#if PRISM_ENABLE_PERFORMANCE_LOGS
+    if (elapsed_us > (uint64_t)(buffer_budget_ms * 1000.0f))
     {
       printf("synth warning: buffer generation took %.2f ms (%.2f ms budget)\n",
-             elapsed / 1000.0f, ms_per_buf);
+             elapsed_us / 1000.0f, buffer_budget_ms);
     }
 
-    if (i > buf_per_sec)
+    if (++buffers_since_log >= buffers_per_second)
     {
-      i = 0;
+      buffers_since_log = 0;
       printf("synth: %.2f ms / %.2f ms\n", ti_get_average_ms(&ti_synth, true),
-             ms_per_buf);
+             buffer_budget_ms);
     }
-    i++;
+#endif
   }
 }

@@ -1,4 +1,5 @@
 #include "song.h"
+#include "synth_internal.h"
 
 #include <assert.h>
 #include <stdio.h>
@@ -68,11 +69,11 @@ static bool song_event_is_due(const audio_song_event_t *event,
   return event->time_ms >= from_ms && event->time_ms <= to_ms;
 }
 
-static void song_dispatch_to_synth(audio_song_player_t *player,
+static bool song_dispatch_to_synth(audio_song_player_t *player,
                                    const audio_song_event_t *event)
 {
   if (player->synth == NULL || event == NULL)
-    return;
+    return true;
 
   switch (event->type)
   {
@@ -80,7 +81,7 @@ static void song_dispatch_to_synth(audio_song_player_t *player,
   {
     uint8_t patch_idx =
         song_map_patch_idx(player, event->data.note_on.patch_idx);
-    audio_synth_enqueue(
+    return audio_synth_enqueue(
         player->synth,
         &(audio_synth_message_t){
             .type = AUDIO_SYNTH_MESSAGE_NOTE_ON,
@@ -90,13 +91,12 @@ static void song_dispatch_to_synth(audio_song_player_t *player,
                     .note_number = event->data.note_on.note_number,
                     .velocity = event->data.note_on.velocity,
                 }});
-    break;
   }
   case AUDIO_SONG_EVENT_NOTE_OFF:
   {
     uint8_t patch_idx =
         song_map_patch_idx(player, event->data.note_off.patch_idx);
-    audio_synth_enqueue(
+    return audio_synth_enqueue(
         player->synth,
         &(audio_synth_message_t){
             .type = AUDIO_SYNTH_MESSAGE_NOTE_OFF,
@@ -105,7 +105,6 @@ static void song_dispatch_to_synth(audio_song_player_t *player,
                     .patch_idx = patch_idx,
                     .note_number = event->data.note_off.note_number,
                 }});
-    break;
   }
   case AUDIO_SONG_EVENT_PATCH:
   {
@@ -114,38 +113,48 @@ static void song_dispatch_to_synth(audio_song_player_t *player,
     audio_synth_patch_config_set(player->synth,
                                  patch_idx,
                                  event->data.patch.patch);
-    break;
+    return true;
   }
   case AUDIO_SONG_EVENT_MARKER:
   case AUDIO_SONG_EVENT_TEMPO:
   case AUDIO_SONG_EVENT_TIMESIG:
-    break;
+    return true;
   }
+
+  return true;
 }
 
-static void song_dispatch_event(audio_song_player_t *player,
+static bool song_dispatch_event(audio_song_player_t *player,
                                 const audio_song_event_t *event)
 {
-  audio_song_event_action_t action = AUDIO_SONG_EVENT_ACTION_PASS;
-  if (player->hook.callback != NULL)
+  if (!player->pending_event_hooked)
   {
-    uint32_t type_mask = 1u << event->type;
-    if (player->hook.mask & type_mask)
+    player->pending_event_action = AUDIO_SONG_EVENT_ACTION_PASS;
+    if (player->hook.callback != NULL)
     {
-      action = player->hook.callback(player, event, player->hook.user);
+      uint32_t type_mask = 1u << event->type;
+      if (player->hook.mask & type_mask)
+      {
+        player->pending_event_action =
+            player->hook.callback(player, event, player->hook.user);
+      }
     }
+    player->pending_event_hooked = true;
   }
 
-  if (action == AUDIO_SONG_EVENT_ACTION_PASS)
-  {
-    song_dispatch_to_synth(player, event);
-  }
+  bool accepted =
+      player->pending_event_action == AUDIO_SONG_EVENT_ACTION_CONSUME ||
+      song_dispatch_to_synth(player, event);
+  if (accepted)
+    player->pending_event_hooked = false;
+  return accepted;
 }
 
 static void song_seek_to_time(audio_song_player_t *player, uint32_t time_ms)
 {
   player->song_time_ms = time_ms;
   player->next_event_idx = 0;
+  player->pending_event_hooked = false;
 
   const audio_song_asset_t *song = player->song;
   if (song == NULL || song->events == NULL)
@@ -189,10 +198,15 @@ void audio_song_player_play(audio_song_player_t *player,
     return;
   }
 
-  // A fresh player has no playback state to clean up. Avoid placing a PANIC
-  // ahead of the new song's time-zero events in that case.
+  // Finish cleanup before queuing the new song. A normal queued PANIC is
+  // intentionally destructive and would also discard time-zero events queued
+  // behind it. The synchronous form gives this player a completed barrier.
   if (player->song != NULL)
-    audio_song_player_stop(player, true);
+  {
+    audio_song_player_stop(player, false);
+    if (player->synth != NULL)
+      audio_synth_panic_sync(player->synth);
+  }
 
   player->song = song;
   player->playing = true;
@@ -212,7 +226,9 @@ void audio_song_player_play(audio_song_player_t *player,
   while (player->next_event_idx < song->event_count &&
          song->events[player->next_event_idx].time_ms == 0)
   {
-    song_dispatch_event(player, &song->events[player->next_event_idx]);
+    if (!song_dispatch_event(player,
+                             &song->events[player->next_event_idx]))
+      break;
     player->next_event_idx++;
   }
 }
@@ -235,6 +251,7 @@ void audio_song_player_stop(audio_song_player_t *player, bool panic)
   player->song_time_ms = 0;
   player->last_engine_ms = 0;
   player->next_event_idx = 0;
+  player->pending_event_hooked = false;
 }
 
 void audio_song_player_pause(audio_song_player_t *player)
@@ -261,6 +278,11 @@ void audio_song_player_seek(audio_song_player_t *player,
   if (time_ms > player->song->duration_ms)
     time_ms = player->song->duration_ms;
 
+  // Seeking abandons the current event timeline. Release any notes started
+  // before the new cursor so their skipped NOTE_OFF events cannot leave them
+  // sounding indefinitely. This also cleans up time-zero notes when a caller
+  // starts a song and immediately seeks to preserved progress.
+  song_stop_all_patches(player);
   song_seek_to_time(player, time_ms);
   player->last_engine_ms = now_ms;
 }
@@ -312,7 +334,11 @@ void audio_song_player_tick(audio_song_player_t *player, uint32_t now_ms)
         continue;
       }
 
-      song_dispatch_event(player, event);
+      if (!song_dispatch_event(player, event))
+      {
+        player->song_time_ms = event->time_ms;
+        return;
+      }
       player->next_event_idx++;
     }
 
