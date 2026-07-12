@@ -1,12 +1,11 @@
-#include <stdio.h>
-
 #include <shared/anim.h>
 #include <shared/os/launcher.h>
+#include <shared/os/power_indicator.h>
 #include <shared/config.h>
 #include <shared/engine.h>
 #include <platform/display.h>
 #include <platform/peripheral.h>
-#include <shared/utils/vec.h>
+#include <prism/graphics/vector.h>
 #include <prism/registry.h>
 #include <prism/runtime.h>
 
@@ -26,7 +25,7 @@ static struct
   bool ignore_release;
   int32_t active_offset;
   int32_t scroll_offset;
-  uint32_t held_width;
+  int32_t held_width;
   button_id_t held_button;
 } state = {
     .scroll_offset = APP_SCROLL_MARGIN,
@@ -52,7 +51,6 @@ static void change_active(int8_t delta)
     state.active = 0;
   }
 
-  // scroll to active
   int32_t offset = app_x(state.active);
   anim_to(&state.active_offset, offset, 150, ANIM_EASE_INOUT_QUAD, NULL, NULL);
   int32_t scroll_idx = state.active / 2;
@@ -100,7 +98,7 @@ static void frame()
       anim_cancel(&state.held_width, false);
       state.held_width = APP_SIZE * ease_out_cubic(held);
       state.held_button = button_id;
-    } // otherwise use the existing value instead of overwriting it.
+    }
   }
 
   if (BUTTON_KEYUP(BUTTON_LEFT))
@@ -161,25 +159,11 @@ static void frame()
   u8g2_DrawStr(u8g2, (DISP_WIDTH - width) / 2, DISP_HEIGHT - 5,
                active->name);
 
-  // status bar
   u8g2_SetDrawColor(u8g2, 1);
   u8g2_SetFont(u8g2, u8g2_font_5x7_tr);
 
-  char chg_str[8];
   platform_power_state_t power_state = platform_peripheral_get_power_state();
-  if (power_state.charging)
-  {
-    snprintf(chg_str, sizeof(chg_str), "CHG");
-  }
-  else if (power_state.plugged_in)
-  {
-    snprintf(chg_str, sizeof(chg_str), "USB");
-  }
-  else
-  {
-    snprintf(chg_str, sizeof(chg_str), "%d", power_state.battery_level);
-  }
-  u8g2_DrawStr(u8g2, 128 - u8g2_GetStrWidth(u8g2, chg_str), 6, chg_str);
+  power_indicator_draw(u8g2, DISP_WIDTH, 0, power_state);
 
   u8g2_DrawStr(u8g2, 0, 6, "prism");
 }

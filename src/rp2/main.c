@@ -22,7 +22,7 @@ static void core1_main(void)
   hard_assert(flash_safe_execute_core_init());
   sem_release(&core1_flash_ready);
   audio_playback_init();
-  audio_playback_run_forever(&g_engine.synth);
+  audio_playback_run_forever(engine_synth());
 }
 
 static void on_frame_cb(void)
@@ -45,7 +45,7 @@ int main(void)
   sem_acquire_blocking(&core1_flash_ready);
 
   management_init();
-  g_engine.on_frame_cb = on_frame_cb;
+  engine_set_frame_callback(on_frame_cb);
 
   engine_run_forever();
   return 0;

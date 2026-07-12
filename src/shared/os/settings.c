@@ -7,7 +7,7 @@
 #include <platform/peripheral.h>
 #include <shared/engine.h>
 #include <shared/os/launcher.h>
-#include <shared/utils/color.h>
+#include <prism/graphics/color.h>
 
 static prism_management_settings_t current;
 static bool dirty;
@@ -15,7 +15,7 @@ static platform_time_t dirty_at;
 static bool was_plugged_in;
 static bool save_deferred;
 
-#define SETTINGS_REVISION 1u
+#define SETTINGS_REVISION 2u
 
 static color_t wire_color(const uint8_t rgb[3])
 {
@@ -35,8 +35,7 @@ static color_t wheel(uint8_t position)
   return rgba(position * 3, 0, 255 - position * 3, 255);
 }
 
-static color_t effect_color(const prism_led_settings_t *led, uint32_t now_ms,
-                            uint8_t offset)
+static color_t effect_color(const prism_led_settings_t *led, uint32_t now_ms)
 {
   uint32_t duration = led->speed_ms == 0 ? 2000u : led->speed_ms;
   uint8_t count = led->palette_len;
@@ -70,59 +69,80 @@ static color_t effect_color(const prism_led_settings_t *led, uint32_t now_ms,
                       (phase % span) / (float)span);
   }
   case PRISM_LED_RAINBOW:
-    return wheel((uint8_t)((now_ms * 256u / duration) + offset));
+    return wheel((uint8_t)((now_ms * 256u / duration) + led->phase_offset));
   case PRISM_LED_STATIC:
   default:
     return wire_color(led->colors[0]);
   }
 }
 
-void prism_settings_init(void)
+static prism_management_settings_t default_settings(void)
 {
-  memset(&current, 0, sizeof(current));
-  current.volume = 4;
-  current.linked_leds = 1;
-  current.brightness = 8;
-  current.settings_revision = SETTINGS_REVISION;
+  prism_management_settings_t settings = {
+      .volume = 4,
+      .linked_leds = 1,
+      .brightness = 8,
+      .settings_revision = SETTINGS_REVISION,
+  };
   for (uint8_t i = 0; i < 2; ++i)
   {
-    current.leds[i].effect = PRISM_LED_STATIC;
-    current.leds[i].palette_len = 1;
-    current.leds[i].speed_ms = 2000;
-    current.leds[i].colors[0][0] = 24;
-    current.leds[i].colors[0][1] = 96;
-    current.leds[i].colors[0][2] = 255;
+    settings.leds[i].effect = PRISM_LED_STATIC;
+    settings.leds[i].palette_len = 1;
+    settings.leds[i].speed_ms = 2000;
+    settings.leds[i].phase_offset = i == 0 ? 0 : 128;
+    settings.leds[i].colors[0][0] = 24;
+    settings.leds[i].colors[0][1] = 96;
+    settings.leds[i].colors[0][2] = 255;
   }
-  dirty = false;
-  if (platform_settings_load(&current, sizeof(current)) &&
-      (current.settings_revision != SETTINGS_REVISION ||
-       current.brightness > 8))
-  {
-    /* The two bytes were reserved before brightness existed. Preserve the
-     * user's other settings while initializing old records to full output. */
-    current.brightness = 8;
-    current.settings_revision = SETTINGS_REVISION;
-    dirty = true;
-    dirty_at = platform_now_us();
-  }
-  was_plugged_in = platform_peripheral_is_plugged_in();
+  return settings;
+}
+
+static bool settings_valid(const prism_management_settings_t *settings)
+{
+  if (settings->settings_revision != SETTINGS_REVISION ||
+      settings->volume > 8 || settings->brightness > 8)
+    return false;
+  for (uint8_t i = 0; i < 2; ++i)
+    if (settings->leds[i].effect > PRISM_LED_RAINBOW ||
+        settings->leds[i].palette_len > PRISM_LED_PALETTE_MAX)
+      return false;
+  return true;
+}
+
+void prism_settings_init(void)
+{
+  current = default_settings();
+  prism_management_settings_t stored;
+  bool loaded = platform_settings_load(&stored, sizeof(stored));
+  bool valid = loaded && settings_valid(&stored);
+  if (valid)
+    current = stored;
+
+  dirty = loaded && !valid;
+  dirty_at = dirty ? platform_now_us() : PLATFORM_TIME_ZERO;
+  was_plugged_in = platform_peripheral_get_power_state().plugged_in;
 }
 
 const prism_management_settings_t *prism_settings_get(void) { return &current; }
 
 bool prism_settings_preview(const prism_management_settings_t *settings)
 {
-  if (settings == NULL || settings->volume > 8 || settings->brightness > 8 ||
-      settings->settings_revision != SETTINGS_REVISION)
+  if (settings == NULL || !settings_valid(settings))
     return false;
-  for (uint8_t i = 0; i < 2; ++i)
-    if (settings->leds[i].effect > PRISM_LED_RAINBOW ||
-        settings->leds[i].palette_len > PRISM_LED_PALETTE_MAX)
-      return false;
 
   current = *settings;
   if (current.linked_leds)
+  {
+    uint8_t phase_offset = current.leds[1].phase_offset;
     current.leds[1] = current.leds[0];
+    current.leds[0].phase_offset = 0;
+    current.leds[1].phase_offset = phase_offset;
+  }
+  else
+  {
+    current.leds[0].phase_offset = 0;
+    current.leds[1].phase_offset = 0;
+  }
   engine_set_volume((int8_t)current.volume);
   engine_set_brightness((int8_t)current.brightness);
   dirty = true;
@@ -132,11 +152,11 @@ bool prism_settings_preview(const prism_management_settings_t *settings)
 
 void prism_settings_frame(void)
 {
-  if (g_engine.app != &app_launcher)
+  if (!engine_is_app(&app_launcher))
     return;
   uint32_t now_ms = (uint32_t)(platform_now_us() / 1000u);
-  g_engine.led_colors[0] = effect_color(&current.leds[0], now_ms, 0);
-  g_engine.led_colors[1] = effect_color(&current.leds[1], now_ms, 128);
+  engine_led_set(LED_L, effect_color(&current.leds[0], now_ms));
+  engine_led_set(LED_R, effect_color(&current.leds[1], now_ms));
 }
 
 void prism_settings_mark_saved(void) { dirty = false; }
@@ -150,7 +170,7 @@ void prism_settings_flush(void)
 
 void prism_settings_task(void)
 {
-  bool plugged_in = platform_peripheral_is_plugged_in();
+  bool plugged_in = platform_peripheral_get_power_state().plugged_in;
   if (dirty && !save_deferred &&
       ((dirty_at != PLATFORM_TIME_ZERO &&
                  platform_time_diff_us(dirty_at, platform_now_us()) >=

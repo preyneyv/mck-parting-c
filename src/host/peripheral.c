@@ -31,9 +31,3 @@ platform_power_state_t platform_peripheral_get_power_state(void) {
       .battery_level = g_peripheral.battery_level,
   };
 }
-
-bool platform_peripheral_is_enabled(void) { return g_peripheral.enabled; }
-bool platform_peripheral_is_plugged_in(void) { return g_peripheral.plugged_in; }
-bool platform_peripheral_is_charging_enabled(void) { return g_peripheral.charging_enabled; }
-bool platform_peripheral_is_charging(void) { return g_peripheral.charging; }
-uint8_t platform_peripheral_battery_level(void) { return g_peripheral.battery_level; }

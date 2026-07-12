@@ -30,7 +30,7 @@
 #define AUDIO_I2S_PIO pio0
 
 #define AUDIO_BUFFER_SIZE 256
-#define AUDIO_BUFFER_POOL_SIZE 3
+#define AUDIO_BUFFER_RING_SLOTS 4
 
 //// PERIPHERAL CONFIGURATION ////
 #define PERIPH_PWR_EN 22
@@ -50,3 +50,7 @@
 //// VALIDATIONS ////
 static_assert(AUDIO_I2S_BCLK == AUDIO_I2S_LRCK + 1,
               "AUDIO_I2S_BCLK must be LRCK + 1");
+static_assert(AUDIO_BUFFER_RING_SLOTS >= 2 &&
+                  (AUDIO_BUFFER_RING_SLOTS &
+                   (AUDIO_BUFFER_RING_SLOTS - 1)) == 0,
+              "AUDIO_BUFFER_RING_SLOTS must be a power of two");

@@ -14,10 +14,12 @@ static struct
   uint8_t contrast;
 } g_display;
 
-static uint8_t _byte_cb(u8x8_t *u8x8, uint8_t msg, uint8_t arg_int,
-                        void *arg_ptr) {
+static uint8_t u8g2_byte_callback(u8x8_t *u8x8, uint8_t msg, uint8_t arg_int,
+                                  void *arg_ptr)
+{
   uint8_t *data;
-  switch (msg) {
+  switch (msg)
+  {
   case U8X8_MSG_BYTE_SEND:
     data = (uint8_t *)arg_ptr;
     spi_write_blocking(DISP_SPI_PORT, data, arg_int);
@@ -44,9 +46,12 @@ static uint8_t _byte_cb(u8x8_t *u8x8, uint8_t msg, uint8_t arg_int,
   return 1;
 }
 
-static uint8_t _gpio_and_delay_cb(u8x8_t *u8x8, uint8_t msg, uint8_t arg_int,
-                                  void *arg_ptr) {
-  switch (msg) {
+static uint8_t u8g2_gpio_callback(u8x8_t *u8x8, uint8_t msg, uint8_t arg_int,
+                                  void *arg_ptr)
+{
+  (void)arg_ptr;
+  switch (msg)
+  {
   case U8X8_MSG_GPIO_AND_DELAY_INIT:
     spi_init(DISP_SPI_PORT, DISP_SPI_SPEED);
     gpio_set_function(DISP_CS, GPIO_FUNC_SIO);
@@ -62,56 +67,55 @@ static uint8_t _gpio_and_delay_cb(u8x8_t *u8x8, uint8_t msg, uint8_t arg_int,
     gpio_put(DISP_CS, 1);
     gpio_put(DISP_DC, 0);
     break;
-  case U8X8_MSG_DELAY_NANO: // delay arg_int * 1 nano second
+  case U8X8_MSG_DELAY_NANO:
     sleep_us((999 + arg_int) / 1000);
     break;
-  case U8X8_MSG_DELAY_100NANO: // delay arg_int * 100 nano seconds
+  case U8X8_MSG_DELAY_100NANO:
     sleep_us((9 + arg_int) / 10);
     break;
-  case U8X8_MSG_DELAY_10MICRO: // delay arg_int * 10 micro seconds
+  case U8X8_MSG_DELAY_10MICRO:
     sleep_us(arg_int * 10);
     break;
-  case U8X8_MSG_DELAY_MILLI: // delay arg_int * 1 milli second
+  case U8X8_MSG_DELAY_MILLI:
     sleep_ms(arg_int);
     break;
-  case U8X8_MSG_GPIO_CS: // CS (chip select) pin: Output level in arg_int
+  case U8X8_MSG_GPIO_CS:
     gpio_put(DISP_CS, arg_int);
     break;
-  case U8X8_MSG_GPIO_DC: // DC (data/cmd, A0, register select) pin: Output level
+  case U8X8_MSG_GPIO_DC:
     gpio_put(DISP_DC, arg_int);
     break;
-  case U8X8_MSG_GPIO_RESET: // Reset pin: Output level in arg_int
-    gpio_put(DISP_RST,
-             arg_int); // printf("U8X8_MSG_GPIO_RESET %d\n", arg_int);
+  case U8X8_MSG_GPIO_RESET:
+    gpio_put(DISP_RST, arg_int);
     break;
   default:
-    u8x8_SetGPIOResult(u8x8, 1); // default return value
+    u8x8_SetGPIOResult(u8x8, 1);
     break;
   }
   return 1;
 }
 
-void platform_display_init(void) {
+void platform_display_init(void)
+{
   g_display.enabled = false;
   g_display.contrast = 255;
 
   u8g2_t *u8g2 = &g_display.u8g2;
-  u8g2_Setup_sh1107_64x128_f(u8g2, U8G2_R1, _byte_cb, _gpio_and_delay_cb);
+  u8g2_Setup_sh1107_64x128_f(u8g2, U8G2_R1, u8g2_byte_callback,
+                             u8g2_gpio_callback);
   u8g2_InitDisplay(u8g2);
 
   gpio_init(DISP_REG_EN);
   gpio_set_dir(DISP_REG_EN, GPIO_OUT);
-  gpio_put(DISP_REG_EN, 0); // keep display off until needed.
+  gpio_put(DISP_REG_EN, 0);
 }
 
-u8g2_t *platform_display_get_u8g2(void) {
-  return &g_display.u8g2;
-}
+u8g2_t *platform_display_get_u8g2(void) { return &g_display.u8g2; }
 
-static void display_on(void) {
-  // enable regulator
+static void display_on(void)
+{
   gpio_put(DISP_REG_EN, 1);
-  sleep_ms(50); // wait for regulator to stabilize
+  sleep_ms(50);
 
   u8g2_t *u8g2 = &g_display.u8g2;
   u8g2_ClearBuffer(u8g2);
@@ -120,7 +124,8 @@ static void display_on(void) {
   u8g2_SetContrast(u8g2, g_display.contrast);
 }
 
-void platform_display_set_contrast(uint8_t contrast) {
+void platform_display_set_contrast(uint8_t contrast)
+{
   if (g_display.contrast == contrast)
     return;
   g_display.contrast = contrast;
@@ -128,24 +133,23 @@ void platform_display_set_contrast(uint8_t contrast) {
     u8g2_SetContrast(&g_display.u8g2, contrast);
 }
 
-static void display_off(void) {
+static void display_off(void)
+{
   u8g2_t *u8g2 = &g_display.u8g2;
   u8g2_SetPowerSave(u8g2, 1);
 
-  sleep_ms(50); // wait for disp off flush
-  // disable regulator
+  sleep_ms(50);
   gpio_put(DISP_REG_EN, 0);
 }
 
-void platform_display_set_enabled(bool enabled) {
-  if (g_display.enabled == enabled) {
+void platform_display_set_enabled(bool enabled)
+{
+  if (g_display.enabled == enabled)
     return;
-  }
   g_display.enabled = enabled;
 
-  if (enabled) {
+  if (enabled)
     display_on();
-  } else {
+  else
     display_off();
-  }
 }
