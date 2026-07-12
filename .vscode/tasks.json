@@ -2,21 +2,28 @@
   "version": "2.0.0",
   "tasks": [
     {
+      "label": "rp2: configure release",
+      "type": "process",
+      "command": "${userHome}/.pico-sdk/cmake/v3.31.5/bin/cmake",
+      "args": [
+        "-S", "${workspaceFolder}",
+        "-B", "${workspaceFolder}/build",
+        "-G", "Ninja",
+        "-DCMAKE_BUILD_TYPE=Release",
+        "-DCMAKE_MAKE_PROGRAM=${userHome}/.pico-sdk/ninja/v1.12.1/ninja"
+      ],
+      "problemMatcher": "$gcc",
+      "windows": {
+        "command": "${env:USERPROFILE}/.pico-sdk/cmake/v3.31.5/bin/cmake.exe"
+      }
+    },
+    {
       "label": "rp2: compile",
       "type": "process",
       "command": "${userHome}/.pico-sdk/ninja/v1.12.1/ninja",
       "args": ["-C", "${workspaceFolder}/build"],
-      "group": "build",
-      "problemMatcher": "$gcc",
-      "windows": {
-        "command": "${env:USERPROFILE}/.pico-sdk/ninja/v1.12.1/ninja.exe"
-      }
-    },
-    {
-      "label": "Compile Project",
-      "type": "process",
-      "command": "${userHome}/.pico-sdk/ninja/v1.12.1/ninja",
-      "args": ["-C", "${workspaceFolder}/build"],
+      "dependsOn": ["rp2: configure release"],
+      "dependsOrder": "sequence",
       "group": "build",
       "problemMatcher": "$gcc",
       "windows": {
@@ -69,6 +76,28 @@
       }
     },
     {
+      "label": "host: configure release",
+      "type": "process",
+      "command": "${userHome}/.pico-sdk/cmake/v3.31.5/bin/cmake",
+      "args": [
+        "-S", "${workspaceFolder}",
+        "-B", "${workspaceFolder}/build_host",
+        "-G", "Ninja",
+        "-DPICO_PLATFORM=host",
+        "-DCMAKE_BUILD_TYPE=Release",
+        "-DCMAKE_MAKE_PROGRAM=${userHome}/.pico-sdk/ninja/v1.12.1/ninja"
+      ],
+      "options": {
+        "env": {
+          "Path": "C:\\msys64\\usr\\bin;C:\\msys64\\mingw64\\bin;${env:PATH}"
+        }
+      },
+      "problemMatcher": "$gcc",
+      "windows": {
+        "command": "${env:USERPROFILE}/.pico-sdk/cmake/v3.31.5/bin/cmake.exe"
+      }
+    },
+    {
       "label": "host: compile",
       "type": "process",
       "group": "build",
@@ -76,9 +105,11 @@
       "args": ["-C", "${workspaceFolder}/build_host"],
       "options": {
         "env": {
-          "Path": "C:\\msys64\\mingw64\\bin;${env:PATH}"
+          "Path": "C:\\msys64\\usr\\bin;C:\\msys64\\mingw64\\bin;${env:PATH}"
         }
       },
+      "dependsOn": ["host: configure release"],
+      "dependsOrder": "sequence",
       "problemMatcher": "$gcc",
       "windows": {
         "command": "${env:USERPROFILE}/.pico-sdk/ninja/v1.12.1/ninja.exe"
@@ -87,40 +118,13 @@
     {
       "label": "host: run",
       "type": "process",
-      "command": "${workspaceFolder}/build_host/mck-parting-c",
+      "command": "${workspaceFolder}/build_host/prism",
       "args": [],
       "group": "build",
       "problemMatcher": "$gcc",
       "dependsOn": ["host: compile"],
       "windows": {
-        "command": "${workspaceFolder}/build_host/mck-parting-c.exe"
-      }
-    },
-    {
-      "label": "host: build active file",
-      "type": "process",
-      "command": "${userHome}/.pico-sdk/ninja/v1.12.1/ninja",
-      "args": [
-        "-C",
-        "${workspaceFolder}/build_host",
-        "${fileBasenameNoExtension}"
-      ],
-      "group": "build",
-      "problemMatcher": "$gcc",
-      "windows": {
-        "command": "${env:USERPROFILE}/.pico-sdk/ninja/v1.12.1/ninja.exe"
-      }
-    },
-    {
-      "label": "host: run active file",
-      "type": "process",
-      "command": "${workspaceFolder}/build_host/${fileBasenameNoExtension}",
-      "args": [],
-      "group": "test",
-      "problemMatcher": [],
-      "dependsOn": ["host: build active file"],
-      "windows": {
-        "command": "${workspaceFolder}/build_host/${fileBasenameNoExtension}.exe"
+        "command": "${workspaceFolder}/build_host/prism.exe"
       }
     }
   ]

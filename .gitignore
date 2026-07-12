@@ -10,3 +10,5 @@ web/.next/
 web/*.log
 web/tsconfig.tsbuildinfo
 src/cartridges/**/Backups/
+
+*.pyc
