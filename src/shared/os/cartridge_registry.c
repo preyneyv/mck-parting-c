@@ -7,21 +7,23 @@
 #define BUILTIN_POLICY                                                        \
   (PRISM_REGISTRY_POLICY_BUNDLED | PRISM_REGISTRY_POLICY_UNDELETABLE)
 
-static const prism_registry_entry_t entries[] = {
 #if !defined(PICO_ON_DEVICE) || !PICO_ON_DEVICE
+static const prism_registry_entry_t entries[] = {
     {&cartridge_bongocat, BUILTIN_POLICY},
     {&cartridge_morse, BUILTIN_POLICY},
     {&cartridge_asteroids, BUILTIN_POLICY},
     {&cartridge_beatline, BUILTIN_POLICY},
-#endif
-    {&cartridge_dummy, BUILTIN_POLICY | PRISM_REGISTRY_POLICY_HIDDEN},
-    {&cartridge_full_test, BUILTIN_POLICY | PRISM_REGISTRY_POLICY_HIDDEN},
 };
 
 static size_t builtin_count(void)
 {
   return sizeof(entries) / sizeof(entries[0]);
 }
+#else
+static const prism_registry_entry_t entries[1];
+
+static size_t builtin_count(void) { return 0; }
+#endif
 
 size_t prism_registry_count(void)
 {
@@ -43,25 +45,31 @@ const prism_registry_entry_t *prism_registry_get(size_t index)
   return &installed[slot];
 }
 
-const prism_registry_entry_t *prism_registry_find(const char *slug)
+const prism_registry_entry_t *prism_registry_find(const char *id)
 {
-  if (slug == NULL)
+  if (id == NULL)
     return NULL;
   for (size_t i = 0; i < prism_registry_count(); ++i)
   {
     const prism_registry_entry_t *entry = prism_registry_get(i);
-    if (entry != NULL && strcmp(entry->cartridge->slug, slug) == 0)
+    if (entry != NULL && strcmp(entry->cartridge->id, id) == 0)
       return entry;
   }
   return NULL;
 }
 
-const prism_registry_entry_t *prism_registry_find_app_id(uint32_t app_id)
+const prism_registry_entry_t *prism_registry_find_app_key(
+    const uint8_t app_key[PRISM_APP_KEY_BYTES])
 {
+  if (app_key == NULL)
+    return NULL;
   for (size_t i = 0; i < prism_registry_count(); ++i)
   {
     const prism_registry_entry_t *entry = prism_registry_get(i);
-    if (entry != NULL && entry->cartridge->app_id == app_id)
+    prism_app_key_t candidate;
+    if (entry != NULL &&
+        prism_app_key_derive(entry->cartridge->id, candidate) &&
+        memcmp(candidate, app_key, sizeof(candidate)) == 0)
       return entry;
   }
   return NULL;

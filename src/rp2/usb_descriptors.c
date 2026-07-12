@@ -1,5 +1,6 @@
 #include <string.h>
 
+#include "pico/usb_reset_interface.h"
 #include "pico/unique_id.h"
 #include "tusb.h"
 
@@ -16,6 +17,7 @@ enum
   ITF_MIDI,
   ITF_MIDI_STREAMING,
   ITF_MANAGEMENT,
+  ITF_RESET,
   ITF_COUNT,
 };
 
@@ -28,6 +30,7 @@ enum
   STR_CDC,
   STR_MIDI,
   STR_MANAGEMENT,
+  STR_RESET,
 };
 
 #define EP_CDC_NOTIFY 0x81
@@ -58,7 +61,11 @@ static const tusb_desc_device_t device_descriptor = {
 
 #define CONFIG_LEN                                                           \
   (TUD_CONFIG_DESC_LEN + TUD_CDC_DESC_LEN + TUD_MIDI_DESC_LEN +             \
-   TUD_VENDOR_DESC_LEN)
+   TUD_VENDOR_DESC_LEN + 9)
+
+#define TUD_PRISM_RESET_DESCRIPTOR(interface, string_index)                  \
+  9, TUSB_DESC_INTERFACE, interface, 0, 0, TUSB_CLASS_VENDOR_SPECIFIC,       \
+      RESET_INTERFACE_SUBCLASS, RESET_INTERFACE_PROTOCOL, string_index
 
 static const uint8_t configuration_descriptor[] = {
     TUD_CONFIG_DESCRIPTOR(1, ITF_COUNT, 0, CONFIG_LEN, 0, 500),
@@ -67,9 +74,14 @@ static const uint8_t configuration_descriptor[] = {
     TUD_MIDI_DESCRIPTOR(ITF_MIDI, STR_MIDI, EP_MIDI_OUT, EP_MIDI_IN, EP_SIZE),
     TUD_VENDOR_DESCRIPTOR(ITF_MANAGEMENT, STR_MANAGEMENT, EP_MANAGEMENT_OUT,
                           EP_MANAGEMENT_IN, EP_SIZE),
+    TUD_PRISM_RESET_DESCRIPTOR(ITF_RESET, STR_RESET),
 };
 
-#define MS_OS_20_DESC_LEN 0xB2
+#define MS_OS_20_MANAGEMENT_SUBSET_LEN 0xA0
+#define MS_OS_20_RESET_SUBSET_LEN 0x9C
+#define MS_OS_20_DESC_LEN                                                     \
+  (0x0A + 0x08 + MS_OS_20_MANAGEMENT_SUBSET_LEN +                            \
+   MS_OS_20_RESET_SUBSET_LEN)
 #define BOS_LEN                                                              \
   (TUD_BOS_DESC_LEN + TUD_BOS_WEBUSB_DESC_LEN +                             \
    TUD_BOS_MICROSOFT_OS_DESC_LEN)
@@ -90,11 +102,11 @@ static const uint8_t ms_os_20_descriptor[] = {
     U16_TO_U8S_LE(MS_OS_20_SUBSET_HEADER_CONFIGURATION), 0, 0,
     U16_TO_U8S_LE(MS_OS_20_DESC_LEN - 0x0A),
     U16_TO_U8S_LE(0x0008), U16_TO_U8S_LE(MS_OS_20_SUBSET_HEADER_FUNCTION),
-    ITF_MANAGEMENT, 0, U16_TO_U8S_LE(MS_OS_20_DESC_LEN - 0x0A - 0x08),
+    ITF_MANAGEMENT, 0, U16_TO_U8S_LE(MS_OS_20_MANAGEMENT_SUBSET_LEN),
     U16_TO_U8S_LE(0x0014), U16_TO_U8S_LE(MS_OS_20_FEATURE_COMPATBLE_ID),
     'W', 'I', 'N', 'U', 'S', 'B', 0, 0,
     0, 0, 0, 0, 0, 0, 0, 0,
-    U16_TO_U8S_LE(MS_OS_20_DESC_LEN - 0x0A - 0x08 - 0x08 - 0x14),
+    U16_TO_U8S_LE(MS_OS_20_MANAGEMENT_SUBSET_LEN - 0x08 - 0x14),
     U16_TO_U8S_LE(MS_OS_20_FEATURE_REG_PROPERTY), U16_TO_U8S_LE(0x0007),
     U16_TO_U8S_LE(0x002A),
     'D', 0, 'e', 0, 'v', 0, 'i', 0, 'c', 0, 'e', 0, 'I', 0, 'n', 0,
@@ -106,6 +118,23 @@ static const uint8_t ms_os_20_descriptor[] = {
     'C', 0, 'D', 0, 'B', 0, '-', 0, 'A', 0, '9', 0, '7', 0, '1', 0,
     '-', 0, 'D', 0, '7', 0, 'E', 0, '2', 0, '5', 0, 'D', 0, 'E', 0,
     'B', 0, '4', 0, '0', 0, 'D', 0, '6', 0, '}', 0, 0, 0, 0, 0,
+
+    U16_TO_U8S_LE(0x0008), U16_TO_U8S_LE(MS_OS_20_SUBSET_HEADER_FUNCTION),
+    ITF_RESET, 0, U16_TO_U8S_LE(MS_OS_20_RESET_SUBSET_LEN),
+    U16_TO_U8S_LE(0x0014), U16_TO_U8S_LE(MS_OS_20_FEATURE_COMPATBLE_ID),
+    'W', 'I', 'N', 'U', 'S', 'B', 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0,
+    U16_TO_U8S_LE(0x0080), U16_TO_U8S_LE(MS_OS_20_FEATURE_REG_PROPERTY),
+    U16_TO_U8S_LE(0x0001), U16_TO_U8S_LE(0x0028),
+    'D', 0, 'e', 0, 'v', 0, 'i', 0, 'c', 0, 'e', 0, 'I', 0, 'n', 0,
+    't', 0, 'e', 0, 'r', 0, 'f', 0, 'a', 0, 'c', 0, 'e', 0, 'G', 0,
+    'U', 0, 'I', 0, 'D', 0, 0, 0,
+    U16_TO_U8S_LE(0x004E),
+    '{', 0, 'b', 0, 'c', 0, '7', 0, '3', 0, '9', 0, '8', 0, 'c', 0,
+    '1', 0, '-', 0, '7', 0, '3', 0, 'c', 0, 'd', 0, '-', 0, '4', 0,
+    'c', 0, 'b', 0, '7', 0, '-', 0, '9', 0, '8', 0, 'b', 0, '8', 0,
+    '-', 0, '9', 0, '1', 0, '3', 0, 'a', 0, '8', 0, 'f', 0, 'c', 0,
+    'a', 0, '7', 0, 'b', 0, 'f', 0, '6', 0, '}', 0, 0, 0,
 };
 
 TU_VERIFY_STATIC(sizeof(ms_os_20_descriptor) == MS_OS_20_DESC_LEN,
@@ -119,6 +148,7 @@ static const char *const strings[] = {
     [STR_CDC] = "prism debug",
     [STR_MIDI] = "prism MIDI",
     [STR_MANAGEMENT] = "prism management",
+    [STR_RESET] = "Pico reset",
 };
 
 const uint8_t *tud_descriptor_device_cb(void)

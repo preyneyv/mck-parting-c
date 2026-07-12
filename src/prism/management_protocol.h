@@ -2,22 +2,18 @@
 
 #include <stdint.h>
 
+#include <prism/cartridge_identity.h>
+#include <prism/types.h>
+
 #define PRISM_MANAGEMENT_MAGIC 0x4d535250u /* "PRSM", little endian */
-#define PRISM_MANAGEMENT_VERSION 2u
+#define PRISM_MANAGEMENT_VERSION 1u
 #define PRISM_MANAGEMENT_MAX_PAYLOAD 4096u
 #define PRISM_SCREEN_BYTES 1024u
 #define PRISM_SERIAL_BYTES 8u
-#define PRISM_CARTRIDGE_UUID_BYTES 16u
 #define PRISM_CARTRIDGE_BLOCK_BYTES (128u * 1024u)
 #define PRISM_CARTRIDGE_BLOCK_COUNT 96u
 #define PRISM_LED_PALETTE_MAX 16u
-#define PRISM_CARTRIDGE_SLUG_MAX 31u
 #define PRISM_CARTRIDGE_NAME_MAX 31u
-#define PRISM_CARTRIDGE_ICON_WIDTH 36u
-#define PRISM_CARTRIDGE_ICON_HEIGHT 36u
-#define PRISM_CARTRIDGE_ICON_BYTES                                  \
-  (((PRISM_CARTRIDGE_ICON_WIDTH + 7u) / 8u) *                       \
-   PRISM_CARTRIDGE_ICON_HEIGHT)
 
 #if defined(__GNUC__)
 #define PRISM_PACKED __attribute__((packed))
@@ -129,20 +125,31 @@ enum
 
 typedef struct PRISM_PACKED
 {
+  uint16_t total_count;
+  uint16_t start_index;
   uint16_t count;
-  uint16_t reserved;
+  uint16_t string_bytes;
 } prism_management_cartridge_list_t;
 
 typedef struct PRISM_PACKED
 {
-  uint8_t uuid[PRISM_CARTRIDGE_UUID_BYTES];
+  uint8_t app_key[PRISM_APP_KEY_BYTES];
   uint32_t package_bytes;
   uint32_t persistent_bytes;
+  uint32_t version;
   uint16_t blocks;
   uint16_t policy;
-  char slug[PRISM_CARTRIDGE_SLUG_MAX + 1];
-  char name[PRISM_CARTRIDGE_NAME_MAX + 1];
+  uint16_t id_offset;
+  uint16_t id_length;
+  uint16_t name_offset;
+  uint16_t name_length;
 } prism_management_cartridge_entry_t;
+
+typedef struct PRISM_PACKED
+{
+  uint16_t start_index;
+  uint16_t reserved;
+} prism_management_cartridge_list_request_t;
 
 typedef enum
 {
@@ -157,6 +164,8 @@ typedef struct PRISM_PACKED
   uint8_t effect;
   uint8_t palette_len;
   uint16_t speed_ms;
+  uint8_t phase_offset;
+  uint8_t reserved[3];
   uint8_t colors[PRISM_LED_PALETTE_MAX][3];
 } prism_led_settings_t;
 
@@ -193,7 +202,7 @@ typedef struct PRISM_PACKED
 
 typedef struct PRISM_PACKED
 {
-  uint8_t uuid[PRISM_CARTRIDGE_UUID_BYTES];
+  uint8_t app_key[PRISM_APP_KEY_BYTES];
   uint32_t package_bytes;
   uint32_t package_crc32;
   uint16_t required_blocks;
@@ -212,7 +221,7 @@ typedef struct PRISM_PACKED
 
 typedef struct PRISM_PACKED
 {
-  uint8_t uuid[PRISM_CARTRIDGE_UUID_BYTES];
+  uint8_t app_key[PRISM_APP_KEY_BYTES];
 } prism_management_cartridge_id_t;
 
 enum
@@ -237,5 +246,13 @@ typedef struct PRISM_PACKED
 
 _Static_assert(sizeof(prism_management_header_t) == 16,
                "management header is part of the wire format");
+_Static_assert(sizeof(prism_management_cartridge_list_t) == 8,
+               "cartridge lists are part of the wire format");
+_Static_assert(sizeof(prism_management_cartridge_entry_t) == 40,
+               "cartridge entries are part of the wire format");
+_Static_assert(sizeof(prism_led_settings_t) == 56,
+               "LED settings are part of the wire format");
+_Static_assert(sizeof(prism_management_settings_t) == 116,
+               "settings are part of the wire format");
 _Static_assert(sizeof(prism_management_mirror_frame_t) == 1036,
                "mirror frames are consumed directly by the browser");

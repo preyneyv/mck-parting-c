@@ -1,20 +1,18 @@
 #include <platform/persistence.h>
 
+#include "flash_io.h"
+#include "flash_layout.h"
+
 #include <stdint.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include <hardware/address_mapped.h>
 #include <hardware/flash.h>
-#include <hardware/watchdog.h>
-#include <pico/config.h>
-#include <pico/flash.h>
 
 #define SETTINGS_MAGIC 0x54455350u
-#define SETTINGS_VERSION 2u
-#define SETTINGS_SLOT_COUNT 2u
+#define SETTINGS_VERSION 1u
 #define SETTINGS_PAGES_PER_SLOT (FLASH_SECTOR_SIZE / FLASH_PAGE_SIZE)
-#define SETTINGS_REGION_OFFSET                                                \
-  (PICO_FLASH_SIZE_BYTES - SETTINGS_SLOT_COUNT * FLASH_SECTOR_SIZE)
 
 typedef struct
 {
@@ -23,13 +21,13 @@ typedef struct
   uint16_t size;
   uint32_t generation;
   uint32_t crc32;
-  uint32_t sector_erases[SETTINGS_SLOT_COUNT];
+  uint32_t sector_erases[PRISM_FLASH_SETTINGS_SLOT_COUNT];
 } settings_record_t;
 
 static uint32_t current_generation;
 static uint8_t current_slot;
 static uint8_t current_page;
-static uint32_t settings_sector_erases[SETTINGS_SLOT_COUNT];
+static uint32_t settings_sector_erases[PRISM_FLASH_SETTINGS_SLOT_COUNT];
 
 static uint32_t crc32(const uint8_t *data, size_t size)
 {
@@ -46,7 +44,7 @@ static uint32_t crc32(const uint8_t *data, size_t size)
 static bool settings_record_valid(const uint8_t *page, size_t size,
                                   uint32_t *generation,
                                   const uint8_t **data,
-                                  uint32_t erases[SETTINGS_SLOT_COUNT])
+                                  uint32_t erases[PRISM_FLASH_SETTINGS_SLOT_COUNT])
 {
   const settings_record_t *record = (const void *)page;
   const uint8_t *value = page + sizeof(*record);
@@ -63,11 +61,12 @@ static bool settings_record_valid(const uint8_t *page, size_t size,
 
 bool platform_settings_load(void *data, size_t size)
 {
-  const uint8_t *flash = (const uint8_t *)XIP_BASE + SETTINGS_REGION_OFFSET;
+  const uint8_t *flash =
+      (const uint8_t *)XIP_BASE + PRISM_FLASH_SETTINGS_OFFSET;
   uint32_t best_generation = 0;
   const uint8_t *best_data = NULL;
-  uint32_t best_erases[SETTINGS_SLOT_COUNT] = {0};
-  for (uint8_t slot = 0; slot < SETTINGS_SLOT_COUNT; ++slot)
+  uint32_t best_erases[PRISM_FLASH_SETTINGS_SLOT_COUNT] = {0};
+  for (uint8_t slot = 0; slot < PRISM_FLASH_SETTINGS_SLOT_COUNT; ++slot)
   {
     for (uint8_t page_index = 0; page_index < SETTINGS_PAGES_PER_SLOT;
          ++page_index)
@@ -76,7 +75,7 @@ bool platform_settings_load(void *data, size_t size)
                             page_index * FLASH_PAGE_SIZE;
       uint32_t generation;
       const uint8_t *record_data;
-      uint32_t erases[SETTINGS_SLOT_COUNT];
+      uint32_t erases[PRISM_FLASH_SETTINGS_SLOT_COUNT];
       if (!settings_record_valid(page, size, &generation, &record_data,
                                  erases))
         continue;
@@ -99,40 +98,6 @@ bool platform_settings_load(void *data, size_t size)
   return true;
 }
 
-typedef struct
-{
-  uint32_t offset;
-  const uint8_t *page;
-} settings_program_context_t;
-
-static void settings_program_callback(void *param)
-{
-  settings_program_context_t *context = param;
-  flash_range_program(context->offset, context->page, FLASH_PAGE_SIZE);
-}
-
-static bool settings_program_page(uint32_t offset, const uint8_t *page)
-{
-  settings_program_context_t context = {.offset = offset, .page = page};
-  bool ok = flash_safe_execute(settings_program_callback, &context, 1000) ==
-            PICO_OK;
-  watchdog_update();
-  return ok;
-}
-
-static void settings_erase_callback(void *param)
-{
-  flash_range_erase(*(uint32_t *)param, FLASH_SECTOR_SIZE);
-}
-
-static bool settings_erase_sector(uint32_t offset)
-{
-  bool ok = flash_safe_execute(settings_erase_callback, &offset, 1000) ==
-            PICO_OK;
-  watchdog_update();
-  return ok;
-}
-
 static bool settings_page_erased(const uint8_t *page)
 {
   for (size_t i = 0; i < FLASH_PAGE_SIZE; ++i)
@@ -145,7 +110,8 @@ bool platform_settings_save(const void *data, size_t size)
 {
   if (sizeof(settings_record_t) + size > FLASH_PAGE_SIZE)
     return false;
-  const uint8_t *flash = (const uint8_t *)XIP_BASE + SETTINGS_REGION_OFFSET;
+  const uint8_t *flash =
+      (const uint8_t *)XIP_BASE + PRISM_FLASH_SETTINGS_OFFSET;
   uint8_t target_slot = current_slot;
   uint8_t target_page = UINT8_MAX;
   if (current_generation != 0)
@@ -158,16 +124,17 @@ bool platform_settings_save(const void *data, size_t size)
         break;
       }
 
-  uint32_t next_erases[SETTINGS_SLOT_COUNT];
+  uint32_t next_erases[PRISM_FLASH_SETTINGS_SLOT_COUNT];
   memcpy(next_erases, settings_sector_erases, sizeof(next_erases));
   if (target_page == UINT8_MAX)
   {
     target_slot = current_generation == 0
                       ? 0
-                      : (uint8_t)((current_slot + 1u) % SETTINGS_SLOT_COUNT);
+                      : (uint8_t)((current_slot + 1u) %
+                                  PRISM_FLASH_SETTINGS_SLOT_COUNT);
     uint32_t sector_offset =
-        SETTINGS_REGION_OFFSET + target_slot * FLASH_SECTOR_SIZE;
-    if (!settings_erase_sector(sector_offset))
+        PRISM_FLASH_SETTINGS_OFFSET + target_slot * FLASH_SECTOR_SIZE;
+    if (!prism_flash_erase(sector_offset, FLASH_SECTOR_SIZE))
       return false;
     ++next_erases[target_slot];
     target_page = 0;
@@ -186,10 +153,10 @@ bool platform_settings_save(const void *data, size_t size)
   memcpy(record.sector_erases, next_erases, sizeof(next_erases));
   memcpy(page, &record, sizeof(record));
   memcpy(page + sizeof(record), data, size);
-  uint32_t offset = SETTINGS_REGION_OFFSET +
+  uint32_t offset = PRISM_FLASH_SETTINGS_OFFSET +
                     target_slot * FLASH_SECTOR_SIZE +
                     target_page * FLASH_PAGE_SIZE;
-  if (!settings_program_page(offset, page))
+  if (!prism_flash_program(offset, page, sizeof(page)))
     return false;
   current_generation = next_generation;
   current_slot = target_slot;
@@ -201,18 +168,12 @@ bool platform_settings_save(const void *data, size_t size)
 /* Cartridge save data is an append-only log in one of two arenas. During
  * compaction the other arena is erased and populated first; its separate
  * commit page is written last, so boot always has one complete arena. */
-#define DATA_ARENA_MAGIC 0x32524150u /* PAR2 */
-#define DATA_COMMIT_MAGIC 0x32434150u /* PAC2 */
-#define DATA_RECORD_MAGIC 0x32444150u /* PAD2 */
+#define DATA_ARENA_MAGIC 0x31524150u /* PAR1 */
+#define DATA_COMMIT_MAGIC 0x31434150u /* PAC1 */
+#define DATA_RECORD_MAGIC 0x31444150u /* PAD1 */
 #define DATA_TOMBSTONE 1u
-#define DATA_REGION_OFFSET (15u * 1024u * 1024u)
-#define DATA_REGION_END SETTINGS_REGION_OFFSET
-#define DATA_ARENA_BYTES ((DATA_REGION_END - DATA_REGION_OFFSET) / 2u)
 #define DATA_RECORDS_OFFSET (2u * FLASH_PAGE_SIZE)
-#define DATA_MAX_APPS 64u
-
-_Static_assert((DATA_REGION_END - DATA_REGION_OFFSET) % (2u * FLASH_SECTOR_SIZE) == 0,
-               "persistence arenas must contain whole sectors");
+#define DATA_INLINE_INDEX_CAPACITY 64u
 
 typedef struct
 {
@@ -224,7 +185,7 @@ typedef struct
 typedef struct
 {
   uint32_t magic;
-  uint32_t app_id;
+  uint8_t app_key[PRISM_APP_KEY_BYTES];
   uint16_t schema;
   uint16_t flags;
   uint32_t size;
@@ -234,17 +195,11 @@ typedef struct
 
 typedef struct
 {
-  uint32_t app_id;
+  uint8_t app_key[PRISM_APP_KEY_BYTES];
   const data_record_t *record;
   uint32_t offset;
   uint32_t bytes;
 } latest_record_t;
-
-typedef struct
-{
-  uint32_t offset;
-  const uint8_t *page;
-} page_context_t;
 
 static bool data_initialized;
 static uint8_t data_active_arena;
@@ -254,11 +209,12 @@ static uint32_t data_append_offset;
 static bool data_tail_tainted;
 /* Core 0 has a 2 KiB stack; reuse one scan workspace instead of placing a
  * 1 KiB latest-record table in several persistence call frames. */
-static latest_record_t latest_workspace[DATA_MAX_APPS];
+static latest_record_t latest_inline[DATA_INLINE_INDEX_CAPACITY];
 
 static uint32_t arena_offset(uint8_t arena)
 {
-  return DATA_REGION_OFFSET + arena * DATA_ARENA_BYTES;
+  return arena == 0 ? PRISM_FLASH_CARTRIDGE_DATA_ARENA0_OFFSET
+                    : PRISM_FLASH_CARTRIDGE_DATA_ARENA1_OFFSET;
 }
 
 static uint32_t marker_crc(uint32_t generation)
@@ -282,37 +238,15 @@ static bool sector_erased(const uint8_t *sector)
   return true;
 }
 
-static void program_page_callback(void *param)
-{
-  page_context_t *context = param;
-  flash_range_program(context->offset, context->page, FLASH_PAGE_SIZE);
-}
-
-static bool program_page(uint32_t offset, const uint8_t page[FLASH_PAGE_SIZE])
-{
-  page_context_t context = {.offset = offset, .page = page};
-  return flash_safe_execute(program_page_callback, &context, 1000) == PICO_OK;
-}
-
-static void erase_sector_callback(void *param)
-{
-  flash_range_erase(*(uint32_t *)param, FLASH_SECTOR_SIZE);
-}
-
-static bool erase_sector(uint32_t offset)
-{
-  bool ok = flash_safe_execute(erase_sector_callback, &offset, 1000) == PICO_OK;
-  watchdog_update();
-  return ok;
-}
-
 static bool erase_arena(uint8_t arena)
 {
   uint32_t base = arena_offset(arena);
   const uint8_t *xip = (const uint8_t *)XIP_BASE + base;
-  for (uint32_t offset = 0; offset < DATA_ARENA_BYTES;
+  for (uint32_t offset = 0;
+       offset < PRISM_FLASH_CARTRIDGE_DATA_ARENA_BYTES;
        offset += FLASH_SECTOR_SIZE)
-    if (!sector_erased(xip + offset) && !erase_sector(base + offset))
+    if (!sector_erased(xip + offset) &&
+        !prism_flash_erase(base + offset, FLASH_SECTOR_SIZE))
       return false;
   return true;
 }
@@ -339,9 +273,9 @@ static bool write_marker(uint8_t arena, bool commit, uint32_t generation)
       .crc32 = marker_crc(generation),
   };
   memcpy(page, &marker, sizeof(marker));
-  return program_page(arena_offset(arena) +
-                          (commit ? FLASH_PAGE_SIZE : 0u),
-                      page);
+  return prism_flash_program(arena_offset(arena) +
+                                 (commit ? FLASH_PAGE_SIZE : 0u),
+                             page, sizeof(page));
 }
 
 static uint32_t record_bytes(const data_record_t *record)
@@ -364,43 +298,63 @@ static bool record_valid(const data_record_t *record, uint32_t remaining)
 
 static size_t scan_latest(uint8_t arena, latest_record_t *latest,
                           size_t capacity, bool *tainted,
-                          uint32_t *append_offset)
+                          uint32_t *append_offset, bool *overflow)
 {
   const uint8_t *xip = (const uint8_t *)XIP_BASE + arena_offset(arena);
   uint32_t offset = DATA_RECORDS_OFFSET;
   size_t count = 0;
   *tainted = false;
-  while (offset + FLASH_PAGE_SIZE <= DATA_ARENA_BYTES)
+  *overflow = false;
+  while (offset + FLASH_PAGE_SIZE <=
+         PRISM_FLASH_CARTRIDGE_DATA_ARENA_BYTES)
   {
     const uint8_t *page = xip + offset;
     if (page_erased(page))
       break;
     const data_record_t *record = (const void *)page;
     if (record->magic != DATA_RECORD_MAGIC ||
-        record->size > DATA_ARENA_BYTES - offset - sizeof(*record))
+        record->size > PRISM_FLASH_CARTRIDGE_DATA_ARENA_BYTES - offset -
+                           sizeof(*record))
     {
       *tainted = true;
       break;
     }
     uint32_t bytes = record_bytes(record);
-    if (bytes == 0 || bytes > DATA_ARENA_BYTES - offset)
+    if (bytes == 0 ||
+        bytes > PRISM_FLASH_CARTRIDGE_DATA_ARENA_BYTES - offset)
     {
       *tainted = true;
       break;
     }
-    if (record_valid(record, DATA_ARENA_BYTES - offset))
+    if (record_valid(record,
+                     PRISM_FLASH_CARTRIDGE_DATA_ARENA_BYTES - offset))
     {
       if (record->generation > data_record_generation)
         data_record_generation = record->generation;
       size_t index = 0;
-      while (index < count && latest[index].app_id != record->app_id)
+      while (index < count &&
+             memcmp(latest[index].app_key, record->app_key,
+                    PRISM_APP_KEY_BYTES) != 0)
         ++index;
-      if (index == count && count < capacity)
+      if (index == count)
+      {
+        if (count == capacity)
+        {
+          *overflow = true;
+          offset += bytes;
+          continue;
+        }
         ++count;
-      if (index < capacity &&
-          (latest[index].record == NULL ||
-           (int32_t)(record->generation - latest[index].record->generation) > 0))
-        latest[index] = (latest_record_t){record->app_id, record, offset, bytes};
+      }
+      if (latest[index].record == NULL ||
+          (int32_t)(record->generation - latest[index].record->generation) > 0)
+      {
+        memcpy(latest[index].app_key, record->app_key,
+               PRISM_APP_KEY_BYTES);
+        latest[index].record = record;
+        latest[index].offset = offset;
+        latest[index].bytes = bytes;
+      }
     }
     offset += bytes;
   }
@@ -408,12 +362,44 @@ static size_t scan_latest(uint8_t arena, latest_record_t *latest,
   return count;
 }
 
-static size_t scan_latest_workspace(uint8_t arena, bool *tainted,
-                                    uint32_t *append_offset)
+static size_t scan_latest_inline(uint8_t arena, bool *tainted,
+                                 uint32_t *append_offset, bool *overflow)
 {
-  memset(latest_workspace, 0, sizeof(latest_workspace));
-  return scan_latest(arena, latest_workspace, DATA_MAX_APPS, tainted,
-                     append_offset);
+  memset(latest_inline, 0, sizeof(latest_inline));
+  return scan_latest(arena, latest_inline, DATA_INLINE_INDEX_CAPACITY, tainted,
+                     append_offset, overflow);
+}
+
+static const data_record_t *find_latest_record(
+    uint8_t arena, const uint8_t app_key[PRISM_APP_KEY_BYTES])
+{
+  const uint8_t *xip = (const uint8_t *)XIP_BASE + arena_offset(arena);
+  const data_record_t *latest = NULL;
+  uint32_t offset = DATA_RECORDS_OFFSET;
+  while (offset + FLASH_PAGE_SIZE <=
+         PRISM_FLASH_CARTRIDGE_DATA_ARENA_BYTES)
+  {
+    const uint8_t *page = xip + offset;
+    if (page_erased(page))
+      break;
+    const data_record_t *record = (const void *)page;
+    if (record->magic != DATA_RECORD_MAGIC ||
+        record->size > PRISM_FLASH_CARTRIDGE_DATA_ARENA_BYTES - offset -
+                           sizeof(*record))
+      break;
+    uint32_t bytes = record_bytes(record);
+    if (bytes == 0 ||
+        bytes > PRISM_FLASH_CARTRIDGE_DATA_ARENA_BYTES - offset)
+      break;
+    if (memcmp(record->app_key, app_key, PRISM_APP_KEY_BYTES) == 0 &&
+        record_valid(record,
+                     PRISM_FLASH_CARTRIDGE_DATA_ARENA_BYTES - offset) &&
+        (latest == NULL ||
+         (int32_t)(record->generation - latest->generation) > 0))
+      latest = record;
+    offset += bytes;
+  }
+  return latest;
 }
 
 static bool initialize_data_store(void)
@@ -445,26 +431,30 @@ static bool initialize_data_store(void)
         data_active_arena ? marker1 : marker0;
     data_arena_generation = active->generation;
   }
-  scan_latest_workspace(data_active_arena, &data_tail_tainted,
-                        &data_append_offset);
+  bool overflow;
+  scan_latest_inline(data_active_arena, &data_tail_tainted,
+                     &data_append_offset, &overflow);
   data_initialized = true;
   return true;
 }
 
-static bool append_record(uint32_t app_id, uint16_t schema, uint16_t flags,
-                          const void *data, size_t size)
+static bool append_record(const uint8_t app_key[PRISM_APP_KEY_BYTES],
+                          uint16_t schema, uint16_t flags, const void *data,
+                          size_t size)
 {
   data_record_t record = {
       .magic = DATA_RECORD_MAGIC,
-      .app_id = app_id,
       .schema = schema,
       .flags = flags,
       .size = (uint32_t)size,
       .generation = ++data_record_generation,
       .crc32 = flags == DATA_TOMBSTONE ? 0 : crc32(data, size),
   };
+  memcpy(record.app_key, app_key, PRISM_APP_KEY_BYTES);
   uint32_t bytes = record_bytes(&record);
-  if (data_tail_tainted || data_append_offset + bytes > DATA_ARENA_BYTES)
+  if (data_tail_tainted ||
+      data_append_offset + bytes >
+          PRISM_FLASH_CARTRIDGE_DATA_ARENA_BYTES)
     return false;
 
   uint8_t page[FLASH_PAGE_SIZE];
@@ -480,11 +470,10 @@ static bool append_record(uint32_t app_id, uint16_t schema, uint16_t flags,
       else if (source - sizeof(record) < size)
         page[i] = ((const uint8_t *)data)[source - sizeof(record)];
     }
-    if (!program_page(arena_offset(data_active_arena) + data_append_offset +
-                          page_offset,
-                      page))
+    if (!prism_flash_program(arena_offset(data_active_arena) +
+                                 data_append_offset + page_offset,
+                             page, sizeof(page)))
       return false;
-    watchdog_update();
   }
   data_append_offset += bytes;
   return true;
@@ -493,12 +482,34 @@ static bool append_record(uint32_t app_id, uint16_t schema, uint16_t flags,
 static bool compact_data_store(void)
 {
   bool tainted;
-  uint32_t ignored;
-  size_t count = scan_latest_workspace(data_active_arena, &tainted, &ignored);
+  bool overflow;
+  uint32_t source_end;
+  size_t count = scan_latest_inline(data_active_arena, &tainted,
+                                    &source_end, &overflow);
+  latest_record_t *latest = latest_inline;
+  if (overflow)
+  {
+    size_t capacity =
+        (source_end - DATA_RECORDS_OFFSET) / FLASH_PAGE_SIZE;
+    latest = calloc(capacity, sizeof(*latest));
+    if (latest == NULL)
+      return false;
+    count = scan_latest(data_active_arena, latest, capacity, &tainted,
+                        &source_end, &overflow);
+    if (overflow)
+    {
+      free(latest);
+      return false;
+    }
+  }
   uint8_t target = data_active_arena ^ 1u;
   uint32_t generation = data_arena_generation + 1u;
   if (!erase_arena(target) || !write_marker(target, false, generation))
+  {
+    if (latest != latest_inline)
+      free(latest);
     return false;
+  }
 
   uint32_t destination = DATA_RECORDS_OFFSET;
   const uint8_t *source_base =
@@ -506,24 +517,38 @@ static bool compact_data_store(void)
   uint8_t page[FLASH_PAGE_SIZE];
   for (size_t i = 0; i < count; ++i)
   {
-    if (latest_workspace[i].record == NULL ||
-        latest_workspace[i].record->flags == DATA_TOMBSTONE)
+    if (latest[i].record == NULL ||
+        latest[i].record->flags == DATA_TOMBSTONE)
       continue;
-    if (destination + latest_workspace[i].bytes > DATA_ARENA_BYTES)
+    if (destination + latest[i].bytes >
+        PRISM_FLASH_CARTRIDGE_DATA_ARENA_BYTES)
+    {
+      if (latest != latest_inline)
+        free(latest);
       return false;
-    for (uint32_t offset = 0; offset < latest_workspace[i].bytes;
+    }
+    for (uint32_t offset = 0; offset < latest[i].bytes;
          offset += FLASH_PAGE_SIZE)
     {
-      memcpy(page, source_base + latest_workspace[i].offset + offset,
-             sizeof(page));
-      if (!program_page(arena_offset(target) + destination + offset, page))
+      memcpy(page, source_base + latest[i].offset + offset, sizeof(page));
+      if (!prism_flash_program(arena_offset(target) + destination + offset,
+                               page, sizeof(page)))
+      {
+        if (latest != latest_inline)
+          free(latest);
         return false;
-      watchdog_update();
+      }
     }
-    destination += latest_workspace[i].bytes;
+    destination += latest[i].bytes;
   }
   if (!write_marker(target, true, generation))
+  {
+    if (latest != latest_inline)
+      free(latest);
     return false;
+  }
+  if (latest != latest_inline)
+    free(latest);
   data_active_arena = target;
   data_arena_generation = generation;
   data_append_offset = destination;
@@ -531,63 +556,55 @@ static bool compact_data_store(void)
   return true;
 }
 
-bool platform_cartridge_data_load(uint32_t app_id, uint16_t schema,
+bool platform_cartridge_data_load(
+    const uint8_t app_key[PRISM_APP_KEY_BYTES], uint16_t schema,
                                   void *data, size_t size)
 {
   if (!initialize_data_store())
     return false;
-  bool tainted;
-  uint32_t append;
-  size_t count = scan_latest_workspace(data_active_arena, &tainted, &append);
-  for (size_t i = 0; i < count; ++i)
-    if (latest_workspace[i].app_id == app_id &&
-        latest_workspace[i].record != NULL &&
-        latest_workspace[i].record->flags != DATA_TOMBSTONE &&
-        latest_workspace[i].record->schema == schema &&
-        latest_workspace[i].record->size == size)
-    {
-      memcpy(data, (const uint8_t *)latest_workspace[i].record +
-                       sizeof(data_record_t), size);
-      return true;
-    }
-  return false;
+  const data_record_t *record =
+      find_latest_record(data_active_arena, app_key);
+  if (record == NULL || record->flags == DATA_TOMBSTONE ||
+      record->schema != schema || record->size != size)
+    return false;
+  memcpy(data, (const uint8_t *)record + sizeof(*record), size);
+  return true;
 }
 
-static bool cartridge_data_matches(uint32_t app_id, uint16_t schema,
+static bool cartridge_data_matches(
+                                   const uint8_t app_key[PRISM_APP_KEY_BYTES],
+                                   uint16_t schema,
                                    const void *data, size_t size)
 {
-  bool tainted;
-  uint32_t append;
-  size_t count = scan_latest_workspace(data_active_arena, &tainted, &append);
-  for (size_t i = 0; i < count; ++i)
-  {
-    const data_record_t *record = latest_workspace[i].record;
-    if (latest_workspace[i].app_id == app_id && record != NULL &&
-        record->flags != DATA_TOMBSTONE && record->schema == schema &&
-        record->size == size)
-      return memcmp((const uint8_t *)record + sizeof(*record), data, size) == 0;
-  }
-  return false;
+  const data_record_t *record =
+      find_latest_record(data_active_arena, app_key);
+  return record != NULL && record->flags != DATA_TOMBSTONE &&
+         record->schema == schema && record->size == size &&
+         memcmp((const uint8_t *)record + sizeof(*record), data, size) == 0;
 }
 
-bool platform_cartridge_data_save(uint32_t app_id, uint16_t schema,
+bool platform_cartridge_data_save(
+                                  const uint8_t app_key[PRISM_APP_KEY_BYTES],
+                                  uint16_t schema,
                                   const void *data, size_t size)
 {
   if (size > UINT32_MAX || !initialize_data_store())
     return false;
-  if (cartridge_data_matches(app_id, schema, data, size))
+  if (cartridge_data_matches(app_key, schema, data, size))
     return true;
-  if (append_record(app_id, schema, 0, data, size))
+  if (append_record(app_key, schema, 0, data, size))
     return true;
-  return compact_data_store() && append_record(app_id, schema, 0, data, size);
+  return compact_data_store() &&
+         append_record(app_key, schema, 0, data, size);
 }
 
-bool platform_cartridge_data_delete(uint32_t app_id)
+bool platform_cartridge_data_delete(
+    const uint8_t app_key[PRISM_APP_KEY_BYTES])
 {
   if (!initialize_data_store())
     return false;
-  if (append_record(app_id, 0, DATA_TOMBSTONE, NULL, 0))
+  if (append_record(app_key, 0, DATA_TOMBSTONE, NULL, 0))
     return true;
   return compact_data_store() &&
-         append_record(app_id, 0, DATA_TOMBSTONE, NULL, 0);
+         append_record(app_key, 0, DATA_TOMBSTONE, NULL, 0);
 }
