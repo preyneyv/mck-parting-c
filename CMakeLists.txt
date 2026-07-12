@@ -99,6 +99,7 @@ prism_check_cartridge_boundary(${CMAKE_CURRENT_LIST_DIR}/src/cartridges)
 
 # --- OS and shared runtime ---
 set(SHARED_SOURCES
+    src/cartridges/_full_test/app.c
     src/shared/audio/synth.c
     src/shared/audio/song.c
     src/shared/audio/midi.c
