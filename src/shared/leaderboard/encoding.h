@@ -12,8 +12,7 @@ static size_t bytes_to_base36(
     const uint8_t *in, size_t in_len,
     char *out, size_t out_cap)
 {
-    // Make a working copy of input (big-endian)
-    uint8_t buf[64]; // adjust if you need larger inputs
+    uint8_t buf[64];
     if (in_len > sizeof(buf))
         return 0;
 
@@ -35,7 +34,7 @@ static size_t bytes_to_base36(
             rem = acc % 36;
         }
 
-        if (out_len >= out_cap)
+        if (out_len + 1 >= out_cap)
             return 0;
         out[out_len++] = base36_digit(rem);
 
@@ -61,7 +60,6 @@ static size_t bytes_to_base36(
     return out_len;
 }
 
-// Fletcher-16 checksum
 static uint16_t fletcher16(const uint8_t *data, size_t len)
 {
     uint16_t sum1 = 0;

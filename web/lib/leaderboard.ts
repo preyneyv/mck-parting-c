@@ -1,12 +1,45 @@
-export type DecodedEntry = {
+export const BEATLINE_TRACKS = ["Never Gonna", "Golden"] as const;
+export const BEATLINE_DIFFICULTIES = ["Normal", "Hard"] as const;
+export const BEATLINE_RANKS = ["S", "A", "B", "C", "D"] as const;
+
+type MorseResult = {
+  game: "morse";
+  gameName: "Morse";
+  letters: number;
+  errors: number;
+  summary: string;
+};
+
+type AsteroidsResult = {
+  game: "asteroids";
+  gameName: "Asteroids";
+  elapsedMs: number;
+  distance: number;
+  summary: string;
+};
+
+type BeatlineResult = {
+  game: "beatline";
+  gameName: "Beatline";
+  track: number;
+  difficulty: number;
+  rank: number;
+  score: number;
+  maxCombo: number;
+  perfect: number;
+  good: number;
+  bad: number;
+  miss: number;
+  summary: string;
+};
+
+export type DecodedGameResult = MorseResult | AsteroidsResult | BeatlineResult;
+
+export type DecodedEntry = DecodedGameResult & {
   appId: number;
   deviceSerial: string;
   entryId: number;
   rawData: Uint8Array;
-  game: string;
-  summary: string;
-  sortScore: number;
-  metadata: Record<string, number | string>;
 };
 
 function fletcher16(bytes: Uint8Array) {
@@ -34,33 +67,81 @@ function base36Bytes(value: string) {
   return Uint8Array.from(bytes.reverse());
 }
 
-function u16(data: Uint8Array, offset: number) { return data[offset] | (data[offset + 1] << 8); }
-function u32(data: Uint8Array, offset: number) { return (data[offset] | (data[offset + 1] << 8) | (data[offset + 2] << 16) | (data[offset + 3] << 24)) >>> 0; }
+function u16(data: Uint8Array, offset: number) {
+  return data[offset] | (data[offset + 1] << 8);
+}
 
-function parseGame(appId: number, data: Uint8Array): Pick<DecodedEntry, "game" | "summary" | "sortScore" | "metadata"> {
+function u32(data: Uint8Array, offset: number) {
+  return (data[offset] | (data[offset + 1] << 8) | (data[offset + 2] << 16) | (data[offset + 3] << 24)) >>> 0;
+}
+
+export function beatlineTrackName(track: number) {
+  return BEATLINE_TRACKS[track] ?? `Track ${track + 1}`;
+}
+
+export function beatlineDifficultyName(difficulty: number) {
+  return BEATLINE_DIFFICULTIES[difficulty] ?? `Difficulty ${difficulty}`;
+}
+
+export function beatlineRankName(rank: number) {
+  return BEATLINE_RANKS[rank] ?? "?";
+}
+
+/** Decode the exact little-endian byte layouts authored by each cartridge. */
+export function decodeGameData(appId: number, data: Uint8Array): DecodedGameResult {
   if (appId === 1 && data.length === 8) {
     const letters = u32(data, 0);
     const errors = u32(data, 4);
-    return { game: "Morse", summary: `${letters} letters · ${errors} errors`, sortScore: letters * 100000 - errors, metadata: { letters, errors } };
+    return {
+      game: "morse",
+      gameName: "Morse",
+      letters,
+      errors,
+      summary: `${letters} letters · ${errors} ${errors === 1 ? "error" : "errors"}`,
+    };
   }
+
   if (appId === 2 && data.length === 8) {
     const elapsedMs = u32(data, 0);
     const distance = u32(data, 4);
-    return { game: "Asteroids", summary: `${distance} m · ${(elapsedMs / 1000).toFixed(1)} s`, sortScore: distance * 100000000 + elapsedMs, metadata: { elapsedMs, distance } };
+    return {
+      game: "asteroids",
+      gameName: "Asteroids",
+      elapsedMs,
+      distance,
+      summary: `${distance} m · ${(elapsedMs / 1000).toFixed(1)} s`,
+    };
   }
+
   if (appId === 5 && data.length === 14) {
     const track = data[0] >> 1;
     const difficulty = data[0] & 1;
     const rank = data[1];
+    if (rank >= BEATLINE_RANKS.length) throw new Error("Invalid Beatline rank");
+
     const score = u32(data, 2);
     const maxCombo = u16(data, 6);
     const perfect = u16(data, 8);
     const good = u16(data, 10);
     const bad = data[12];
     const miss = data[13];
-    return { game: "Beatline", summary: `${score.toLocaleString()} · ${maxCombo} combo`, sortScore: score, metadata: { track, difficulty, rank, score, maxCombo, perfect, good, bad, miss } };
+    return {
+      game: "beatline",
+      gameName: "Beatline",
+      track,
+      difficulty,
+      rank,
+      score,
+      maxCombo,
+      perfect,
+      good,
+      bad,
+      miss,
+      summary: `${score.toLocaleString()} · ${maxCombo} combo · ${beatlineTrackName(track)}`,
+    };
   }
-  throw new Error(`Unsupported score format (app ${appId})`);
+
+  throw new Error(`Unsupported score format (app ${appId}, ${data.length} bytes)`);
 }
 
 export function decodeLeaderboardPayload(payload: string): DecodedEntry {
@@ -75,5 +156,5 @@ export function decodeLeaderboardPayload(payload: string): DecodedEntry {
   const deviceSerial = Array.from(bytes.subarray(1, 9), (byte) => byte.toString(16).padStart(2, "0")).join("").toUpperCase();
   const entryId = ((bytes[9] << 24) | (bytes[10] << 16) | (bytes[11] << 8) | bytes[12]) >>> 0;
   const rawData = bytes.slice(14, 14 + dataLength);
-  return { appId, deviceSerial, entryId, rawData, ...parseGame(appId, rawData) };
+  return { appId, deviceSerial, entryId, rawData, ...decodeGameData(appId, rawData) };
 }

@@ -1,5 +1,5 @@
 #include <qrcodegen.h>
-#include <stdio.h>
+#include <string.h>
 
 #include <platform/identity.h>
 
@@ -16,73 +16,65 @@ typedef struct
     uint8_t board_id[8];
     uint32_t entry_id;
     uint8_t data_len; // max 255 bytes of data
-    uint8_t *data;
+    const uint8_t *data;
 } leaderboard_entry_t;
 
-static leaderboard_qrcode_t temp;
-static char url_buffer[115]; // max len for v4-L qr code in alphanum
+enum
+{
+    LEADERBOARD_PAYLOAD_BYTES = 16 + LEADERBOARD_MAX_DATA_BYTES,
+    LEADERBOARD_BASE36_BYTES = 76,
+    LEADERBOARD_URL_BYTES = 115,
+};
 
-static void _pack_leaderboard_entry(leaderboard_entry_t *entry, uint8_t *out_buf, size_t *out_len)
+static size_t pack_entry(const leaderboard_entry_t *entry, uint8_t *out)
 {
     size_t offset = 0;
-
-    // app id [0:1] (1 byte)
-    out_buf[offset++] = entry->app_id;
-
-    // board id [1:9] (8 bytes)
+    out[offset++] = entry->app_id;
     for (size_t i = 0; i < sizeof(entry->board_id); i++)
-    {
-        out_buf[offset++] = entry->board_id[i];
-    }
-
-    // entry id [9:13] (4 bytes)
-    out_buf[offset++] = (entry->entry_id >> 24) & 0xFF;
-    out_buf[offset++] = (entry->entry_id >> 16) & 0xFF;
-    out_buf[offset++] = (entry->entry_id >> 8) & 0xFF;
-    out_buf[offset++] = (entry->entry_id) & 0xFF;
-
-    // data_len (1 byte)
-    out_buf[offset++] = entry->data_len;
-
-    // data [14:14+data_len]
+        out[offset++] = entry->board_id[i];
+    out[offset++] = (entry->entry_id >> 24) & 0xFF;
+    out[offset++] = (entry->entry_id >> 16) & 0xFF;
+    out[offset++] = (entry->entry_id >> 8) & 0xFF;
+    out[offset++] = entry->entry_id & 0xFF;
+    out[offset++] = entry->data_len;
     for (size_t i = 0; i < entry->data_len; i++)
-    {
-        out_buf[offset++] = entry->data[i];
-    }
-
-    // checksum [14+data_len:16+data_len] (2 bytes)
-    uint16_t checksum = fletcher16(out_buf, offset);
-    out_buf[offset++] = (checksum >> 8) & 0xFF;
-    out_buf[offset++] = (checksum) & 0xFF;
-
-    *out_len = offset;
+        out[offset++] = entry->data[i];
+    uint16_t checksum = fletcher16(out, offset);
+    out[offset++] = checksum >> 8;
+    out[offset++] = checksum & 0xFF;
+    return offset;
 }
 
-bool leaderboard_get_qrcode(uint8_t app_id, void *data, size_t data_len, uint8_t *qrcode)
+bool leaderboard_get_qrcode(uint8_t app_id, const void *data, size_t data_len,
+                            uint8_t qrcode[LEADERBOARD_QR_SIZE])
 {
+    if (qrcode == NULL || data_len > LEADERBOARD_MAX_DATA_BYTES ||
+        (data_len > 0 && data == NULL))
+        return false;
+
     leaderboard_entry_t entry = {
         .app_id = app_id,
-        .entry_id = platform_rand_u32(), // simple random entry ID
+        .entry_id = platform_rand_u32(),
         .data = data,
-        .data_len = data_len,
+        .data_len = (uint8_t)data_len,
     };
     platform_device_id(entry.board_id);
 
-    size_t packed_len = 0;
-    // abuse url buffer for packed data
-    _pack_leaderboard_entry(&entry, url_buffer, &packed_len);
-    // abuse temp buffer for base36 encoding
-    bytes_to_base36(url_buffer, packed_len, temp, sizeof(temp));
-    // construct final url
-    snprintf(
-        url_buffer, sizeof(url_buffer),
-        "%s%s",
-        LEADERBOARD_QR_PREFIX,
-        (char *)temp);
+    uint8_t payload[LEADERBOARD_PAYLOAD_BYTES];
+    char encoded[LEADERBOARD_BASE36_BYTES];
+    char url[LEADERBOARD_URL_BYTES];
+    leaderboard_qrcode_t scratch;
+    size_t payload_len = pack_entry(&entry, payload);
+    size_t encoded_len = bytes_to_base36(payload, payload_len, encoded,
+                                         sizeof(encoded));
+    size_t prefix_len = strlen(LEADERBOARD_QR_PREFIX);
+    if (encoded_len == 0 || prefix_len + encoded_len >= sizeof(url))
+        return false;
+    memcpy(url, LEADERBOARD_QR_PREFIX, prefix_len);
+    memcpy(url + prefix_len, encoded, encoded_len + 1);
 
-    printf("[leaderboard] url gen: %s\n", url_buffer);
-
-    // build final qr code
-    bool ok = qrcodegen_encodeText(url_buffer, temp, qrcode, qrcodegen_Ecc_LOW, LEADERBOARD_QR_VERSION, LEADERBOARD_QR_VERSION, qrcodegen_Mask_AUTO, true);
-    return ok;
+    return qrcodegen_encodeText(url, scratch, qrcode, qrcodegen_Ecc_LOW,
+                                LEADERBOARD_QR_VERSION,
+                                LEADERBOARD_QR_VERSION, qrcodegen_Mask_AUTO,
+                                true);
 }
