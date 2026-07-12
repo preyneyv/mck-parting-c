@@ -1,14 +1,10 @@
-// elm is short for element
-// a super basic hierarchical wrapper around u8g2
-
 #pragma once
 
 #include <u8g2.h>
-#include <qrcodegen.h>
-
-#include <shared/utils/vec.h>
-#include <stdio.h>
-#include <shared/utils/misc.h>
+#include <prism/graphics/display.h>
+#include <prism/graphics/easing.h>
+#include <prism/graphics/qrcode.h>
+#include <prism/graphics/vector.h>
 typedef struct
 {
   vec2_t pos;
@@ -28,16 +24,14 @@ typedef enum
   ELM_ALIGN_BOTTOM_RIGHT,
 } elm_align_t;
 
-static inline vec2_t _elm_calculate_aligned_pos(elm_t *parent, vec2_t pos,
-                                                uint16_t w, uint16_t h,
-                                                elm_align_t align)
+static inline vec2_t elm_aligned_position(vec2_t pos, uint16_t w, uint16_t h,
+                                          elm_align_t align)
 {
   vec2_t aligned_pos = pos;
 
   switch (align)
   {
   case ELM_ALIGN_TOP_LEFT:
-    // no-op
     break;
   case ELM_ALIGN_TOP_CENTER:
     aligned_pos.x -= w / 2;
@@ -85,7 +79,7 @@ static inline elm_t elm_child(elm_t *parent, vec2_t pos)
 static inline elm_t elm_child_aligned(elm_t *parent, vec2_t pos, uint16_t w,
                                       uint16_t h, elm_align_t align)
 {
-  vec2_t aligned_pos = _elm_calculate_aligned_pos(parent, pos, w, h, align);
+  vec2_t aligned_pos = elm_aligned_position(pos, w, h, align);
   return (elm_t){.pos = aligned_pos, .u8g2 = parent->u8g2};
 }
 
@@ -231,24 +225,31 @@ static inline elm_t elm_qrcode(elm_t *parent, vec2_t pos,
                                elm_align_t align,
                                const uint8_t *qrcode, uint8_t border, uint8_t pixel_size)
 {
+  if (qrcode == NULL || pixel_size == 0)
+    return elm_child_aligned(parent, pos, 0, 0, align);
 
-  int size = qrcodegen_getSize(qrcode);
-  int dim = (size * pixel_size) + (2 * border);
+  uint16_t size = qrcode[0];
+  uint32_t dimension = (uint32_t)size * pixel_size + 2u * border;
+  if (dimension > PRISM_DISPLAY_WIDTH)
+    return elm_child_aligned(parent, pos, (uint16_t)dimension,
+                             (uint16_t)dimension, align);
+
+  uint16_t dim = (uint16_t)dimension;
   elm_t child = elm_child_aligned(parent, pos, dim, dim, align);
 
-  u8g2_SetDrawColor(child.u8g2, 1);
-  u8g2_DrawBox(child.u8g2, child.pos.x, child.pos.y, dim, dim);
+  size_t bitmap_bytes = prism_qrcode_xbm_bytes(dim);
+  uint8_t bitmap[bitmap_bytes];
+  uint16_t rendered_dim;
+  if (!prism_qrcode_to_xbm(qrcode, border, pixel_size, bitmap,
+                           bitmap_bytes, &rendered_dim))
+    return child;
 
-  for (uint8_t y = 0; y < size; y++)
-  {
-    for (uint8_t x = 0; x < size; x++)
-    {
-      bool filled = qrcodegen_getModule(qrcode, x, y);
-      u8g2_SetDrawColor(child.u8g2, filled ? 0 : 1);
-      u8g2_DrawBox(child.u8g2, border + child.pos.x + (x * pixel_size), border + child.pos.y + (y * pixel_size),
-                   pixel_size, pixel_size);
-    }
-  }
+  uint8_t bitmap_mode = child.u8g2->bitmap_transparency;
+  u8g2_SetDrawColor(child.u8g2, 1);
+  u8g2_SetBitmapMode(child.u8g2, 0);
+  u8g2_DrawXBM(child.u8g2, child.pos.x, child.pos.y, rendered_dim,
+               rendered_dim, bitmap);
+  u8g2_SetBitmapMode(child.u8g2, bitmap_mode);
   return child;
 }
 

@@ -1,5 +1,7 @@
 #pragma once
 
+#include <stdint.h>
+
 typedef union {
   struct {
     int16_t x;

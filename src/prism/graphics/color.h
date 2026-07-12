@@ -1,6 +1,13 @@
 #pragma once
 
-#include <platform/leds.h>
+#include <prism/types.h>
+
+typedef prism_color_t color_t;
+
+static inline color_t rgba(uint8_t r, uint8_t g, uint8_t b, uint8_t a)
+{
+    return prism_rgba(r, g, b, a);
+}
 
 static inline uint8_t u8_lerp(uint8_t a, uint8_t b, float t)
 {

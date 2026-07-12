@@ -1,4 +1,5 @@
 #include <prism/runtime.h>
+#include <prism/cartridge_identity.h>
 
 #include <stdlib.h>
 #include <string.h>
@@ -9,6 +10,7 @@
 #include <platform/peripheral.h>
 #include <platform/time.h>
 #include <platform/system.h>
+#include <shared/anim.h>
 #include <shared/engine.h>
 #include <shared/leaderboard/leaderboard.h>
 
@@ -23,21 +25,35 @@ static bool persistent_dirty;
 static platform_time_t persistent_dirty_at;
 static bool persistence_deferred;
 
-static button_t *api_button(prism_button_t button)
-{
-  return engine_button_from_id((button_id_t)button);
-}
-
 static bool api_button_pressed(prism_button_t button)
 {
-  button_t *value = api_button(button);
-  return value != NULL && value->pressed;
+  return engine_button_pressed((button_id_t)button);
 }
 
 static bool api_button_edge(prism_button_t button)
 {
-  button_t *value = api_button(button);
-  return value != NULL && value->edge;
+  return engine_button_app_keydown((button_id_t)button) ||
+         engine_button_app_keyup((button_id_t)button);
+}
+
+static bool api_button_keydown(prism_button_t button)
+{
+  return engine_button_app_keydown((button_id_t)button);
+}
+
+static bool api_button_keyup(prism_button_t button)
+{
+  return engine_button_app_keyup((button_id_t)button);
+}
+
+static uint32_t api_button_keydown_tick(prism_button_t button)
+{
+  return engine_button_app_keydown_tick((button_id_t)button);
+}
+
+static uint32_t api_button_keyup_tick(prism_button_t button)
+{
+  return engine_button_app_keyup_tick((button_id_t)button);
 }
 
 static float api_button_hold_ratio(prism_button_t button)
@@ -45,13 +61,12 @@ static float api_button_hold_ratio(prism_button_t button)
   return engine_button_held_ratio((button_id_t)button);
 }
 
-static uint32_t api_ticks(void) { return g_engine.tick; }
-static audio_synth_t *api_synth(void) { return &g_engine.synth; }
+static uint32_t api_ticks(void) { return engine_ticks(); }
+static audio_synth_t *api_synth(void) { return engine_synth(); }
 
 static void api_led_set(uint8_t led, color_t color)
 {
-  if (led < LED_COUNT)
-    g_engine.led_colors[led] = color;
+  engine_led_set(led, color);
 }
 
 static void api_persist(void)
@@ -63,7 +78,7 @@ static void api_persist(void)
 }
 
 static const prism_api_v1_t api_v1 = {
-    .abi_version = PRISM_CARTRIDGE_ABI_V1,
+    .abi_version = PRISM_API_ABI_VERSION,
     .struct_size = sizeof(prism_api_v1_t),
     .display = platform_display_get_u8g2,
     .ticks = api_ticks,
@@ -83,6 +98,10 @@ static const prism_api_v1_t api_v1 = {
     .anim_to = anim_to,
     .anim_cancel = anim_cancel,
     .leaderboard_qrcode = leaderboard_get_qrcode,
+    .button_keydown = api_button_keydown,
+    .button_keyup = api_button_keyup,
+    .button_keydown_tick = api_button_keydown_tick,
+    .button_keyup_tick = api_button_keyup_tick,
 };
 
 static void adapter_enter(void)
@@ -155,9 +174,11 @@ static app_t adapter = {
 bool prism_cartridge_launch(const prism_cartridge_t *cartridge)
 {
   if (cartridge == NULL || cartridge->magic != PRISM_CARTRIDGE_MAGIC ||
-      cartridge->abi_version != PRISM_CARTRIDGE_ABI_V1 ||
+      cartridge->abi_version != PRISM_CARTRIDGE_ABI_VERSION ||
       cartridge->descriptor_size < sizeof(prism_cartridge_t) ||
-      cartridge->slug == NULL || cartridge->name == NULL)
+      !prism_cartridge_id_valid(cartridge->id) ||
+      cartridge->name == NULL || cartridge->name[0] == '\0' ||
+      cartridge->icon == NULL || cartridge->frame == NULL)
     return false;
 
   void *state = NULL;
@@ -184,8 +205,15 @@ bool prism_cartridge_launch(const prism_cartridge_t *cartridge)
       platform_cartridge_release(&execution);
       return false;
     }
-    platform_cartridge_data_load(cartridge->app_id,
-                                 cartridge->persistent_schema_version,
+    prism_app_key_t app_key;
+    if (!prism_app_key_derive(cartridge->id, app_key))
+    {
+      free(persistent);
+      free(state);
+      platform_cartridge_release(&execution);
+      return false;
+    }
+    platform_cartridge_data_load(app_key, cartridge->persistent_schema_version,
                                  persistent, cartridge->persistent_size);
   }
 
@@ -196,6 +224,9 @@ bool prism_cartridge_launch(const prism_cartridge_t *cartridge)
   memset(adapter.name, 0, sizeof(adapter.name));
   strncpy(adapter.name, cartridge->name, sizeof(adapter.name) - 1);
   adapter.icon = cartridge->icon;
+  adapter.tick_divider = cartridge->tick_divider == 0
+                             ? 1u
+                             : cartridge->tick_divider;
   engine_set_app(&adapter);
   return true;
 }
@@ -207,7 +238,9 @@ void prism_cartridge_persistence_flush(void)
 {
   if (!persistent_dirty || current == NULL || context.persistent == NULL)
     return;
-  if (platform_cartridge_data_save(current->app_id,
+  prism_app_key_t app_key;
+  if (prism_app_key_derive(current->id, app_key) &&
+      platform_cartridge_data_save(app_key,
                                    current->persistent_schema_version,
                                    context.persistent,
                                    context.persistent_size))

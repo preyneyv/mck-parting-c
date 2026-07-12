@@ -1,8 +1,7 @@
 #include <platform/cartridge.h>
+#include <platform/system.h>
 
 #include <stdlib.h>
-
-#include <hardware/structs/watchdog.h>
 
 #include "cartridge_storage.h"
 
@@ -26,13 +25,14 @@ bool platform_cartridge_prepare(const prism_cartridge_t *cartridge,
     return false;
   execution->allocation = NULL;
   execution->got_base = NULL;
+  execution->backend = NULL;
   if (!cartridge_storage_owns(cartridge))
     return true; /* Firmware-bundled descriptor. */
-  watchdog_hw->scratch[0] = 0x50524550u; /* PREP */
-  watchdog_hw->scratch[1] = (uint32_t)(uintptr_t)cartridge;
+  uint32_t parent_stage = platform_watchdog_trace_stage();
+  uint32_t parent_detail = platform_watchdog_trace_detail();
+  platform_watchdog_trace(0x50524550u, (uint32_t)(uintptr_t)cartridge);
   bool prepared = cartridge_storage_prepare(cartridge, execution);
-  watchdog_hw->scratch[0] = 0;
-  watchdog_hw->scratch[1] = 0;
+  platform_watchdog_trace(parent_stage, parent_detail);
   return prepared;
 }
 
@@ -43,6 +43,7 @@ void platform_cartridge_release(platform_cartridge_execution_t *execution)
   free(execution->allocation);
   execution->allocation = NULL;
   execution->got_base = NULL;
+  execution->backend = NULL;
 }
 
 void platform_cartridge_call(const platform_cartridge_execution_t *execution,
@@ -52,11 +53,11 @@ void platform_cartridge_call(const platform_cartridge_execution_t *execution,
     return;
   if (execution != NULL && execution->got_base != NULL)
   {
-    watchdog_hw->scratch[0] = 0x43414c4cu; /* CALL */
-    watchdog_hw->scratch[1] = (uint32_t)(uintptr_t)function;
+    uint32_t parent_stage = platform_watchdog_trace_stage();
+    uint32_t parent_detail = platform_watchdog_trace_detail();
+    platform_watchdog_trace(0x43414c4cu, (uint32_t)(uintptr_t)function);
     prism_call_with_got(function, execution->got_base, context);
-    watchdog_hw->scratch[0] = 0;
-    watchdog_hw->scratch[1] = 0;
+    platform_watchdog_trace(parent_stage, parent_detail);
   }
   else
     function(context);

@@ -1,10 +1,5 @@
-function(prism_check_cartridge_boundary ROOT)
-    file(GLOB_RECURSE CARTRIDGE_CODE CONFIGURE_DEPENDS
-        "${ROOT}/*.c"
-        "${ROOT}/*.h"
-    )
-
-    foreach(FILE IN LISTS CARTRIDGE_CODE)
+function(prism_check_cartridge_files)
+    foreach(FILE IN LISTS ARGN)
         file(READ "${FILE}" CONTENT)
         if(CONTENT MATCHES "#[ \t]*include[ \t]*[<\"]+(shared/|platform/|host/|rp2/)")
             message(FATAL_ERROR
@@ -18,4 +13,12 @@ function(prism_check_cartridge_boundary ROOT)
             )
         endif()
     endforeach()
+endfunction()
+
+function(prism_check_cartridge_boundary ROOT)
+    file(GLOB_RECURSE CARTRIDGE_CODE CONFIGURE_DEPENDS
+        "${ROOT}/*.c"
+        "${ROOT}/*.h"
+    )
+    prism_check_cartridge_files(${CARTRIDGE_CODE})
 endfunction()

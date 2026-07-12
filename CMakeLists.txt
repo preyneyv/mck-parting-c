@@ -9,6 +9,14 @@ set(CMAKE_C_STANDARD 11)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
+option(PRISM_ENABLE_PERFORMANCE_LOGS
+    "Collect and print frame, tick, and audio timing statistics"
+    OFF
+)
+if(PRISM_ENABLE_PERFORMANCE_LOGS)
+    add_compile_definitions(PRISM_ENABLE_PERFORMANCE_LOGS=1)
+endif()
+
 if(NOT CMAKE_CONFIGURATION_TYPES AND NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)
     set_property(CACHE CMAKE_BUILD_TYPE PROPERTY STRINGS Debug Release MinSizeRel RelWithDebInfo)
@@ -34,11 +42,16 @@ set(PICO_BOARD board)
 list(APPEND PICO_BOARD_HEADER_DIRS ${CMAKE_CURRENT_LIST_DIR})
 
 include(pico_sdk_import.cmake)
-project(mck-parting-c C CXX ASM)
+project(prism C CXX ASM)
 
 pico_sdk_init()
 
-# super important for u8g2 otherwise we get a 11 MB binary :skull:
+function(prism_enable_warnings TARGET)
+    target_compile_options(${TARGET} PRIVATE
+        $<$<COMPILE_LANGUAGE:C>:-Wall;-Wextra;-Wformat=2;-Werror=implicit-function-declaration;-Werror=return-type>
+    )
+endfunction()
+
 add_compile_options(-ffast-math -ffunction-sections -fdata-sections)
 if(APPLE)
     add_link_options(-Wl,-dead_strip)
@@ -61,14 +74,15 @@ add_library(prism_sdk INTERFACE)
 target_link_libraries(prism_sdk INTERFACE prism_cartridge_headers)
 target_link_libraries(prism_sdk INTERFACE u8g2 qrcodegen m)
 
-# Cartridges are compiled as their own target. They are bundled into the
-# firmware today, but only consume the public Prism SDK boundary.
-set(CARTRIDGE_SOURCES
-    src/cartridges/_full_test/app.c
-    src/cartridges/dummy/app.c
-)
+add_library(prism_sdk_header_test OBJECT tests/sdk_public_headers.c)
+target_link_libraries(prism_sdk_header_test PRIVATE prism_sdk)
+prism_enable_warnings(prism_sdk_header_test)
+
+# Built-in host cartridges consume only the public Prism SDK boundary. RP2
+# cartridges are packaged independently and embedded below.
+set(CARTRIDGE_OBJECTS)
 if(PICO_PLATFORM STREQUAL "host")
-    list(APPEND CARTRIDGE_SOURCES
+    add_library(prism_cartridges OBJECT
         src/cartridges/bongocat/app.c
         src/cartridges/morse/app.c
         src/cartridges/asteroids/app.c
@@ -76,15 +90,15 @@ if(PICO_PLATFORM STREQUAL "host")
         src/cartridges/beatline/chart.c
         src/cartridges/beatline/game.c
     )
+    target_link_libraries(prism_cartridges PRIVATE prism_sdk)
+    prism_enable_warnings(prism_cartridges)
+    set(CARTRIDGE_OBJECTS $<TARGET_OBJECTS:prism_cartridges>)
 endif()
-add_library(prism_cartridges OBJECT ${CARTRIDGE_SOURCES})
-target_link_libraries(prism_cartridges PRIVATE prism_sdk)
 include(${CMAKE_CURRENT_LIST_DIR}/cmake/cartridge_boundary.cmake)
 prism_check_cartridge_boundary(${CMAKE_CURRENT_LIST_DIR}/src/cartridges)
 
 # --- OS and shared runtime ---
 set(SHARED_SOURCES
-    src/shared/audio/buffer.c
     src/shared/audio/synth.c
     src/shared/audio/song.c
     src/shared/audio/midi.c
@@ -94,11 +108,17 @@ set(SHARED_SOURCES
     src/shared/os/launcher/app.c
     src/shared/os/cartridge_runtime.c
     src/shared/os/cartridge_registry.c
+    src/shared/os/cartridge_identity.c
+    src/shared/os/management_serialization.c
     src/shared/os/settings.c
     src/shared/os/midi_mode.c
-    $<TARGET_OBJECTS:prism_cartridges>
+    src/shared/os/pause_menu.c
+    src/shared/os/power_indicator.c
+    src/shared/os/wake_confirmation.c
+    ${CARTRIDGE_OBJECTS}
 )
 add_library(shared STATIC ${SHARED_SOURCES})
+prism_enable_warnings(shared)
 target_include_directories(shared PRIVATE ${CMAKE_CURRENT_LIST_DIR}/src)
 target_link_libraries(shared PUBLIC
     prism_sdk
@@ -115,8 +135,60 @@ include(${CMAKE_CURRENT_LIST_DIR}/cmake/assets.cmake)
 
 if(PICO_PLATFORM STREQUAL "host")
     # --- host build ---
+    include(ExternalProject)
+    set(PRISM_UNICORN_PREFIX "${CMAKE_BINARY_DIR}/unicorn")
+    set(PRISM_UNICORN_INSTALL "${PRISM_UNICORN_PREFIX}/install")
+    file(MAKE_DIRECTORY "${PRISM_UNICORN_INSTALL}/include")
+    ExternalProject_Add(prism_unicorn
+        PREFIX "${PRISM_UNICORN_PREFIX}"
+        GIT_REPOSITORY https://github.com/unicorn-engine/unicorn.git
+        GIT_TAG 8028ec436f2d9376525352dd38ed9ed6b9f6be10
+        GIT_SHALLOW TRUE
+        GIT_SUBMODULES ""
+        UPDATE_COMMAND ""
+        CONFIGURE_COMMAND
+            ${CMAKE_COMMAND}
+            -DPRISM_SOURCE=<SOURCE_DIR>
+            -DPRISM_BINARY=<BINARY_DIR>
+            -DPRISM_GENERATOR=${CMAKE_GENERATOR}
+            -DPRISM_BUILD_TYPE=Release
+            -DPRISM_INSTALL=${PRISM_UNICORN_INSTALL}
+            -DPRISM_MAKE_PROGRAM=${CMAKE_MAKE_PROGRAM}
+            -DPRISM_C_COMPILER=${CMAKE_C_COMPILER}
+            -P ${CMAKE_CURRENT_LIST_DIR}/cmake/configure_unicorn.cmake
+        BUILD_COMMAND ${CMAKE_COMMAND} --build <BINARY_DIR>
+        INSTALL_COMMAND ${CMAKE_COMMAND} --install <BINARY_DIR>
+        BUILD_BYPRODUCTS
+            "${PRISM_UNICORN_PREFIX}/src/prism_unicorn-build/libunicorn.a"
+            "${PRISM_UNICORN_PREFIX}/src/prism_unicorn-build/libarm-softmmu.a"
+            "${PRISM_UNICORN_PREFIX}/src/prism_unicorn-build/libunicorn-common.a"
+    )
+    add_library(prism_unicorn_core STATIC IMPORTED GLOBAL)
+    add_library(prism_unicorn_arm STATIC IMPORTED GLOBAL)
+    add_library(prism_unicorn_common STATIC IMPORTED GLOBAL)
+    set_target_properties(prism_unicorn_core PROPERTIES
+        IMPORTED_LOCATION "${PRISM_UNICORN_PREFIX}/src/prism_unicorn-build/libunicorn.a"
+    )
+    set_target_properties(prism_unicorn_arm PROPERTIES
+        IMPORTED_LOCATION "${PRISM_UNICORN_PREFIX}/src/prism_unicorn-build/libarm-softmmu.a"
+    )
+    set_target_properties(prism_unicorn_common PROPERTIES
+        IMPORTED_LOCATION "${PRISM_UNICORN_PREFIX}/src/prism_unicorn-build/libunicorn-common.a"
+    )
+    add_library(prism_unicorn_library INTERFACE)
+    target_include_directories(prism_unicorn_library INTERFACE
+        "${PRISM_UNICORN_INSTALL}/include"
+    )
+    target_link_libraries(prism_unicorn_library INTERFACE
+        prism_unicorn_core
+        prism_unicorn_arm
+        prism_unicorn_common
+        m
+    )
+    add_dependencies(prism_unicorn_library prism_unicorn)
+
     target_compile_definitions(shared PUBLIC PICO_ON_DEVICE=0)
-    add_executable(mck-parting-c
+    add_executable(prism
         src/host/main.c
         src/host/audio.c
         src/host/display.c
@@ -129,53 +201,64 @@ if(PICO_PLATFORM STREQUAL "host")
         src/host/peripheral.c
         src/host/persistence.c
         src/host/cartridge.c
+        src/host/cartridge_vm.c
         src/host/sleep.c
         src/host/sync.c
     )
+    prism_enable_warnings(prism)
 
-    # force-include the host compatibility header
     target_compile_options(shared PRIVATE -include ${CMAKE_CURRENT_LIST_DIR}/src/host/compat.h)
-    target_compile_options(mck-parting-c PRIVATE -include ${CMAKE_CURRENT_LIST_DIR}/src/host/compat.h)
+    target_compile_options(prism PRIVATE -include ${CMAKE_CURRENT_LIST_DIR}/src/host/compat.h)
 
-    target_include_directories(mck-parting-c PRIVATE ${CMAKE_CURRENT_LIST_DIR}/src)
-    # target_compile_options(mck-parting-c PRIVATE -ffast-math)
+    target_include_directories(prism PRIVATE ${CMAKE_CURRENT_LIST_DIR}/src)
 
     find_package(Threads REQUIRED)
     # Link SDL statically so the host simulator is a clone-and-run executable.
     find_package(SDL2 CONFIG REQUIRED)
 
-    target_link_libraries(mck-parting-c PRIVATE
+    target_link_libraries(prism PRIVATE
         shared
         SDL2::SDL2-static
         Threads::Threads
+        prism_unicorn_library
     )
-    if(MINGW)
-        target_link_options(mck-parting-c PRIVATE -static -static-libgcc)
+    include(CTest)
+    if(BUILD_TESTING)
+        add_executable(prism_cartridge_identity_tests
+            tests/cartridge_identity_test.c
+            src/shared/os/cartridge_identity.c
+            src/shared/os/management_serialization.c
+        )
+        target_include_directories(prism_cartridge_identity_tests PRIVATE
+            ${CMAKE_CURRENT_LIST_DIR}/src
+        )
+        prism_enable_warnings(prism_cartridge_identity_tests)
+        add_test(NAME prism_cartridge_identity
+                 COMMAND prism_cartridge_identity_tests)
+
+        add_executable(prism_qrcode_render_tests
+            tests/qrcode_render_test.c
+        )
+        target_link_libraries(prism_qrcode_render_tests PRIVATE prism_sdk)
+        prism_enable_warnings(prism_qrcode_render_tests)
+        add_test(NAME prism_qrcode_render
+                 COMMAND prism_qrcode_render_tests)
     endif()
-
-
-
-    # file(GLOB U8G2_SYS_SDL "lib/u8g2/sys/sdl/common/*.c")
-
-    # --- host executable targets ---
-    # file(GLOB host_entrypoints CONFIGURE_DEPENDS "src/host/test_*.c")
-    # foreach(ts IN LISTS host_entrypoints)
-    #     get_filename_component(test_name ${ts} NAME_WE)
-    #     add_executable(${test_name} ${ts} ${U8G2_SYS_SDL})
-    #     target_link_libraries(${test_name} PRIVATE 
-    #         shared 
-    #         SDL2::SDL2
-    #     )
-    #     target_include_directories(${test_name} PRIVATE ${CMAKE_CURRENT_LIST_DIR}/src)
-    #     target_compile_options(${test_name} PRIVATE -ffast-math)
-    # endforeach()
+    if(MINGW)
+        target_link_options(prism PRIVATE -static -static-libgcc)
+    endif()
 else()
     # --- rp2 build ---
-    add_executable(mck-parting-c
+    add_executable(prism
         src/rp2/main.c
         src/rp2/midi.c
         src/rp2/management.c
+        src/rp2/management_commands.c
+        src/rp2/management_overlay.c
+        src/rp2/management_protocol.c
+        src/rp2/management_transport.c
         src/rp2/cartridge_storage.c
+        src/rp2/flash_io.c
         src/rp2/cartridge.c
         src/rp2/cartridge_call.S
         src/rp2/platform.c
@@ -192,17 +275,17 @@ else()
         src/rp2/sync.c
         src/rp2/usb_descriptors.c
     )
+    prism_enable_warnings(prism)
 
-    target_compile_definitions(mck-parting-c PUBLIC
-        # The sole vendor-class interface belongs to Prism management. Picotool
-        # can still reboot through the CDC baud-rate convention.
-        PICO_STDIO_USB_ENABLE_RESET_VIA_VENDOR_INTERFACE=0
+    target_compile_definitions(prism PUBLIC
+        PICO_STDIO_USB_ENABLE_RESET_VIA_VENDOR_INTERFACE=1
         PICO_STDIO_USB_ENABLE_RESET_VIA_BAUD_RATE=1
+        PICO_STDIO_USB_RESET_INTERFACE_SUPPORT_MS_OS_20_DESCRIPTOR=0
         PICO_STDIO_USB_ENABLE_IRQ_BACKGROUND_TASK=1
         PICO_STDIO_USB_ENABLE_TINYUSB_INIT=1
     )
 
-    target_link_libraries(mck-parting-c PRIVATE
+    target_link_libraries(prism PRIVATE
         shared
         hardware_adc
         hardware_clocks
@@ -221,24 +304,23 @@ else()
         tinyusb_device
         tinyusb_board
     )
-    target_include_directories(mck-parting-c PRIVATE ${CMAKE_CURRENT_LIST_DIR}/src)
+    target_include_directories(prism PRIVATE ${CMAKE_CURRENT_LIST_DIR}/src)
 
-    pico_generate_pio_header(mck-parting-c ${CMAKE_CURRENT_LIST_DIR}/src/rp2/audio.pio)
-    pico_generate_pio_header(mck-parting-c ${CMAKE_CURRENT_LIST_DIR}/src/rp2/leds.pio)
+    pico_generate_pio_header(prism ${CMAKE_CURRENT_LIST_DIR}/src/rp2/audio.pio)
+    pico_generate_pio_header(prism ${CMAKE_CURRENT_LIST_DIR}/src/rp2/leds.pio)
 
 
-    pico_enable_stdio_uart(mck-parting-c 0)
-    pico_enable_stdio_usb(mck-parting-c 1)
-    pico_set_program_name(mck-parting-c "mck-parting-c")
-    pico_set_program_version(mck-parting-c "0.1")
-    pico_add_extra_outputs(mck-parting-c)
+    pico_enable_stdio_uart(prism 0)
+    pico_enable_stdio_usb(prism 1)
+    pico_set_program_name(prism "prism")
+    pico_set_program_version(prism "1.0.0")
+    pico_add_extra_outputs(prism)
 
     # Keep one real installable package in the main build as an end-to-end SDK
     # fixture.  The standalone hello repository uses this same CMake helper.
     set(PRISM_SDK_ROOT ${CMAKE_CURRENT_LIST_DIR})
     include(${CMAKE_CURRENT_LIST_DIR}/cmake/PrismCartridge.cmake)
     prism_add_installable_cartridge(hello_cartridge
-        UUID "7e537f9b-9314-4e27-a0b1-219f48ff88d4"
         ENTRY cartridge_hello
         SOURCES
             ${CMAKE_CURRENT_LIST_DIR}/examples/hello-cartridge/app.c
@@ -247,8 +329,17 @@ else()
         OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/hello.prism
     )
 
+    prism_add_installable_cartridge(runtime_imports_cartridge
+        EXCLUDE_FROM_ALL
+        ENTRY cartridge_runtime_imports
+        SOURCES
+            ${CMAKE_CURRENT_LIST_DIR}/tests/runtime_imports_cartridge.c
+        INCLUDE_DIRECTORIES
+            ${CMAKE_CURRENT_LIST_DIR}/tests
+        OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/runtime-imports.prism
+    )
+
     prism_add_installable_cartridge(bongocat_cartridge
-        UUID "7af8d2af-50cb-4e4b-a203-5efa9bdd61e6"
         ENTRY cartridge_bongocat
         SOURCES
             ${CMAKE_CURRENT_LIST_DIR}/src/cartridges/bongocat/app.c
@@ -258,7 +349,6 @@ else()
     )
 
     prism_add_installable_cartridge(morse_cartridge
-        UUID "05650047-0614-4ff4-8d46-e34fc28b3fd9"
         ENTRY cartridge_morse
         SOURCES
             ${CMAKE_CURRENT_LIST_DIR}/src/cartridges/morse/app.c
@@ -268,7 +358,6 @@ else()
     )
 
     prism_add_installable_cartridge(asteroids_cartridge
-        UUID "43b03ee8-80f2-4e53-a8fe-e09a5cd04c75"
         ENTRY cartridge_asteroids
         SOURCES
             ${CMAKE_CURRENT_LIST_DIR}/src/cartridges/asteroids/app.c
@@ -278,7 +367,6 @@ else()
     )
 
     prism_add_installable_cartridge(beatline_cartridge
-        UUID "36ea78d2-ca5e-4bed-bd9b-c4e90dca4c26"
         ENTRY cartridge_beatline
         SOURCES
             ${CMAKE_CURRENT_LIST_DIR}/src/cartridges/beatline/app.c
@@ -309,5 +397,5 @@ else()
         COMMENT "Embedding default Prism cartridges"
     )
     set_source_files_properties(${DEFAULT_CARTRIDGE_ASM} PROPERTIES GENERATED TRUE)
-    target_sources(mck-parting-c PRIVATE ${DEFAULT_CARTRIDGE_ASM})
+    target_sources(prism PRIVATE ${DEFAULT_CARTRIDGE_ASM})
 endif()

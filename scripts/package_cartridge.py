@@ -9,9 +9,10 @@ an ordinary build artifact.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import pathlib
+import re
 import struct
-import uuid
 
 
 ELF_MAGIC = b"\x7fELF"
@@ -22,13 +23,15 @@ SHF_ALLOC = 0x2
 SHN_UNDEF = 0
 SHN_ABS = 0xFFF1
 R_ARM_ABS32 = 2
+R_ARM_GOT_BREL = 26
 
 PACKAGE_MAGIC = 0x4B505250
-PACKAGE_VERSION = 3
+PACKAGE_VERSION = 1
 PACKAGE_HEADER_SIZE = 256
 CARTRIDGE_ABI = 1
 U8G2_ABI_HASH = 0x1F40A6D9
 IMPORT_SENTINEL = 0xF0000000
+CARTRIDGE_ICON_BYTES = 180
 
 
 class ElfError(RuntimeError):
@@ -149,21 +152,123 @@ class Elf32:
                     result.add(patch)
         return result
 
+    def import_relocations(self) -> list[tuple[int, int, int]]:
+        result: list[tuple[int, int, int]] = []
+        for index, section in enumerate(self.sections):
+            if section["type"] != SHT_REL or \
+                    int(section["link"]) != self.symbol_table_index:
+                continue
+            target_index = int(section["info"])
+            if target_index >= len(self.sections) or \
+                    (int(self.sections[target_index]["flags"]) & SHF_ALLOC) == 0:
+                continue
+            raw = self.section_bytes(index)
+            if int(section["entsize"]) != 8:
+                raise ElfError("invalid ELF relocation table")
+            for offset in range(0, len(raw), 8):
+                patch, info = struct.unpack_from("<II", raw, offset)
+                relocation_type = info & 0xFF
+                symbol_index = info >> 8
+                if symbol_index >= len(self.symbols):
+                    raise ElfError("relocation references an invalid symbol")
+                value = int(self.symbols[symbol_index]["value"])
+                if (value & 0xFFFF0000) == IMPORT_SENTINEL:
+                    result.append((patch, relocation_type, value))
+        return result
+
 
 def align(value: int, alignment: int) -> int:
     return (value + alignment - 1) & ~(alignment - 1)
 
 
-def read_string(image: bytes, offset: int, field: str) -> str:
+def read_string(image: bytes, offset: int, field: str,
+                maximum: int = 253) -> str:
     if offset >= len(image):
         raise ElfError(f"descriptor {field} pointer is outside the image")
-    end = image.find(b"\0", offset, min(len(image), offset + 128))
+    end = image.find(b"\0", offset, min(len(image), offset + maximum + 1))
     if end < 0:
         raise ElfError(f"descriptor {field} is not terminated")
     return image[offset:end].decode("utf-8", errors="strict")
 
 
-def package(elf_path: pathlib.Path, output: pathlib.Path, package_uuid: uuid.UUID) -> None:
+def validate_id(cartridge_id: str) -> None:
+    try:
+        encoded = cartridge_id.encode("ascii")
+    except UnicodeEncodeError as error:
+        raise ElfError("cartridge id must be ASCII") from error
+    if not 1 <= len(encoded) <= 253:
+        raise ElfError("cartridge id must contain 1..253 ASCII bytes")
+    labels = cartridge_id.split(".")
+    if any(not 1 <= len(label) <= 63 for label in labels):
+        raise ElfError("cartridge id labels must contain 1..63 bytes")
+    if any(label[0] == "-" or label[-1] == "-" or
+           re.fullmatch(r"[a-z0-9-]+", label) is None
+           for label in labels):
+        raise ElfError("cartridge id must be a canonical lowercase reverse-FQDN")
+
+
+def derive_app_key(cartridge_id: str) -> bytes:
+    validate_id(cartridge_id)
+    return hashlib.sha256(
+        b"prism.app.v1\0" + cartridge_id.encode("ascii")).digest()[:16]
+
+
+def validate_import_relocations(
+        relocations: list[tuple[int, int, int]]) -> None:
+    """Require every unresolved Prism import reference to use the GOT.
+
+    A direct compiler-runtime call can make GNU ld synthesize a Thumb veneer
+    containing the import sentinel in executable text. Cartridge text executes
+    directly from XIP and cannot be patched at load time, so accepting such an
+    ELF produces a package that jumps to 0xF00000xx on hardware.
+    """
+    for patch, relocation_type, _ in relocations:
+        if relocation_type != R_ARM_GOT_BREL:
+            raise ElfError(
+                f"non-GOT import relocation at 0x{patch:x}; "
+                "route compiler-runtime calls through a PIC trampoline")
+
+
+def parse_package_metadata(data: bytes) -> dict[str, object]:
+    if len(data) < PACKAGE_HEADER_SIZE:
+        raise ElfError("package is shorter than its header")
+    magic, package_version, header_size, cartridge_abi, tick_divider, package_size = \
+        struct.unpack_from("<IHHHHI", data)
+    if magic != PACKAGE_MAGIC or package_version != PACKAGE_VERSION or \
+            header_size != PACKAGE_HEADER_SIZE or cartridge_abi != CARTRIDGE_ABI or \
+            package_size != len(data):
+        raise ElfError("invalid Prism package header")
+    image_offset, image_size, descriptor_offset = struct.unpack_from(
+        "<III", data, 40)
+    if image_offset + image_size > len(data) or \
+            descriptor_offset < image_offset or \
+            descriptor_offset + 64 > image_offset + image_size:
+        raise ElfError("invalid package metadata offsets")
+    magic, abi, descriptor_size, descriptor_tick_divider, version = struct.unpack_from(
+        "<IHHII", data, descriptor_offset)
+    if magic != 0x50524354 or abi != CARTRIDGE_ABI or descriptor_size != 64:
+        raise ElfError("invalid packaged cartridge descriptor")
+    if tick_divider == 0 or descriptor_tick_divider != tick_divider:
+        raise ElfError("invalid cartridge tick divider")
+    id_offset, name_offset, icon_offset = struct.unpack_from(
+        "<III", data, descriptor_offset + 16)
+    image = data[image_offset:image_offset + image_size]
+    cartridge_id = read_string(image, id_offset, "id", 253)
+    name = read_string(image, name_offset, "name", 31)
+    validate_id(cartridge_id)
+    if not name or len(name.encode()) > 31:
+        raise ElfError("cartridge name must contain 1..31 UTF-8 bytes")
+    if icon_offset == 0 or icon_offset + CARTRIDGE_ICON_BYTES > image_size:
+        raise ElfError("cartridge descriptor requires a 36x36 icon")
+    app_key = derive_app_key(cartridge_id)
+    if data[16:32] != app_key:
+        raise ElfError("package app_key does not match its full cartridge id")
+    return {"id": cartridge_id, "name": name, "version": version,
+            "tick_divider": tick_divider,
+            "app_key": app_key, "icon_offset": icon_offset}
+
+
+def package(elf_path: pathlib.Path, output: pathlib.Path) -> None:
     elf = Elf32(elf_path)
     image_size = int(elf.symbol("__prism_image_end")["value"])
     descriptor = int(elf.symbol("__prism_descriptor_start")["value"])
@@ -184,17 +289,33 @@ def package(elf_path: pathlib.Path, output: pathlib.Path, package_uuid: uuid.UUI
         raise ElfError("invalid cartridge GOT layout")
 
     linked_image = elf.image(rw_data_end)
-    image = linked_image[:image_size]
+    image = bytearray(linked_image[:image_size])
     rw_init = linked_image[rw_start:rw_data_end]
-    magic, abi, descriptor_size, flags, app_id = struct.unpack_from(
+    validate_import_relocations(elf.import_relocations())
+    magic, abi, descriptor_size, tick_divider, version = struct.unpack_from(
         "<IHHII", image, descriptor)
     if magic != 0x50524354 or abi != CARTRIDGE_ABI or descriptor_size != 64:
         raise ElfError("invalid prism_cartridge_t descriptor")
-    slug_offset, name_offset = struct.unpack_from("<II", image, descriptor + 16)
-    slug = read_string(image, slug_offset, "slug")
-    name = read_string(image, name_offset, "name")
-    if not slug or len(slug.encode()) > 31 or len(name.encode()) > 31:
-        raise ElfError("cartridge slug/name must contain 1..31 UTF-8 bytes")
+    if tick_divider == 0:
+        tick_divider = 1
+        struct.pack_into("<I", image, descriptor + 8, tick_divider)
+    if tick_divider > 0xFFFF:
+        raise ElfError("cartridge tick divider exceeds uint16 package field")
+    id_offset, name_offset, icon_offset = struct.unpack_from(
+        "<III", image, descriptor + 16)
+    frame_offset = struct.unpack_from("<I", image, descriptor + 40)[0]
+    if id_offset == 0 or name_offset == 0:
+        raise ElfError("cartridge descriptor requires id and name")
+    if icon_offset == 0 or icon_offset + CARTRIDGE_ICON_BYTES > image_size:
+        raise ElfError("cartridge descriptor requires a 36x36 icon")
+    if frame_offset == 0 or (frame_offset & ~1) >= image_size:
+        raise ElfError("cartridge descriptor requires a frame callback")
+    cartridge_id = read_string(image, id_offset, "id", 253)
+    name = read_string(image, name_offset, "name", 31)
+    validate_id(cartridge_id)
+    if not name or len(name.encode()) > 31:
+        raise ElfError("cartridge name must contain 1..31 UTF-8 bytes")
+    app_key = derive_app_key(cartridge_id)
     persistent_size = struct.unpack_from("<I", image, descriptor + 56)[0]
     persistent_schema = struct.unpack_from("<H", image, descriptor + 60)[0]
 
@@ -258,18 +379,16 @@ def package(elf_path: pathlib.Path, output: pathlib.Path, package_uuid: uuid.UUI
     package_size = rw_offset + len(rw_init)
     header = bytearray(PACKAGE_HEADER_SIZE)
     struct.pack_into("<IHHHHI", header, 0, PACKAGE_MAGIC, PACKAGE_VERSION,
-                     PACKAGE_HEADER_SIZE, CARTRIDGE_ABI, flags, package_size)
-    header[16:32] = package_uuid.bytes
-    struct.pack_into("<IIHH", header, 32, app_id, persistent_size,
+                     PACKAGE_HEADER_SIZE, CARTRIDGE_ABI, tick_divider, package_size)
+    header[16:32] = app_key
+    struct.pack_into("<IHH", header, 32, persistent_size,
                      persistent_schema, 0)
-    header[44:44 + len(slug.encode())] = slug.encode()
-    header[76:76 + len(name.encode())] = name.encode()
-    struct.pack_into("<IIIIIIIIIII", header, 108,
+    struct.pack_into("<IIIIIIIIIII", header, 40,
                      image_offset, image_size, image_offset + descriptor,
                      image_offset + got, got_end - got,
                      got_base - got, relocations_offset, relocation_count,
                      imports_offset, import_count, U8G2_ABI_HASH)
-    struct.pack_into("<III", header, 152, rw_offset, len(rw_init),
+    struct.pack_into("<III", header, 84, rw_offset, len(rw_init),
                      rw_end - rw_start)
 
     result = bytearray(package_size)
@@ -286,9 +405,10 @@ def package(elf_path: pathlib.Path, output: pathlib.Path, package_uuid: uuid.UUI
                          image_offset + offset, symbol, 0)
     result[image_offset:image_offset + image_size] = image
     result[rw_offset:rw_offset + len(rw_init)] = rw_init
+    parse_package_metadata(result)
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_bytes(result)
-    print(f"Packaged {name} -> {output} ({package_size} bytes, "
+    print(f"Packaged {name} {version} ({cartridge_id}) -> {output} ({package_size} bytes, "
           f"{relocation_count} relocations, {import_count} imports)")
 
 
@@ -296,9 +416,8 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--elf", type=pathlib.Path, required=True)
     parser.add_argument("--output", type=pathlib.Path, required=True)
-    parser.add_argument("--uuid", type=uuid.UUID, required=True)
     args = parser.parse_args()
-    package(args.elf, args.output, args.uuid)
+    package(args.elf, args.output)
 
 
 if __name__ == "__main__":

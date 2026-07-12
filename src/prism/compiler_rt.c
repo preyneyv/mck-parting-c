@@ -1,10 +1,29 @@
-/* Compiler helpers from the toolchain's prebuilt libgcc are not necessarily
- * position-independent even when the cartridge itself is compiled as PIC.
- * Keep local call sites PC-relative, then cross the cartridge boundary through
- * the normal GOT import mechanism. */
-extern float prism_import_aeabi_fdiv(float numerator, float denominator);
+#include <stddef.h>
+#include <string.h>
 
-float __aeabi_fdiv(float numerator, float denominator)
+/* Keep comparator callbacks inside the ARM guest. This intentionally favors a
+ * tiny implementation over libc's faster one: cartridge collections are
+ * small, and a native qsort could not invoke an ARM function pointer. */
+void qsort(void *base, size_t count, size_t width,
+           int (*compare)(const void *, const void *))
 {
-  return prism_import_aeabi_fdiv(numerator, denominator);
+  if (base == NULL || compare == NULL || width == 0 || count < 2)
+    return;
+
+  unsigned char *bytes = base;
+  for (size_t i = 1; i < count; ++i)
+  {
+    size_t j = i;
+    while (j > 0 && compare(bytes + (j - 1) * width,
+                            bytes + j * width) > 0)
+    {
+      for (size_t k = 0; k < width; ++k)
+      {
+        unsigned char temporary = bytes[(j - 1) * width + k];
+        bytes[(j - 1) * width + k] = bytes[j * width + k];
+        bytes[j * width + k] = temporary;
+      }
+      --j;
+    }
+  }
 }

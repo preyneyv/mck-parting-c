@@ -9,6 +9,7 @@ typedef struct
 {
   void *allocation;
   void *got_base;
+  void *backend;
 } platform_cartridge_execution_t;
 
 size_t platform_cartridge_installed_count(void);

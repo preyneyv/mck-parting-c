@@ -1,8 +1,8 @@
 #pragma once
 
-#include <stdint.h>
 #include <stdbool.h>
 #include <math.h>
+#include <stdint.h>
 
 #define LED_SINE_LUT_SIZE 256u
 
