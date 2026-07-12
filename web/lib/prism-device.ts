@@ -1,5 +1,5 @@
 const MAGIC = 0x4d535250;
-const VERSION = 2;
+const VERSION = 1;
 const VID = 0x2e8a;
 const PID = 0x000a;
 const RESPONSE = 1;
@@ -18,11 +18,11 @@ export const Message = {
 } as const;
 
 export type DeviceInfo = { serial: string; protocolVersion: number; firmware: string; flashBytes: number; blockBytes: number; capabilities: number };
-export type CartridgeMetadata = { slug: string; name: string; icon: Uint8Array };
-export type Cartridge = CartridgeMetadata & { uuid: Uint8Array; packageBytes: number; persistentBytes: number; blocks: number; policy: number };
+export type CartridgeMetadata = { id: string; name: string; version: number; appKey: Uint8Array; icon: Uint8Array };
+export type Cartridge = CartridgeMetadata & { packageBytes: number; persistentBytes: number; blocks: number; policy: number };
 export type StorageInfo = { totalBlocks: number; liveBlocks: number; erasedBlocks: number; deadBlocks: number; largestFreeRun: number; largestReclaimableRun: number; scratchBlocks: number; requiredBlocks: number; blockStates: Uint8Array };
 export type LedEffect = 0 | 1 | 2 | 3;
-export type LedSettings = { effect: LedEffect; speedMs: number; colors: string[] };
+export type LedSettings = { effect: LedEffect; speedMs: number; phaseOffset: number; colors: string[] };
 export type Settings = { volume: number; brightness: number; linked: boolean; leds: [LedSettings, LedSettings] };
 export type MirrorFrame = { sequence: number; framebuffer: Uint8Array; leds: [string, string]; buttons: number };
 export type OperationProgress = { operation: number; phase: number; completedBlocks: number; totalBlocks: number };
@@ -34,21 +34,39 @@ function hex(bytes: Uint8Array) { return Array.from(bytes, byte => byte.toString
 function rgb(bytes: Uint8Array, offset: number) { return `#${hex(bytes.subarray(offset, offset + 3))}`; }
 function rgbBytes(color: string) { const clean = color.replace("#", ""); return [0, 2, 4].map(index => Number.parseInt(clean.slice(index, index + 2), 16)); }
 
-function packageMetadata(bytes: Uint8Array): CartridgeMetadata {
+function cartridgeIdValid(id: string) {
+  const encoded = new TextEncoder().encode(id);
+  if (encoded.length < 1 || encoded.length > 253 || encoded.length !== id.length) return false;
+  return id.split(".").every(label => label.length >= 1 && label.length <= 63 && /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/.test(label));
+}
+
+async function packageMetadata(bytes: Uint8Array): Promise<CartridgeMetadata> {
   const header = view(bytes);
-  const imageOffset = header.getUint32(108, true);
-  const imageSize = header.getUint32(112, true);
-  const descriptorOffset = header.getUint32(116, true);
-  if (descriptorOffset + 64 > bytes.length || imageOffset + imageSize > bytes.length)
+  const imageOffset = header.getUint32(40, true);
+  const imageSize = header.getUint32(44, true);
+  const descriptorOffset = header.getUint32(48, true);
+  if (descriptorOffset < imageOffset || descriptorOffset + 64 > imageOffset + imageSize || imageOffset + imageSize > bytes.length)
     throw new Error("This cartridge has invalid metadata offsets.");
-  const iconRelative = header.getUint32(descriptorOffset + 24, true) & ~1;
+  const idRelative = header.getUint32(descriptorOffset + 16, true);
+  const nameRelative = header.getUint32(descriptorOffset + 20, true);
+  const iconRelative = header.getUint32(descriptorOffset + 24, true);
+  if (idRelative >= imageSize || nameRelative >= imageSize)
+    throw new Error("This cartridge has invalid identity metadata.");
+  const id = stringAt(bytes, imageOffset + idRelative, imageSize - idRelative);
+  const name = stringAt(bytes, imageOffset + nameRelative, imageSize - nameRelative);
+  if (!cartridgeIdValid(id) || !name || new TextEncoder().encode(name).length > 31)
+    throw new Error("This cartridge has invalid authored metadata.");
+  const appKey = bytes.slice(16, 32);
+  const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(`prism.app.v1\0${id}`)));
+  if (!appKey.every((byte, index) => byte === digest[index]))
+    throw new Error("This cartridge's app key does not match its full ID.");
   const icon = new Uint8Array(ICON_BYTES);
   if (iconRelative !== 0) {
     if (iconRelative + ICON_BYTES > imageSize)
       throw new Error("This cartridge has an invalid icon.");
     icon.set(bytes.subarray(imageOffset + iconRelative, imageOffset + iconRelative + ICON_BYTES));
   }
-  return { slug: stringAt(bytes, 44, 32), name: stringAt(bytes, 76, 32), icon };
+  return { id, name, version: header.getUint32(descriptorOffset + 12, true), appKey, icon };
 }
 
 export class PrismDevice {
@@ -58,7 +76,10 @@ export class PrismDevice {
   private endpointOut = -1;
   private requestId = 0;
   private pending = new Map<number, Pending>();
-  private incoming = new Uint8Array();
+  private incoming = new Uint8Array(8192);
+  private incomingStart = 0;
+  private incomingEnd = 0;
+  private requestQueue: Promise<void> = Promise.resolve();
   private reading = false;
   private heartbeat?: ReturnType<typeof setInterval>;
   onMirror?: (frame: MirrorFrame) => void;
@@ -146,17 +167,23 @@ export class PrismDevice {
   }
 
   private accept(chunk: Uint8Array) {
-    const merged = new Uint8Array(this.incoming.length + chunk.length);
-    merged.set(this.incoming); merged.set(chunk, this.incoming.length); this.incoming = merged;
-    while (this.incoming.length >= 16) {
-      const header = view(this.incoming);
-      if (header.getUint32(0, true) !== MAGIC || header.getUint8(4) !== VERSION) { this.incoming = this.incoming.slice(1); continue; }
+    this.appendIncoming(chunk);
+    while (this.incomingEnd - this.incomingStart >= 16) {
+      const available = this.incoming.subarray(this.incomingStart, this.incomingEnd);
+      const header = view(available);
+      if (header.getUint32(0, true) !== MAGIC || header.getUint8(4) !== VERSION) {
+        this.incomingStart++;
+        continue;
+      }
       const length = header.getUint32(12, true);
-      if (length > 4096) { this.incoming = this.incoming.slice(1); continue; }
-      if (this.incoming.length < 16 + length) return;
+      if (length > 4096) {
+        this.incomingStart++;
+        continue;
+      }
+      if (available.length < 16 + length) break;
       const type = header.getUint8(5), flags = header.getUint16(6, true), requestId = header.getUint32(8, true);
-      const payload = this.incoming.slice(16, 16 + length);
-      this.incoming = this.incoming.slice(16 + length);
+      const payload = available.slice(16, 16 + length);
+      this.incomingStart += 16 + length;
       if (flags & EVENT) this.event(type, payload);
       else if (flags & RESPONSE) {
         const pending = this.pending.get(requestId);
@@ -166,6 +193,31 @@ export class PrismDevice {
         else pending.resolve(payload);
       }
     }
+    if (this.incomingStart === this.incomingEnd) {
+      this.incomingStart = 0;
+      this.incomingEnd = 0;
+    }
+  }
+
+  private appendIncoming(chunk: Uint8Array) {
+    const unread = this.incomingEnd - this.incomingStart;
+    if (this.incoming.length - this.incomingEnd < chunk.length) {
+      if (this.incomingStart > 0) {
+        this.incoming.copyWithin(0, this.incomingStart, this.incomingEnd);
+        this.incomingStart = 0;
+        this.incomingEnd = unread;
+      }
+      if (this.incoming.length - this.incomingEnd < chunk.length) {
+        const capacity = Math.max(this.incoming.length * 2, unread + chunk.length);
+        const expanded = new Uint8Array(capacity);
+        expanded.set(this.incoming.subarray(this.incomingStart, this.incomingEnd));
+        this.incoming = expanded;
+        this.incomingStart = 0;
+        this.incomingEnd = unread;
+      }
+    }
+    this.incoming.set(chunk, this.incomingEnd);
+    this.incomingEnd += chunk.length;
   }
 
   private event(type: number, payload: Uint8Array) {
@@ -174,7 +226,14 @@ export class PrismDevice {
     if (type === Message.operationProgress && payload.length === 8) { const value = view(payload); this.onOperationProgress?.({ operation: payload[0], phase: payload[1], completedBlocks: value.getUint16(2, true), totalBlocks: value.getUint16(4, true) }); }
   }
 
-  private async request(type: number, payload: Uint8Array<ArrayBufferLike> = new Uint8Array(), timeoutMs = 5000) {
+  private request(type: number, payload: Uint8Array<ArrayBufferLike> = new Uint8Array(), timeoutMs = 5000) {
+    const operation = this.requestQueue.then(() =>
+      this.performRequest(type, payload, timeoutMs));
+    this.requestQueue = operation.then(() => undefined, () => undefined);
+    return operation;
+  }
+
+  private async performRequest(type: number, payload: Uint8Array<ArrayBufferLike>, timeoutMs: number) {
     if (!this.device?.opened) throw new Error("Connect a Prism first.");
     const requestId = ++this.requestId;
     const packet = new Uint8Array(16 + payload.length), header = view(packet);
@@ -183,19 +242,14 @@ export class PrismDevice {
       const timer = setTimeout(() => { this.pending.delete(requestId); reject(new Error("Prism did not respond.")); }, timeoutMs);
       this.pending.set(requestId, { resolve, reject, timer });
     });
-    let lastError: unknown;
-    for (let attempt = 0; attempt < 3; attempt++) {
-      try { await this.device.transferOut(this.endpointOut, packet); lastError = undefined; break; }
-      catch (error) {
-        lastError = error;
-        await new Promise(resolve => setTimeout(resolve, 200));
-        // A response can arrive even when WinUSB reports the OUT transfer as
-        // failed. In that case the pending entry has already been resolved.
-        if (!this.pending.has(requestId)) return response;
-        try { await this.device.clearHalt("out", this.endpointOut); } catch { /* retry open pipe */ }
-      }
+    try {
+      await this.device.transferOut(this.endpointOut, packet);
+    } catch {
+      // WinUSB may report failure after the device accepted a command. Never
+      // replay a mutating request with an ambiguous outcome; its response or
+      // timeout determines the result.
+      try { await this.device.clearHalt("out", this.endpointOut); } catch { }
     }
-    if (lastError) { const item = this.pending.get(requestId); if (item) clearTimeout(item.timer); this.pending.delete(requestId); throw lastError; }
     return response;
   }
 
@@ -205,12 +259,36 @@ export class PrismDevice {
   }
 
   async cartridges(): Promise<Cartridge[]> {
-    const data = await this.request(Message.cartridges), count = view(data).getUint16(0, true), result: Cartridge[] = []; let offset = 4;
-    for (let index = 0; index < count; index++, offset += 92) { const value = view(data.subarray(offset, offset + 92)), uuid = data.slice(offset, offset + 16); result.push({ uuid, packageBytes: value.getUint32(16, true), persistentBytes: value.getUint32(20, true), blocks: value.getUint16(24, true), policy: value.getUint16(26, true), slug: stringAt(data, offset + 28, 32), name: stringAt(data, offset + 60, 32), icon: await this.cartridgeIcon(uuid) }); }
+    const result: Cartridge[] = [];
+    let startIndex = 0;
+    let totalCount = 0;
+    do {
+      const request = new Uint8Array(4);
+      view(request).setUint16(0, startIndex, true);
+      const data = await this.request(Message.cartridges, request);
+      if (data.length < 8) throw new Error("Prism returned an invalid cartridge list.");
+      const list = view(data), count = list.getUint16(4, true);
+      totalCount = list.getUint16(0, true);
+      const responseStart = list.getUint16(2, true);
+      const stringBytes = list.getUint16(6, true), stringsOffset = 8 + count * 40;
+      if (responseStart !== startIndex || stringsOffset + stringBytes > data.length)
+        throw new Error("Prism returned an invalid cartridge list.");
+      for (let index = 0; index < count; index++) {
+        const offset = 8 + index * 40, entry = view(data.subarray(offset, offset + 40));
+        const appKey = data.slice(offset, offset + 16);
+        const idOffset = entry.getUint16(32, true), idLength = entry.getUint16(34, true);
+        const nameOffset = entry.getUint16(36, true), nameLength = entry.getUint16(38, true);
+        if (idOffset + idLength > stringBytes || nameOffset + nameLength > stringBytes)
+          throw new Error("Prism returned invalid cartridge metadata.");
+        result.push({ appKey, packageBytes: entry.getUint32(16, true), persistentBytes: entry.getUint32(20, true), version: entry.getUint32(24, true), blocks: entry.getUint16(28, true), policy: entry.getUint16(30, true), id: new TextDecoder().decode(data.subarray(stringsOffset + idOffset, stringsOffset + idOffset + idLength)), name: new TextDecoder().decode(data.subarray(stringsOffset + nameOffset, stringsOffset + nameOffset + nameLength)), icon: await this.cartridgeIcon(appKey) });
+      }
+      if (count === 0 && startIndex < totalCount) throw new Error("A cartridge entry is too large for the management protocol.");
+      startIndex += count;
+    } while (startIndex < totalCount);
     return result;
   }
 
-  private async cartridgeIcon(uuid: Uint8Array) { return this.request(Message.cartridgeIcon, uuid); }
+  private async cartridgeIcon(appKey: Uint8Array) { return this.request(Message.cartridgeIcon, appKey); }
 
   async storage(): Promise<StorageInfo> {
     const data = await this.request(Message.storageInfo), value = view(data);
@@ -229,7 +307,7 @@ export class PrismDevice {
   async subscribeMirror() { await this.request(Message.mirrorSubscribe); }
   async unsubscribeMirror() { await this.request(Message.mirrorUnsubscribe); }
   async remoteInput(buttons: number) { await this.request(Message.remoteInput, Uint8Array.of(buttons, 0, 0, 0)); }
-  async deleteCartridge(uuid: Uint8Array) { await this.request(Message.delete, uuid); }
+  async deleteCartridge(appKey: Uint8Array) { await this.request(Message.delete, appKey); }
   async compact(onProgress: (ratio: number) => void) {
     const previous = this.onOperationProgress;
     this.onOperationProgress = progress => {
@@ -246,16 +324,17 @@ export class PrismDevice {
     if (bytes.length < 256) throw new Error("This .prism package is too short.");
     const packageHeader = view(bytes);
     if (packageHeader.getUint32(0, true) !== 0x4b505250 ||
-        packageHeader.getUint16(4, true) !== 3 ||
+        packageHeader.getUint16(4, true) !== 1 ||
         packageHeader.getUint16(6, true) !== 256 ||
         packageHeader.getUint16(8, true) !== 1 ||
+        packageHeader.getUint16(10, true) === 0 ||
         packageHeader.getUint32(12, true) !== bytes.length)
       throw new Error("This is not a compatible Prism cartridge package.");
-    const metadata = packageMetadata(bytes);
+    const metadata = await packageMetadata(bytes);
     onMetadata(metadata);
-    const uuid = bytes.subarray(16, 32);
+    const appKey = bytes.subarray(16, 32);
     const begin = new Uint8Array(60 + ICON_BYTES), value = view(begin);
-    begin.set(uuid); value.setUint32(16, bytes.length, true); value.setUint32(20, crc32(bytes), true); value.setUint16(24, Math.ceil(bytes.length / (128 * 1024)), true);
+    begin.set(appKey); value.setUint32(16, bytes.length, true); value.setUint32(20, crc32(bytes), true); value.setUint16(24, Math.ceil(bytes.length / (128 * 1024)), true);
     begin.set(new TextEncoder().encode(metadata.name).subarray(0, 31), 28);
     begin.set(metadata.icon, 60);
     await this.request(Message.installBegin, begin, 30000);
@@ -266,13 +345,13 @@ export class PrismDevice {
 
 function decodeSettings(data: Uint8Array): Settings {
   const value = view(data), leds: LedSettings[] = [];
-  for (let led = 0; led < 2; led++) { const offset = 4 + led * 52, count = Math.max(1, data[offset + 1]), colors: string[] = []; for (let color = 0; color < count; color++) colors.push(rgb(data, offset + 4 + color * 3)); leds.push({ effect: data[offset] as LedEffect, speedMs: value.getUint16(offset + 2, true), colors }); }
+  for (let led = 0; led < 2; led++) { const offset = 4 + led * 56, count = Math.max(1, data[offset + 1]), colors: string[] = []; for (let color = 0; color < count; color++) colors.push(rgb(data, offset + 8 + color * 3)); leds.push({ effect: data[offset] as LedEffect, speedMs: value.getUint16(offset + 2, true), phaseOffset: data[offset + 4], colors }); }
   return { volume: data[0], brightness: data[2], linked: Boolean(data[1]), leds: leds as [LedSettings, LedSettings] };
 }
 
 function encodeSettings(settings: Settings) {
-  const data = new Uint8Array(108), value = view(data); data[0] = settings.volume; data[1] = settings.linked ? 1 : 0; data[2] = settings.brightness; data[3] = 1;
-  for (let led = 0; led < 2; led++) { const item = settings.linked && led === 1 ? settings.leds[0] : settings.leds[led], offset = 4 + led * 52; data[offset] = item.effect; data[offset + 1] = Math.min(16, item.colors.length); value.setUint16(offset + 2, item.speedMs, true); item.colors.slice(0, 16).forEach((color, index) => data.set(rgbBytes(color), offset + 4 + index * 3)); }
+  const data = new Uint8Array(116), value = view(data); data[0] = settings.volume; data[1] = settings.linked ? 1 : 0; data[2] = settings.brightness; data[3] = 2;
+  for (let led = 0; led < 2; led++) { const item = settings.leds[led], offset = 4 + led * 56; data[offset] = item.effect; data[offset + 1] = Math.min(16, item.colors.length); value.setUint16(offset + 2, item.speedMs, true); data[offset + 4] = item.phaseOffset; item.colors.slice(0, 16).forEach((color, index) => data.set(rgbBytes(color), offset + 8 + index * 3)); }
   return data;
 }
 

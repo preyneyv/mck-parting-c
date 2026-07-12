@@ -25,5 +25,5 @@ export const PrismScreen = forwardRef<PrismScreenHandle>(function PrismScreen(_,
       context.putImageData(image, 0, 0);
     },
   }), []);
-  return <canvas ref={canvasRef} width={128} height={64} aria-label="Prism screen mirror" className="aspect-[2/1] w-full rounded-md border bg-black [image-rendering:pixelated]" />;
+  return <canvas ref={canvasRef} width={128} height={64} aria-label="prism screen mirror" className="aspect-[2/1] w-full rounded-md border bg-black [image-rendering:pixelated]" />;
 });
