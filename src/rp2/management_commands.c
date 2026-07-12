@@ -5,10 +5,13 @@
 #include "management_protocol.h"
 #include "management_transport.h"
 
+#include <string.h>
+
 #include <platform/display.h>
 #include <platform/input.h>
 #include <platform/platform.h>
 #include <platform/time.h>
+#include <prism/registry.h>
 #include <prism/runtime.h>
 #include <shared/engine.h>
 #include <shared/os/settings.h>
@@ -77,6 +80,16 @@ void management_commands_handle(const prism_management_header_t *request,
   {
     session->deferred_compact_request = *request;
     session->compact_deferred = true;
+    return;
+  }
+  if (session->processing_sleep_messages &&
+      request->type == PRISM_MGMT_CARTRIDGE_LAUNCH &&
+      request->payload_len == sizeof(prism_management_cartridge_id_t))
+  {
+    session->deferred_launch_request = *request;
+    memcpy(&session->deferred_launch_id, payload,
+           sizeof(session->deferred_launch_id));
+    session->launch_deferred = true;
     return;
   }
 
@@ -225,6 +238,23 @@ void management_commands_handle(const prism_management_header_t *request,
     session->last_heartbeat = platform_now_us();
     break;
   }
+  case PRISM_MGMT_CARTRIDGE_LAUNCH:
+    if (request->payload_len != sizeof(prism_management_cartridge_id_t))
+      management_transport_result(request, PRISM_MGMT_ERROR_BAD_MESSAGE);
+    else
+    {
+      const prism_management_cartridge_id_t *id = (const void *)payload;
+      const prism_registry_entry_t *entry =
+          prism_registry_find_app_key(id->app_key);
+      prism_management_status_t status =
+          entry == NULL
+              ? PRISM_MGMT_ERROR_NOT_FOUND
+              : (prism_cartridge_launch(entry->cartridge)
+                     ? PRISM_MGMT_OK
+                     : PRISM_MGMT_ERROR_INVALID_CARTRIDGE);
+      management_transport_result(request, status);
+    }
+    break;
   default:
     management_transport_result(request, PRISM_MGMT_ERROR_UNSUPPORTED);
     break;

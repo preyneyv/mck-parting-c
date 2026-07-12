@@ -27,7 +27,8 @@ void management_protocol_device_info(
       .cartridge_block_bytes = PRISM_CARTRIDGE_BLOCK_BYTES,
       .capabilities = PRISM_CAP_MIRROR | PRISM_CAP_REMOTE_INPUT |
                       PRISM_CAP_LOGS | PRISM_CAP_SETTINGS |
-                      PRISM_CAP_CARTRIDGES | PRISM_CAP_COMPACTION,
+                      PRISM_CAP_CARTRIDGES | PRISM_CAP_COMPACTION |
+                      PRISM_CAP_APP_LAUNCH,
   };
   platform_device_id(info.serial);
   management_transport_queue(request->type, PRISM_MGMT_FLAG_RESPONSE,

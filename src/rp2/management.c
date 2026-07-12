@@ -37,6 +37,7 @@ static void disconnect_session(void)
   session.active = false;
   session.mirror_subscribed = false;
   session.compact_deferred = false;
+  session.launch_deferred = false;
   platform_input_set_remote_mask(0);
   management_transport_reset();
   prism_settings_set_save_deferred(false);
@@ -78,6 +79,13 @@ void management_task(void)
     prism_management_header_t request = session.deferred_compact_request;
     session.compact_deferred = false;
     management_commands_handle(&request, NULL, &session);
+  }
+  if (session.launch_deferred)
+  {
+    prism_management_header_t request = session.deferred_launch_request;
+    prism_management_cartridge_id_t id = session.deferred_launch_id;
+    session.launch_deferred = false;
+    management_commands_handle(&request, (const uint8_t *)&id, &session);
   }
 
   management_transport_drain();

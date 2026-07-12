@@ -11,7 +11,7 @@ const ICON_BYTES = Math.ceil(ICON_WIDTH / 8) * ICON_HEIGHT;
 
 export const Message = {
   hello: 0x01, deviceInfo: 0x02, storageInfo: 0x03, cartridges: 0x04, cartridgeIcon: 0x05,
-  installBegin: 0x10, installChunk: 0x11, installCommit: 0x12, delete: 0x13, compact: 0x14, operationProgress: 0x15,
+  installBegin: 0x10, installChunk: 0x11, installCommit: 0x12, delete: 0x13, compact: 0x14, operationProgress: 0x15, launch: 0x16,
   settingsGet: 0x20, settingsPreview: 0x21,
   mirrorSubscribe: 0x30, mirrorUnsubscribe: 0x31, mirrorFrame: 0x32,
   remoteInput: 0x33, heartbeat: 0x34, log: 0x35,
@@ -307,6 +307,7 @@ export class PrismDevice {
   async subscribeMirror() { await this.request(Message.mirrorSubscribe); }
   async unsubscribeMirror() { await this.request(Message.mirrorUnsubscribe); }
   async remoteInput(buttons: number) { await this.request(Message.remoteInput, Uint8Array.of(buttons, 0, 0, 0)); }
+  async launchCartridge(appKey: Uint8Array) { await this.request(Message.launch, appKey); }
   async deleteCartridge(appKey: Uint8Array) { await this.request(Message.delete, appKey); }
   async compact(onProgress: (ratio: number) => void) {
     const previous = this.onOperationProgress;
