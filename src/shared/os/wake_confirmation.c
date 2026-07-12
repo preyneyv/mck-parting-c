@@ -8,6 +8,7 @@
 #include <shared/anim.h>
 #include <shared/config.h>
 #include <shared/engine.h>
+#include <shared/os/settings.h>
 
 #include "engine_internal.h"
 
@@ -18,9 +19,7 @@ static struct
   platform_input_mask_t button;
   uint8_t count;
   platform_time_t idle_deadline;
-  platform_time_t led_transition_started;
-  color_t led_from[LED_COUNT];
-  color_t led_target[LED_COUNT];
+  platform_time_t led_flash_started;
   volatile int32_t circle_radius[3];
   volatile int32_t container_y;
 } wake;
@@ -32,50 +31,24 @@ static struct
   color_t from[LED_COUNT];
 } release;
 
-static color_t led_target(platform_input_mask_t button, uint8_t count,
-                          uint8_t led)
+static bool led_selected(platform_input_mask_t button, uint8_t led)
 {
-  bool selected = (button == PLATFORM_INPUT_LEFT && led == LED_L) ||
-                  (button == PLATFORM_INPUT_RIGHT && led == LED_R);
-  if (!selected)
-    return (color_t){.hex = 0};
-  return count >= 2 ? rgba(0, 162, 191, 255) : rgba(8, 21, 89, 255);
+  return (button == PLATFORM_INPUT_LEFT && led == LED_L) ||
+         (button == PLATFORM_INPUT_RIGHT && led == LED_R);
 }
 
 static color_t led_current(uint8_t led)
 {
-  int64_t elapsed = platform_time_diff_us(wake.led_transition_started,
+  if (!led_selected(wake.button, led))
+    return (color_t){.hex = 0};
+
+  color_t pattern = prism_settings_led_color(led);
+  int64_t elapsed = platform_time_diff_us(wake.led_flash_started,
                                           platform_now_us());
-  float t = elapsed <= 0 ? 0.f : elapsed >= 180000 ? 1.f
-                                                   : elapsed / 180000.f;
-  t = t * t * (3.f - 2.f * t);
-  return color_lerp(wake.led_from[led], wake.led_target[led], t);
-}
-
-static void transition_to_stage(void)
-{
-  color_t current[LED_COUNT];
-  for (uint8_t i = 0; i < LED_COUNT; ++i)
-    current[i] = led_current(i);
-  wake.led_transition_started = platform_now_us();
-  for (uint8_t i = 0; i < LED_COUNT; ++i)
-  {
-    wake.led_from[i] = current[i];
-    wake.led_target[i] = led_target(wake.button, wake.count, i);
-  }
-}
-
-static void transition_to_success(void)
-{
-  color_t current[LED_COUNT];
-  for (uint8_t i = 0; i < LED_COUNT; ++i)
-    current[i] = led_current(i);
-  wake.led_transition_started = platform_now_us();
-  for (uint8_t i = 0; i < LED_COUNT; ++i)
-  {
-    wake.led_from[i] = current[i];
-    wake.led_target[i] = rgba(255, 255, 255, 255);
-  }
+  float t = elapsed <= 0 ? 0.f : elapsed >= 240000 ? 1.f
+                                                   : elapsed / 240000.f;
+  t = 1.f - (1.f - t) * (1.f - t) * (1.f - t);
+  return color_lerp(rgba(255, 255, 255, 255), pattern, t);
 }
 
 static void exit_done(void *ctx)
@@ -84,7 +57,7 @@ static void exit_done(void *ctx)
   release.active = true;
   release.started = platform_now_us();
   for (uint8_t i = 0; i < LED_COUNT; ++i)
-    release.from[i] = rgba(255, 255, 255, 255);
+    release.from[i] = led_current(i);
   engine_finish_wake();
 }
 
@@ -119,12 +92,7 @@ void wake_confirmation_start(platform_input_mask_t button)
   wake.count = 1;
   wake.container_y = 0;
   wake.idle_deadline = platform_time_add_ms(platform_now_us(), 5000);
-  wake.led_transition_started = platform_now_us();
-  for (uint8_t i = 0; i < LED_COUNT; ++i)
-  {
-    wake.led_from[i] = (color_t){.hex = 0};
-    wake.led_target[i] = led_target(button, 1, i);
-  }
+  wake.led_flash_started = platform_now_us();
   for (uint8_t i = 0; i < 3; ++i)
   {
     anim_cancel(&wake.circle_radius[i], false);
@@ -175,17 +143,16 @@ void wake_confirmation_tick(void)
     }
   }
   wake.idle_deadline = platform_time_add_ms(platform_now_us(), 5000);
+  wake.led_flash_started = platform_now_us();
 
   if (wake.count >= 3)
   {
     wake.count = 3;
     wake.completing = true;
-    transition_to_success();
     pop_circle(2);
   }
   else
   {
-    transition_to_stage();
     pop_circle(wake.count - 1);
   }
 }

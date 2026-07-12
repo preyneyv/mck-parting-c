@@ -424,7 +424,13 @@ static platform_wake_result_t engine_sleep_cycle(uint32_t quick_wake_ms)
   prism_settings_flush();
   platform_watchdog_disable();
   const color_t leds_off[LED_COUNT] = {0};
+
+  /* platform_leds_show() queues the WS2812 words, but the RP2 PIO still needs
+   * time to shift them out and hold the data line low long enough to latch.
+   * Entering dormant sleep immediately can suspend that transfer mid-frame,
+   * which briefly restores stale LED data when the clocks restart. */
   platform_leds_show(leds_off, LED_COUNT);
+  platform_sleep_us(200);
   platform_display_set_enabled(false);
   platform_peripheral_set_enabled(false);
   audio_playback_set_enabled(false);
@@ -589,7 +595,14 @@ static inline void engine_do_frame()
   if (!wake_confirmation_active())
   {
     pause_menu_frame();
-    prism_settings_frame();
+    /* Manual sleep blocks inside pause_menu_frame() until a wake input
+     * arrives. If that starts wake confirmation, replace the already-buffered
+     * pause UI and its LED state in this same render pass instead of exposing
+     * either for one frame. */
+    if (wake_confirmation_active())
+      wake_confirmation_frame(last_app_framebuffer);
+    else
+      prism_settings_frame();
   }
   prism_settings_task();
   prism_cartridge_persistence_task();

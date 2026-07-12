@@ -86,10 +86,10 @@ static prism_management_settings_t default_settings(void)
   };
   for (uint8_t i = 0; i < 2; ++i)
   {
-    settings.leds[i].effect = PRISM_LED_STATIC;
+    settings.leds[i].effect = PRISM_LED_RAINBOW;
     settings.leds[i].palette_len = 1;
-    settings.leds[i].speed_ms = 2000;
-    settings.leds[i].phase_offset = i == 0 ? 0 : 128;
+    settings.leds[i].speed_ms = 8000;
+    settings.leds[i].phase_offset = i == 0 ? 0 : 14;
     settings.leds[i].colors[0][0] = 24;
     settings.leds[i].colors[0][1] = 96;
     settings.leds[i].colors[0][2] = 255;
@@ -125,6 +125,14 @@ void prism_settings_init(void)
 
 const prism_management_settings_t *prism_settings_get(void) { return &current; }
 
+color_t prism_settings_led_color(uint8_t led)
+{
+  if (led >= 2)
+    return (color_t){.hex = 0};
+  uint32_t now_ms = (uint32_t)(platform_now_us() / 1000u);
+  return effect_color(&current.leds[led], now_ms);
+}
+
 bool prism_settings_preview(const prism_management_settings_t *settings)
 {
   if (settings == NULL || !settings_valid(settings))
@@ -154,9 +162,8 @@ void prism_settings_frame(void)
 {
   if (!engine_is_app(&app_launcher))
     return;
-  uint32_t now_ms = (uint32_t)(platform_now_us() / 1000u);
-  engine_led_set(LED_L, effect_color(&current.leds[0], now_ms));
-  engine_led_set(LED_R, effect_color(&current.leds[1], now_ms));
+  engine_led_set(LED_L, prism_settings_led_color(LED_L));
+  engine_led_set(LED_R, prism_settings_led_color(LED_R));
 }
 
 void prism_settings_mark_saved(void) { dirty = false; }

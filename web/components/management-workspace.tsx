@@ -13,7 +13,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { PrismScreen, type PrismScreenHandle } from "@/components/prism-screen";
 import { PrismDevice, type Cartridge, type CartridgeMetadata, type DeviceInfo, type LedEffect, type LedSettings, type Settings, type StorageInfo } from "@/lib/prism-device";
 
-const defaultSettings: Settings = { volume: 4, brightness: 8, linked: true, leds: [{ effect: 0, speedMs: 2000, phaseOffset: 0, colors: ["#1860ff"] }, { effect: 0, speedMs: 2000, phaseOffset: 128, colors: ["#1860ff"] }] };
+const defaultSettings: Settings = { volume: 4, brightness: 8, linked: true, leds: [{ effect: 3, speedMs: 8000, phaseOffset: 0, colors: ["#1860ff"] }, { effect: 3, speedMs: 8000, phaseOffset: 14, colors: ["#1860ff"] }] };
 const effects = [{ value: "0", label: "static" }, { value: "1", label: "breathing" }, { value: "2", label: "crossfade" }, { value: "3", label: "rainbow" }];
 
 export function ManagementWorkspace() {

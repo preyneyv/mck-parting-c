@@ -2,10 +2,12 @@
 
 #include <stdbool.h>
 
+#include <prism/graphics/color.h>
 #include <prism/management_protocol.h>
 
 void prism_settings_init(void);
 const prism_management_settings_t *prism_settings_get(void);
+color_t prism_settings_led_color(uint8_t led);
 bool prism_settings_preview(const prism_management_settings_t *settings);
 void prism_settings_frame(void);
 void prism_settings_task(void);
