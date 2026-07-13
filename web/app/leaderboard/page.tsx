@@ -71,7 +71,7 @@ function BeatlineBoard({ rows }: { rows: BeatlineLeaderboardRow[] }) {
   return (
     <Table>
       <TableHeader><TableRow><TableHead>#</TableHead><TableHead>player</TableHead><TableHead className="text-right">score</TableHead><TableHead>song</TableHead><TableHead>difficulty</TableHead><TableHead className="text-center">rank</TableHead><TableHead className="text-right">max combo</TableHead><TableHead className="text-right">perfect</TableHead><TableHead className="text-right">good</TableHead><TableHead className="text-right">bad</TableHead><TableHead className="text-right">miss</TableHead><TableHead>submitted</TableHead></TableRow></TableHeader>
-      <TableBody>{rows.length === 0 ? <EmptyRow columns={12} /> : rows.map((row, index) => <TableRow key={row.id}><TableCell>{index + 1}</TableCell><TableCell className="font-medium">{row.player_name}</TableCell><TableCell className="text-right font-medium tabular-nums">{row.score.toLocaleString()}</TableCell><TableCell className="whitespace-nowrap">{beatlineTrackName(row.track)}</TableCell><TableCell>{beatlineDifficultyName(row.difficulty)}</TableCell><TableCell className="text-center font-medium">{beatlineRankName(row.rank)}</TableCell><TableCell className="text-right tabular-nums">{row.max_combo}</TableCell><TableCell className="text-right tabular-nums">{row.perfect}</TableCell><TableCell className="text-right tabular-nums">{row.good}</TableCell><TableCell className="text-right tabular-nums">{row.bad}</TableCell><TableCell className="text-right tabular-nums">{row.miss}</TableCell><TableCell className="whitespace-nowrap text-muted-foreground">{submittedAt(row.created_at)}</TableCell></TableRow>)}</TableBody>
+      <TableBody>{rows.length === 0 ? <EmptyRow columns={12} /> : rows.map((row, index) => <TableRow key={row.id}><TableCell>{index + 1}</TableCell><TableCell className="font-medium">{row.player_name}</TableCell><TableCell className="text-right font-medium tabular-nums">{row.score.toLocaleString()}</TableCell><TableCell className="whitespace-nowrap">{beatlineTrackName(row.track_id)}</TableCell><TableCell>{beatlineDifficultyName(row.difficulty)}</TableCell><TableCell className="text-center font-medium">{beatlineRankName(row.rank)}</TableCell><TableCell className="text-right tabular-nums">{row.max_combo}</TableCell><TableCell className="text-right tabular-nums">{row.perfect}</TableCell><TableCell className="text-right tabular-nums">{row.good}</TableCell><TableCell className="text-right tabular-nums">{row.bad}</TableCell><TableCell className="text-right tabular-nums">{row.miss}</TableCell><TableCell className="whitespace-nowrap text-muted-foreground">{submittedAt(row.created_at)}</TableCell></TableRow>)}</TableBody>
     </Table>
   );
 }
@@ -79,7 +79,7 @@ function BeatlineBoard({ rows }: { rows: BeatlineLeaderboardRow[] }) {
 export default async function LeaderboardPage({ searchParams }: { searchParams: Promise<{ game?: string; track?: string; difficulty?: string }> }) {
   const query = await searchParams;
   const selectedGame: GameKey = isGame(query.game) ? query.game : "morse";
-  const selectedTrack = query.track === "0" || query.track === "1" ? query.track : "all";
+  const selectedTrack = BEATLINE_TRACKS.some((track) => track.id === query.track) ? query.track! : "all";
   const selectedDifficulty = query.difficulty === "0" || query.difficulty === "1" ? query.difficulty : "all";
 
   let boards = EMPTY_LEADERBOARDS;
@@ -92,7 +92,7 @@ export default async function LeaderboardPage({ searchParams }: { searchParams: 
   }
 
   const activeGame = GAMES.find((game) => game.key === selectedGame) ?? GAMES[0];
-  const beatlineRows = boards.beatline.filter((row) => (selectedTrack === "all" || row.track === Number(selectedTrack)) && (selectedDifficulty === "all" || row.difficulty === Number(selectedDifficulty)));
+  const beatlineRows = boards.beatline.filter((row) => (selectedTrack === "all" || row.track_id === selectedTrack) && (selectedDifficulty === "all" || row.difficulty === Number(selectedDifficulty)));
 
   return (
     <div className="space-y-6">
@@ -108,7 +108,7 @@ export default async function LeaderboardPage({ searchParams }: { searchParams: 
       <Card>
         <CardHeader><CardTitle>{activeGame.label}</CardTitle></CardHeader>
         <CardContent className="space-y-4">
-          {selectedGame === "beatline" ? <LeaderboardFilters tracks={[...BEATLINE_TRACKS]} selectedTrack={selectedTrack} selectedDifficulty={selectedDifficulty} /> : null}
+          {selectedGame === "beatline" ? <LeaderboardFilters tracks={BEATLINE_TRACKS} selectedTrack={selectedTrack} selectedDifficulty={selectedDifficulty} /> : null}
           {!databaseAvailable ? <div className="py-12 text-center text-sm text-muted-foreground">start PostgreSQL and reload this page.</div> : selectedGame === "morse" ? <MorseBoard rows={boards.morse} /> : selectedGame === "asteroids" ? <AsteroidsBoard rows={boards.asteroids} /> : <BeatlineBoard rows={beatlineRows} />}
         </CardContent>
       </Card>

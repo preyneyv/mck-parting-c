@@ -8,7 +8,7 @@ export function LeaderboardFilters({
   selectedTrack,
   selectedDifficulty,
 }: {
-  tracks: string[];
+  tracks: ReadonlyArray<{ id: string; name: string }>;
   selectedTrack: string;
   selectedDifficulty: string;
 }) {
@@ -31,7 +31,7 @@ export function LeaderboardFilters({
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="all">All songs</SelectItem>
-            {tracks.map((track, index) => <SelectItem key={track} value={String(index)}>{track}</SelectItem>)}
+            {tracks.map((track) => <SelectItem key={track.id} value={track.id}>{track.name}</SelectItem>)}
           </SelectContent>
         </Select>
       </div>

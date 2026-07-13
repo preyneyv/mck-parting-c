@@ -15,7 +15,8 @@ export async function POST(request: Request) {
         (app_id, device_serial, entry_id, player_name, raw_data,
          morse_letters, morse_errors,
          asteroids_elapsed_ms, asteroids_distance,
-         beatline_track, beatline_difficulty, beatline_rank, beatline_score,
+         beatline_track_id, beatline_chart_id, beatline_difficulty,
+         beatline_rank, beatline_score,
          beatline_max_combo, beatline_perfect, beatline_good,
          beatline_bad, beatline_miss)
       values
@@ -25,7 +26,8 @@ export async function POST(request: Request) {
          ${entry.game === "morse" ? entry.errors : null},
          ${entry.game === "asteroids" ? entry.elapsedMs : null},
          ${entry.game === "asteroids" ? entry.distance : null},
-         ${entry.game === "beatline" ? entry.track : null},
+         ${entry.game === "beatline" ? entry.trackId : null},
+         ${entry.game === "beatline" ? entry.chartId : null},
          ${entry.game === "beatline" ? entry.difficulty : null},
          ${entry.game === "beatline" ? entry.rank : null},
          ${entry.game === "beatline" ? entry.score : null},

@@ -20,6 +20,8 @@ async function migrateSchema() {
       asteroids_elapsed_ms bigint,
       asteroids_distance bigint,
       beatline_track smallint,
+      beatline_track_id numeric(20, 0),
+      beatline_chart_id numeric(20, 0),
       beatline_difficulty smallint,
       beatline_rank smallint,
       beatline_score bigint,
@@ -41,6 +43,8 @@ async function migrateSchema() {
       add column if not exists asteroids_elapsed_ms bigint,
       add column if not exists asteroids_distance bigint,
       add column if not exists beatline_track smallint,
+      add column if not exists beatline_track_id numeric(20, 0),
+      add column if not exists beatline_chart_id numeric(20, 0),
       add column if not exists beatline_difficulty smallint,
       add column if not exists beatline_rank smallint,
       add column if not exists beatline_score bigint,
@@ -49,6 +53,12 @@ async function migrateSchema() {
       add column if not exists beatline_good integer,
       add column if not exists beatline_bad smallint,
       add column if not exists beatline_miss smallint
+  `;
+
+  await sql`
+    alter table leaderboard_entries
+      alter column beatline_track_id type numeric(20, 0) using beatline_track_id::numeric,
+      alter column beatline_chart_id type numeric(20, 0) using beatline_chart_id::numeric
   `;
 
   await sql`
@@ -97,17 +107,33 @@ async function migrateSchema() {
     where app_id = 5 and octet_length(raw_data) = 14
   `;
 
+  // Preserve development scores created with the retired track-index payload.
+  // Track 0 was Never Gonna and track 1 was Golden.
+  await sql`
+    update leaderboard_entries
+    set beatline_track_id = case beatline_track when 0 then 1 when 1 then 2 end,
+        beatline_chart_id = case
+          when beatline_track = 0 and beatline_difficulty = 0 then 1
+          when beatline_track = 0 and beatline_difficulty = 1 then 2
+          when beatline_track = 1 and beatline_difficulty = 0 then 3
+          when beatline_track = 1 and beatline_difficulty = 1 then 4
+        end
+    where app_id = 5 and octet_length(raw_data) = 14
+  `;
+
   await sql`
     alter table leaderboard_entries
       drop column if exists game,
       drop column if exists summary,
       drop column if exists sort_score,
-      drop column if exists metadata
+      drop column if exists metadata,
+      drop column if exists beatline_track
   `;
 
   await sql`create index if not exists leaderboard_morse_rank on leaderboard_entries (morse_letters desc, morse_errors asc, created_at asc) where app_id = 1`;
   await sql`create index if not exists leaderboard_asteroids_rank on leaderboard_entries (asteroids_distance desc, asteroids_elapsed_ms asc, created_at asc) where app_id = 2`;
-  await sql`create index if not exists leaderboard_beatline_rank on leaderboard_entries (beatline_score desc, beatline_max_combo desc, created_at asc) where app_id = 5`;
+  await sql`drop index if exists leaderboard_beatline_rank`;
+  await sql`create index leaderboard_beatline_rank on leaderboard_entries (beatline_chart_id, beatline_score desc, beatline_max_combo desc, created_at asc) where app_id = 5`;
 }
 
 export function ensureSchema() {
@@ -137,7 +163,8 @@ export type AsteroidsLeaderboardRow = BaseLeaderboardRow & {
 };
 
 export type BeatlineLeaderboardRow = BaseLeaderboardRow & {
-  track: number;
+  track_id: string;
+  chart_id: string;
   difficulty: number;
   rank: number;
   score: number;
@@ -178,7 +205,9 @@ export async function getLeaderboards(): Promise<Leaderboards> {
     `,
     sql<BeatlineLeaderboardRow[]>`
       select id::text, player_name, created_at,
-             beatline_track as track, beatline_difficulty as difficulty,
+             beatline_track_id::text as track_id,
+             beatline_chart_id::text as chart_id,
+             beatline_difficulty as difficulty,
              beatline_rank as rank, beatline_score::double precision as score,
              beatline_max_combo as max_combo, beatline_perfect as perfect,
              beatline_good as good, beatline_bad as bad, beatline_miss as miss

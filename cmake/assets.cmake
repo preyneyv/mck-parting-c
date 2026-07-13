@@ -70,9 +70,15 @@ if(PRISM_ASSET_AUTHORING AND Reaper_FOUND)
             if(SOUND_REL_NOEXT STREQUAL "golden")
                 set(TRACK_TITLE "Golden")
                 set(TRACK_ARTIST "HUNTR/X")
+                set(TRACK_ID 2)
+                set(NORMAL_CHART_ID 3)
+                set(HARD_CHART_ID 4)
             else()
                 set(TRACK_TITLE "Never Gonna")
                 set(TRACK_ARTIST "Rick Astley")
+                set(TRACK_ID 1)
+                set(NORMAL_CHART_ID 1)
+                set(HARD_CHART_ID 2)
             endif()
             set(OUT_TRACK
                 "${CMAKE_CURRENT_SOURCE_DIR}/assets/beatline/${SOUND_REL_NOEXT}.beatline")
@@ -87,6 +93,9 @@ if(PRISM_ASSET_AUTHORING AND Reaper_FOUND)
                 --beatline-out "${OUT_TRACK}"
                 --title "${TRACK_TITLE}"
                 --artist "${TRACK_ARTIST}"
+                --track-id "${TRACK_ID}"
+                --normal-chart-id "${NORMAL_CHART_ID}"
+                --hard-chart-id "${HARD_CHART_ID}"
                 --reaper-cli "${REAPER_EXECUTABLE}"
                 DEPENDS "${RPP}"
                 "${CMAKE_CURRENT_SOURCE_DIR}/scripts/rea_midi_export.py"

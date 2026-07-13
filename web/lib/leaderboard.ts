@@ -1,4 +1,7 @@
-export const BEATLINE_TRACKS = ["Never Gonna", "Golden"] as const;
+export const BEATLINE_TRACKS = [
+  { id: "1", name: "Never Gonna", charts: { normal: "1", hard: "2" } },
+  { id: "2", name: "Golden", charts: { normal: "3", hard: "4" } },
+] as const;
 export const BEATLINE_DIFFICULTIES = ["Normal", "Hard"] as const;
 export const BEATLINE_RANKS = ["S", "A", "B", "C", "D"] as const;
 
@@ -21,7 +24,8 @@ type AsteroidsResult = {
 type BeatlineResult = {
   game: "beatline";
   gameName: "Beatline";
-  track: number;
+  trackId: string;
+  chartId: string;
   difficulty: number;
   rank: number;
   score: number;
@@ -75,8 +79,22 @@ function u32(data: Uint8Array, offset: number) {
   return (data[offset] | (data[offset + 1] << 8) | (data[offset + 2] << 16) | (data[offset + 3] << 24)) >>> 0;
 }
 
-export function beatlineTrackName(track: number) {
-  return BEATLINE_TRACKS[track] ?? `Track ${track + 1}`;
+function u64(data: Uint8Array, offset: number) {
+  let value = 0n;
+  for (let index = 7; index >= 0; index--) value = (value << 8n) | BigInt(data[offset + index]);
+  return value;
+}
+
+function beatlineChart(chartId: string) {
+  for (const track of BEATLINE_TRACKS) {
+    if (track.charts.normal === chartId) return { track, difficulty: 0 };
+    if (track.charts.hard === chartId) return { track, difficulty: 1 };
+  }
+  return undefined;
+}
+
+export function beatlineTrackName(trackId: string) {
+  return BEATLINE_TRACKS.find((track) => track.id === trackId)?.name ?? `Track ${trackId}`;
 }
 
 export function beatlineDifficultyName(difficulty: number) {
@@ -113,23 +131,31 @@ export function decodeGameData(appId: number, data: Uint8Array): DecodedGameResu
     };
   }
 
-  if (appId === 5 && data.length === 14) {
-    const track = data[0] >> 1;
-    const difficulty = data[0] & 1;
-    const rank = data[1];
-    if (rank >= BEATLINE_RANKS.length) throw new Error("Invalid Beatline rank");
+  if (appId === 5 && data.length === 22) {
+    const chartId = u64(data, 0).toString();
+    const chart = beatlineChart(chartId);
+    if (!chart) throw new Error("Unrecognized Beatline chart ID");
 
-    const score = u32(data, 2);
-    const maxCombo = u16(data, 6);
-    const perfect = u16(data, 8);
-    const good = u16(data, 10);
-    const bad = data[12];
-    const miss = data[13];
+    const score = u32(data, 8);
+    const maxCombo = u16(data, 12);
+    const perfect = u16(data, 14);
+    const good = u16(data, 16);
+    const bad = u16(data, 18);
+    const miss = u16(data, 20);
+    const total = perfect + good + bad + miss;
+    const goodOrBetter = perfect + good;
+    const rank = total === 0 ? 4
+      : bad === 0 && miss === 0 ? 0
+      : goodOrBetter * 100 >= total * 90 ? 1
+      : goodOrBetter * 100 >= total * 85 ? 2
+      : goodOrBetter * 100 >= total * 70 ? 3
+      : 4;
     return {
       game: "beatline",
       gameName: "Beatline",
-      track,
-      difficulty,
+      trackId: chart.track.id,
+      chartId,
+      difficulty: chart.difficulty,
       rank,
       score,
       maxCombo,
@@ -137,7 +163,7 @@ export function decodeGameData(appId: number, data: Uint8Array): DecodedGameResu
       good,
       bad,
       miss,
-      summary: `${score.toLocaleString()} · ${maxCombo} combo · ${beatlineTrackName(track)}`,
+      summary: `${score.toLocaleString()} · ${maxCombo} combo · ${chart.track.name}`,
     };
   }
 

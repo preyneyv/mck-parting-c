@@ -11,6 +11,13 @@ The bundled Golden and Never Gonna tracks are separate asset packs. They use
 the same discovery and playback path as user-installed tracks and are not
 compiled into `beatline.prism`.
 
+Their initial registered IDs are:
+
+| Track | Track ID | Normal chart ID | Hard chart ID |
+| --- | ---: | ---: | ---: |
+| Never Gonna | 1 | 1 | 2 |
+| Golden | 2 | 3 | 4 |
+
 ## Registration
 
 A `.beatline` file is complete and playable without registration. An
