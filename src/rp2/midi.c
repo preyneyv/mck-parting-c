@@ -112,7 +112,11 @@ static void append_sysex_packet(const uint8_t packet[4], uint8_t code)
 
 void midi_task(void)
 {
-  if (!tud_mounted())
+  /* A battery-powered RP2040 can retain TinyUSB's configured/mounted state
+   * after the host disappears. Bus suspend is the reliable second half of
+   * the disconnect signal; MIDI mode should not pin the native view open in
+   * either state. */
+  if (!tud_mounted() || tud_suspended())
   {
     prism_midi_mode_usb_disconnected();
     sysex_length = 0;

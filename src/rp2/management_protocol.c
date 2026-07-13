@@ -44,7 +44,8 @@ void management_protocol_cartridges(
   {
     const prism_registry_entry_t *registry = prism_registry_get(i);
     if (registry != NULL &&
-        (registry->policy & PRISM_REGISTRY_POLICY_BUNDLED) != 0)
+        (registry->policy & PRISM_REGISTRY_POLICY_BUNDLED) != 0 &&
+        (registry->policy & PRISM_REGISTRY_POLICY_HIDDEN) == 0)
       ++bundled_count;
   }
   size_t installed_count = cartridge_storage_count();
@@ -62,7 +63,8 @@ void management_protocol_cartridges(
   {
     const prism_registry_entry_t *registry = prism_registry_get(i);
     if (registry == NULL ||
-        (registry->policy & PRISM_REGISTRY_POLICY_BUNDLED) == 0)
+        (registry->policy & PRISM_REGISTRY_POLICY_BUNDLED) == 0 ||
+        (registry->policy & PRISM_REGISTRY_POLICY_HIDDEN) != 0)
       continue;
     if (logical_index++ < start_index)
       continue;
