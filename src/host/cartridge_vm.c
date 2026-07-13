@@ -10,6 +10,7 @@
 #include <string.h>
 
 #include <platform/display.h>
+#include <platform/asset_pack.h>
 #include <platform/time.h>
 #include <prism/cartridge_identity.h>
 #include <qrcodegen.h>
@@ -36,6 +37,8 @@ enum
    * ordinary code region instead. */
   GUEST_TRAP_BASE = 0x11000000u,
   GUEST_TRAP_BYTES = 0x10000u,
+  GUEST_ASSET_BASE = 0x12000000u,
+  GUEST_ASSET_MAX_BYTES = 16u * 1024u * 1024u,
   GUEST_OBJECT_BASE = 0x30000000u,
   GUEST_DISPLAY_HANDLE = GUEST_OBJECT_BASE + 0x10000u,
   GUEST_SYNTH_HANDLE = GUEST_OBJECT_BASE + 0x10004u,
@@ -62,6 +65,22 @@ typedef struct
   bool active;
 } guest_animation_t;
 
+typedef struct
+{
+  prism_asset_pack_handle_t handle;
+  uint32_t id;
+  uint32_t name;
+} guest_pack_mapping_t;
+
+typedef struct
+{
+  prism_asset_pack_handle_t handle;
+  uint32_t index;
+  uint32_t path;
+  uint32_t data;
+  uint32_t size;
+} guest_file_mapping_t;
+
 struct host_cartridge_vm
 {
   uc_engine *uc;
@@ -72,6 +91,10 @@ struct host_cartridge_vm
   uint32_t heap_limit;
   guest_allocation_t allocations[GUEST_ALLOCATION_MAX];
   guest_animation_t animations[GUEST_ANIMATION_MAX];
+  guest_pack_mapping_t *asset_packs;
+  size_t asset_pack_count;
+  guest_file_mapping_t *asset_files;
+  size_t asset_file_count;
   bool failed;
   bool failure_pending;
   bool unsupported_reported[PRISM_PACKAGE_MAX_IMPORTS];
@@ -353,6 +376,134 @@ static bool guest_write(host_cartridge_vm_t *vm, uint32_t address,
           uc_strerror(error));
   vm->failed = true;
   return false;
+}
+
+static bool guest_asset_copy(host_cartridge_vm_t *vm, uint32_t *cursor,
+                             const void *data, size_t size,
+                             uint32_t *guest_address)
+{
+  if (size > UINT32_MAX || *cursor < GUEST_ASSET_BASE ||
+      *cursor > GUEST_ASSET_BASE + GUEST_ASSET_MAX_BYTES ||
+      size > GUEST_ASSET_BASE + GUEST_ASSET_MAX_BYTES - *cursor)
+    return false;
+  *guest_address = *cursor;
+  if (size != 0 && !guest_write(vm, *cursor, data, size))
+    return false;
+  *cursor = align_up(*cursor + (uint32_t)size, 4u);
+  return true;
+}
+
+static bool guest_asset_measure(size_t *total, size_t size)
+{
+  if (total == NULL || size > GUEST_ASSET_MAX_BYTES ||
+      size > SIZE_MAX - 3u)
+    return false;
+  size_t padded = (size + 3u) & ~(size_t)3u;
+  if (*total > GUEST_ASSET_MAX_BYTES - padded)
+    return false;
+  *total += padded;
+  return true;
+}
+
+static bool guest_assets_init(host_cartridge_vm_t *vm)
+{
+  const prism_cartridge_t *cartridge = &vm->package->descriptor;
+  vm->asset_pack_count = platform_asset_pack_count(cartridge);
+  if (vm->asset_pack_count == 0)
+    return true;
+  vm->asset_packs = calloc(vm->asset_pack_count,
+                           sizeof(*vm->asset_packs));
+  if (vm->asset_packs == NULL)
+    return false;
+
+  size_t file_count = 0;
+  size_t total_bytes = 0;
+  for (size_t i = 0; i < vm->asset_pack_count; ++i)
+  {
+    prism_asset_pack_info_t info = {0};
+    if (!platform_asset_pack_get(cartridge, i, &info) ||
+        file_count > SIZE_MAX - info.file_count)
+      return false;
+    file_count += info.file_count;
+    if (!guest_asset_measure(&total_bytes, strlen(info.id) + 1u) ||
+        !guest_asset_measure(&total_bytes, strlen(info.name) + 1u))
+      return false;
+    for (uint32_t file_index = 0; file_index < info.file_count; ++file_index)
+    {
+      prism_asset_file_t file = {0};
+      if (!platform_asset_file_get(cartridge, info.handle, file_index,
+                                   &file) ||
+          !guest_asset_measure(&total_bytes, strlen(file.path) + 1u) ||
+          !guest_asset_measure(&total_bytes, file.size))
+        return false;
+    }
+  }
+  vm->asset_files = calloc(file_count, sizeof(*vm->asset_files));
+  if (file_count != 0 && vm->asset_files == NULL)
+    return false;
+  vm->asset_file_count = file_count;
+
+  uint32_t mapped_bytes = align_up((uint32_t)total_bytes, 0x1000u);
+  if (mapped_bytes == 0 ||
+      uc_mem_map(vm->uc, GUEST_ASSET_BASE, mapped_bytes, UC_PROT_ALL) !=
+          UC_ERR_OK)
+    return false;
+
+  uint32_t cursor = GUEST_ASSET_BASE;
+  size_t output_file = 0;
+  for (size_t i = 0; i < vm->asset_pack_count; ++i)
+  {
+    prism_asset_pack_info_t info = {0};
+    if (!platform_asset_pack_get(cartridge, i, &info))
+      return false;
+    guest_pack_mapping_t *mapping = &vm->asset_packs[i];
+    mapping->handle = info.handle;
+    if (!guest_asset_copy(vm, &cursor, info.id, strlen(info.id) + 1u,
+                          &mapping->id) ||
+        !guest_asset_copy(vm, &cursor, info.name, strlen(info.name) + 1u,
+                          &mapping->name))
+      return false;
+    for (uint32_t file_index = 0; file_index < info.file_count; ++file_index)
+    {
+      prism_asset_file_t file = {0};
+      if (!platform_asset_file_get(cartridge, info.handle, file_index,
+                                   &file))
+        return false;
+      guest_file_mapping_t *file_mapping =
+          &vm->asset_files[output_file++];
+      file_mapping->handle = info.handle;
+      file_mapping->index = file_index;
+      file_mapping->size = file.size;
+      if (!guest_asset_copy(vm, &cursor, file.path,
+                            strlen(file.path) + 1u,
+                            &file_mapping->path) ||
+          !guest_asset_copy(vm, &cursor, file.data, file.size,
+                            &file_mapping->data))
+        return false;
+    }
+  }
+  return uc_mem_protect(vm->uc, GUEST_ASSET_BASE, mapped_bytes,
+                        UC_PROT_READ) == UC_ERR_OK;
+}
+
+static const guest_pack_mapping_t *guest_pack_mapping(
+    const host_cartridge_vm_t *vm, prism_asset_pack_handle_t handle)
+{
+  for (size_t i = 0; i < vm->asset_pack_count; ++i)
+    if (vm->asset_packs[i].handle == handle)
+      return &vm->asset_packs[i];
+  return NULL;
+}
+
+static const guest_file_mapping_t *guest_file_mapping(
+    const host_cartridge_vm_t *vm, prism_asset_pack_handle_t handle,
+    uint32_t index)
+{
+  for (size_t i = 0; i < vm->asset_file_count; ++i)
+    if (vm->asset_files[i].handle == handle &&
+        vm->asset_files[i].index == index)
+      return &vm->asset_files[i];
+  return NULL;
 }
 
 static uint32_t guest_read_u32(host_cartridge_vm_t *vm, uint32_t address)
@@ -974,6 +1125,43 @@ static void api_dispatch(host_cartridge_vm_t *vm, uint16_t api)
   case 22:
     context->api->ui_sound((prism_ui_sound_t)r0, (uint8_t)r1);
     break;
+  case 23:
+    reg_write(vm, UC_ARM_REG_R0, context->api->asset_pack_count());
+    break;
+  case 24:
+  {
+    prism_asset_pack_info_t info = {0};
+    bool ok = context->api->asset_pack_get(r0, &info);
+    const guest_pack_mapping_t *mapping =
+        ok ? guest_pack_mapping(vm, info.handle) : NULL;
+    uint32_t guest_info[5] = {
+        info.handle,
+        info.version,
+        info.file_count,
+        mapping == NULL ? 0 : mapping->id,
+        mapping == NULL ? 0 : mapping->name,
+    };
+    ok = mapping != NULL && guest_write(vm, r1, guest_info,
+                                         sizeof(guest_info));
+    reg_write(vm, UC_ARM_REG_R0, ok);
+    break;
+  }
+  case 25:
+  {
+    prism_asset_file_t file = {0};
+    bool ok = context->api->asset_file_get(r0, r1, &file);
+    const guest_file_mapping_t *mapping =
+        ok ? guest_file_mapping(vm, r0, r1) : NULL;
+    uint32_t guest_file[3] = {
+        mapping == NULL ? 0 : mapping->path,
+        mapping == NULL ? 0 : mapping->data,
+        mapping == NULL ? 0 : mapping->size,
+    };
+    ok = mapping != NULL && mapping->size == file.size &&
+         guest_write(vm, r2, guest_file, sizeof(guest_file));
+    reg_write(vm, UC_ARM_REG_R0, ok);
+    break;
+  }
   default:
     fprintf(stderr, "unsupported cartridge API trap: %u\n", api);
     vm->failed = true;
@@ -1572,7 +1760,9 @@ host_cartridge_vm_create(const host_cartridge_package_t *package)
       uc_mem_map(vm->uc, GUEST_TRAP_BASE, GUEST_TRAP_BYTES,
                  UC_PROT_READ | UC_PROT_EXEC) != UC_ERR_OK ||
       uc_mem_map(vm->uc, GUEST_STOP_ADDRESS, 0x1000u,
-                 UC_PROT_READ | UC_PROT_EXEC) != UC_ERR_OK)
+                  UC_PROT_READ | UC_PROT_EXEC) != UC_ERR_OK)
+    goto fail;
+  if (!guest_assets_init(vm))
     goto fail;
 
   if (!guest_write(vm, GUEST_IMAGE_BASE,
@@ -1668,6 +1858,8 @@ fail:
   free(launch_image);
   if (vm->uc != NULL)
     uc_close(vm->uc);
+  free(vm->asset_files);
+  free(vm->asset_packs);
   free(vm);
   return NULL;
 }
@@ -1678,6 +1870,8 @@ void host_cartridge_vm_destroy(host_cartridge_vm_t *vm)
     return;
   if (vm->uc != NULL)
     uc_close(vm->uc);
+  free(vm->asset_files);
+  free(vm->asset_packs);
   free(vm);
 }
 

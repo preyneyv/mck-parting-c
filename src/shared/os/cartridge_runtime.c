@@ -5,6 +5,7 @@
 #include <string.h>
 
 #include <platform/display.h>
+#include <platform/asset_pack.h>
 #include <platform/cartridge.h>
 #include <platform/persistence.h>
 #include <platform/peripheral.h>
@@ -91,6 +92,24 @@ static void api_ui_sound(prism_ui_sound_t sound, uint8_t value)
   }
 }
 
+static uint32_t api_asset_pack_count(void)
+{
+  size_t count = platform_asset_pack_count(current);
+  return count > UINT32_MAX ? UINT32_MAX : (uint32_t)count;
+}
+
+static bool api_asset_pack_get(uint32_t index,
+                               prism_asset_pack_info_t *info)
+{
+  return platform_asset_pack_get(current, index, info);
+}
+
+static bool api_asset_file_get(prism_asset_pack_handle_t pack,
+                               uint32_t index, prism_asset_file_t *file)
+{
+  return platform_asset_file_get(current, pack, index, file);
+}
+
 static const prism_api_v1_t api_v1 = {
     .abi_version = PRISM_API_ABI_VERSION,
     .struct_size = sizeof(prism_api_v1_t),
@@ -117,6 +136,9 @@ static const prism_api_v1_t api_v1 = {
     .button_keydown_tick = api_button_keydown_tick,
     .button_keyup_tick = api_button_keyup_tick,
     .ui_sound = api_ui_sound,
+    .asset_pack_count = api_asset_pack_count,
+    .asset_pack_get = api_asset_pack_get,
+    .asset_file_get = api_asset_file_get,
 };
 
 static void adapter_enter(void)

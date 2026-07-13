@@ -24,6 +24,8 @@ int main(int argc, char **argv)
     return host_cartridge_test_lifecycle(argv[2]) ? 0 : 1;
   if (argc == 3 && strcmp(argv[1], "--test-cartridge-audio") == 0)
     return host_cartridge_test_audio(argv[2]) ? 0 : 1;
+  if (argc == 3 && strcmp(argv[1], "--test-cartridge-assets") == 0)
+    return host_cartridge_test_assets(argv[2]) ? 0 : 1;
   if (argc > 2)
   {
     fprintf(stderr, "usage: %s [cartridge.prism]\n", argv[0]);

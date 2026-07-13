@@ -5,6 +5,7 @@
  * full fidelity of upstream u8g2 and elm. */
 #include <prism/cartridge.h>
 #include <prism/audio.h>
+#include <prism/asset_pack.h>
 #include <prism/graphics.h>
 #include <prism/leaderboard.h>
 #include <prism/ui.h>

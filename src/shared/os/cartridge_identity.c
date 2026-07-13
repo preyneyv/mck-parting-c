@@ -1,4 +1,5 @@
 #include <prism/cartridge_identity.h>
+#include <prism/asset_pack.h>
 
 #include <string.h>
 
@@ -193,6 +194,59 @@ bool prism_app_key_derive(const char *id, prism_app_key_t app_key)
     ++length;
   return length <= PRISM_CARTRIDGE_ID_MAX &&
          prism_app_key_derive_n(id, length, app_key);
+}
+
+bool prism_pack_key_derive_n(const char *id, size_t length,
+                             prism_pack_key_t pack_key)
+{
+  static const uint8_t domain[] = "prism.pack.v1";
+  if (pack_key == NULL || !prism_cartridge_id_valid_n(id, length))
+    return false;
+  sha256_t sha;
+  uint8_t digest[32];
+  sha256_init(&sha);
+  sha256_update(&sha, domain, sizeof(domain));
+  sha256_update(&sha, id, length);
+  sha256_finish(&sha, digest);
+  memcpy(pack_key, digest, PRISM_PACK_KEY_BYTES);
+  return true;
+}
+
+bool prism_pack_key_derive(const char *id, prism_pack_key_t pack_key)
+{
+  if (id == NULL)
+    return false;
+  size_t length = 0;
+  while (length <= PRISM_CARTRIDGE_ID_MAX && id[length] != '\0')
+    ++length;
+  return length <= PRISM_CARTRIDGE_ID_MAX &&
+         prism_pack_key_derive_n(id, length, pack_key);
+}
+
+bool prism_asset_path_valid_n(const char *path, size_t length)
+{
+  if (path == NULL || length == 0 || length > PRISM_ASSET_PATH_MAX ||
+      path[0] == '/' || path[length - 1] == '/')
+    return false;
+  size_t component_start = 0;
+  for (size_t i = 0; i <= length; ++i)
+  {
+    if (i != length && path[i] != '/')
+    {
+      unsigned char character = (unsigned char)path[i];
+      if (character < 0x21 || character > 0x7e || character == '\\')
+        return false;
+      continue;
+    }
+    size_t component_length = i - component_start;
+    if (component_length == 0 ||
+        (component_length == 1 && path[component_start] == '.') ||
+        (component_length == 2 && path[component_start] == '.' &&
+         path[component_start + 1] == '.'))
+      return false;
+    component_start = i + 1;
+  }
+  return true;
 }
 
 prism_cartridge_update_result_t prism_cartridge_update_check(

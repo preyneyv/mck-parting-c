@@ -1,4 +1,5 @@
 #include <platform/cartridge.h>
+#include <platform/asset_pack.h>
 #include <platform/system.h>
 
 #include <stdlib.h>
@@ -40,6 +41,7 @@ void platform_cartridge_release(platform_cartridge_execution_t *execution)
 {
   if (execution == NULL)
     return;
+  cartridge_storage_release_execution(execution);
   free(execution->allocation);
   execution->allocation = NULL;
   execution->got_base = NULL;
@@ -61,4 +63,22 @@ void platform_cartridge_call(const platform_cartridge_execution_t *execution,
   }
   else
     function(context);
+}
+
+size_t platform_asset_pack_count(const prism_cartridge_t *cartridge)
+{
+  return cartridge_storage_asset_pack_count(cartridge);
+}
+
+bool platform_asset_pack_get(const prism_cartridge_t *cartridge, size_t index,
+                             prism_asset_pack_info_t *info)
+{
+  return cartridge_storage_asset_pack_get(cartridge, index, info);
+}
+
+bool platform_asset_file_get(const prism_cartridge_t *cartridge,
+                             prism_asset_pack_handle_t pack, uint32_t index,
+                             prism_asset_file_t *file)
+{
+  return cartridge_storage_asset_file_get(cartridge, pack, index, file);
 }

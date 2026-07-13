@@ -7,13 +7,14 @@
 #include <u8g2.h>
 
 #include <prism/types.h>
+#include <prism/asset_pack.h>
 #include <shared/audio/synth.h>
 
 #define PRISM_CARTRIDGE_MAGIC 0x50524354u /* PRCT */
 #define PRISM_API_ABI_V1 1u
 #define PRISM_API_ABI_VERSION PRISM_API_ABI_V1
-#define PRISM_API_V1_FUNCTION_COUNT 23u
-#define PRISM_API_V1_STRUCT_SIZE 100u
+#define PRISM_API_V1_FUNCTION_COUNT 26u
+#define PRISM_API_V1_STRUCT_SIZE 112u
 #define PRISM_CARTRIDGE_ABI_V1 1u
 #define PRISM_CARTRIDGE_ABI_VERSION PRISM_CARTRIDGE_ABI_V1
 
@@ -69,6 +70,10 @@ typedef struct prism_api_v1
   uint32_t (*button_keydown_tick)(prism_button_t button);
   uint32_t (*button_keyup_tick)(prism_button_t button);
   void (*ui_sound)(prism_ui_sound_t sound, uint8_t value);
+  uint32_t (*asset_pack_count)(void);
+  bool (*asset_pack_get)(uint32_t index, prism_asset_pack_info_t *info);
+  bool (*asset_file_get)(prism_asset_pack_handle_t pack, uint32_t index,
+                         prism_asset_file_t *file);
 } prism_api_v1_t;
 
 typedef struct prism_context
@@ -280,4 +285,27 @@ static inline bool prism_leaderboard_qrcode(prism_t *prism, uint8_t app_id,
                                             uint8_t *qrcode)
 {
   return prism->api->leaderboard_qrcode(app_id, data, data_len, qrcode);
+}
+
+static inline uint32_t prism_asset_pack_count(prism_t *prism)
+{
+  return prism->api->asset_pack_count == NULL
+             ? 0
+             : prism->api->asset_pack_count();
+}
+
+static inline bool prism_asset_pack_get(prism_t *prism, uint32_t index,
+                                        prism_asset_pack_info_t *info)
+{
+  return prism->api->asset_pack_get != NULL &&
+         prism->api->asset_pack_get(index, info);
+}
+
+static inline bool prism_asset_file_get(prism_t *prism,
+                                        prism_asset_pack_handle_t pack,
+                                        uint32_t index,
+                                        prism_asset_file_t *file)
+{
+  return prism->api->asset_file_get != NULL &&
+         prism->api->asset_file_get(pack, index, file);
 }

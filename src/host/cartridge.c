@@ -1,4 +1,5 @@
 #include <platform/cartridge.h>
+#include <platform/asset_pack.h>
 
 #include <stdint.h>
 #include <stdio.h>
@@ -6,6 +7,7 @@
 #include <string.h>
 
 #include "cartridge.h"
+#include "asset_pack.h"
 #include "cartridge_vm.h"
 #include <shared/audio/synth_internal.h>
 #include <shared/engine.h>
@@ -34,6 +36,8 @@ bool host_cartridge_init_bundled(void)
   for (size_t i = 0; i < bundled_count; ++i)
     host_cartridge_package_unload(&bundled[i]);
   bundled_count = 0;
+  if (!host_asset_pack_init_bundled())
+    return false;
   for (size_t i = 0; i < HOST_BUNDLED_CARTRIDGE_COUNT; ++i)
   {
     if (!host_cartridge_package_load(&bundled[i], bundled_paths[i]))
@@ -167,6 +171,37 @@ bool host_cartridge_test_audio(const char *path)
   host_cartridge_package_unload(&package);
   puts(passed ? "host cartridge audio tests passed"
               : "host cartridge audio tests failed");
+  return passed;
+}
+
+bool host_cartridge_test_assets(const char *path)
+{
+  if (!host_cartridge_init_bundled() || !host_cartridge_load(path))
+    return false;
+  const prism_cartridge_t *cartridge = platform_cartridge_installed_get(
+      platform_cartridge_installed_count() - 1u);
+
+  bool passed = cartridge != NULL &&
+                platform_asset_pack_count(cartridge) == 2;
+  for (size_t pack_index = 0; pack_index < 2 && passed; ++pack_index)
+  {
+    prism_asset_pack_info_t info = {0};
+    prism_asset_file_t file = {0};
+    passed = platform_asset_pack_get(cartridge, pack_index, &info) &&
+             info.file_count == 1 && info.id != NULL && info.name != NULL &&
+             platform_asset_file_get(cartridge, info.handle, 0, &file) &&
+             file.path != NULL && strstr(file.path, ".beatline") != NULL &&
+             file.data != NULL && file.size >= 4 &&
+             memcmp(file.data, "BTLN", 4) == 0;
+  }
+
+  engine_init();
+  passed = passed && prism_cartridge_launch(cartridge) &&
+           prism_cartridge_current() == cartridge &&
+           prism_os_api()->asset_pack_count() == 2;
+  engine_set_app(NULL);
+  puts(passed ? "host cartridge asset tests passed"
+              : "host cartridge asset tests failed");
   return passed;
 }
 
