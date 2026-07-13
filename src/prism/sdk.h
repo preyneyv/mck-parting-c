@@ -7,3 +7,4 @@
 #include <prism/audio.h>
 #include <prism/graphics.h>
 #include <prism/leaderboard.h>
+#include <prism/ui.h>

@@ -971,6 +971,9 @@ static void api_dispatch(host_cartridge_vm_t *vm, uint16_t api)
     reg_write(vm, UC_ARM_REG_R0,
               context->api->button_keyup_tick((prism_button_t)r0));
     break;
+  case 22:
+    context->api->ui_sound((prism_ui_sound_t)r0, (uint8_t)r1);
+    break;
   default:
     fprintf(stderr, "unsupported cartridge API trap: %u\n", api);
     vm->failed = true;
@@ -1623,11 +1626,11 @@ host_cartridge_vm_create(const host_cartridge_package_t *package)
     guest_write_u32(vm, guest_patch, value + GUEST_IMAGE_BASE);
   }
 
-  uint32_t api[24] = {
+  uint32_t api[2 + PRISM_API_V1_FUNCTION_COUNT] = {
       PRISM_API_ABI_VERSION,
-      96,
+      PRISM_API_V1_STRUCT_SIZE,
   };
-  for (uint16_t i = 0; i < 22; ++i)
+  for (uint16_t i = 0; i < PRISM_API_V1_FUNCTION_COUNT; ++i)
     api[2 + i] = trap_address(GUEST_API_TRAP_BASE + i);
   if (!guest_write(vm, GUEST_API_ADDRESS, api, sizeof(api)))
     goto fail;

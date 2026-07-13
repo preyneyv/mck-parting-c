@@ -8,6 +8,7 @@
 #include <shared/config.h>
 #include <shared/engine.h>
 #include <shared/os/power_indicator.h>
+#include <shared/os/system_sound.h>
 #include <shared/utils/misc.h>
 
 #include "engine_internal.h"
@@ -29,6 +30,7 @@ static struct
 {
   int active;
   bool ignore_release;
+  uint8_t hold_sound_step;
   platform_time_t last_level_change;
   struct
   {
@@ -69,10 +71,12 @@ static void change_active(int8_t delta)
     menu.active = 0;
   anim_sys_to(&menu.anim.active, action_y(menu.active), 150,
               ANIM_EASE_OUT_CUBIC, NULL, NULL);
+  system_sound_navigation();
 }
 
 void pause_menu_show(bool immediate)
 {
+  menu.hold_sound_step = 0;
   menu.anim.held = 0;
   if (immediate)
     menu.anim.container = 0;
@@ -91,6 +95,7 @@ void pause_menu_hide_immediate(void)
 {
   anim_cancel(&menu.anim.container, false);
   menu.anim.container = MENU_CLOSED_Y;
+  menu.hold_sound_step = 0;
 }
 
 static void adjust_level(button_id_t button)
@@ -109,13 +114,16 @@ static void adjust_level(button_id_t button)
   }
   *kick = direction * 2;
   anim_sys_to(kick, 0, 150, ANIM_EASE_OUT_CUBIC, NULL, NULL);
+  system_sound_navigation();
 }
 
 static void handle_input(void)
 {
   if (BUTTON_KEYDOWN(BUTTON_MENU))
   {
-    if (engine_is_paused())
+    bool opening = !engine_is_paused();
+    system_sound_menu(opening);
+    if (!opening)
       engine_resume();
     else
       engine_pause(false);
@@ -143,6 +151,14 @@ static void handle_input(void)
     {
       if (held > 0.f)
       {
+        uint8_t sound_step = (uint8_t)(held * 5.f) + 1u;
+        if (sound_step > 5u)
+          sound_step = 5u;
+        if (sound_step != menu.hold_sound_step)
+        {
+          menu.hold_sound_step = sound_step;
+          system_sound_hold(sound_step);
+        }
         anim_cancel(&menu.anim.held, false);
         menu.anim.held = 14 * ease_out_cubic(held);
       }
@@ -157,6 +173,7 @@ static void handle_input(void)
 
   if (BUTTON_KEYUP(BUTTON_LEFT))
   {
+    menu.hold_sound_step = 0;
     anim_sys_to(&menu.anim.held, 0, 150, ANIM_EASE_OUT_CUBIC, NULL, NULL);
     if (!menu.ignore_release)
       change_active(-1);
@@ -164,6 +181,7 @@ static void handle_input(void)
   }
   if (BUTTON_KEYUP(BUTTON_RIGHT))
   {
+    menu.hold_sound_step = 0;
     anim_sys_to(&menu.anim.held, 0, 150, ANIM_EASE_OUT_CUBIC, NULL, NULL);
     if (!menu.ignore_release)
       change_active(1);

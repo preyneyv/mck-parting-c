@@ -3,6 +3,7 @@
 #include <shared/os/power_indicator.h>
 #include <shared/config.h>
 #include <shared/engine.h>
+#include <shared/os/system_sound.h>
 #include <platform/display.h>
 #include <platform/peripheral.h>
 #include <prism/graphics/vector.h>
@@ -27,6 +28,7 @@ static struct
   int32_t scroll_offset;
   int32_t held_width;
   button_id_t held_button;
+  uint8_t hold_sound_step;
 } state = {
     .scroll_offset = APP_SCROLL_MARGIN,
 };
@@ -58,6 +60,7 @@ static void change_active(int8_t delta)
       APP_SCROLL_MARGIN - (APP_SIZE + APP_MARGIN) * 2 * scroll_idx;
   anim_to(&state.scroll_offset, scroll_offset, 150, ANIM_EASE_INOUT_QUAD, NULL,
           NULL);
+  system_sound_navigation();
 }
 
 static inline float ease_out_cubic(float t)
@@ -66,17 +69,48 @@ static inline float ease_out_cubic(float t)
   return 1.0f - inv * inv * inv;
 }
 
+static void draw_header(u8g2_t *u8g2)
+{
+  u8g2_SetDrawColor(u8g2, 1);
+  u8g2_SetFont(u8g2, u8g2_font_5x7_tr);
+  power_indicator_draw(u8g2, DISP_WIDTH, 0,
+                       platform_peripheral_get_power_state());
+  u8g2_DrawStr(u8g2, 0, 6, "prism");
+}
+
+static void draw_empty(u8g2_t *u8g2)
+{
+  static const char message[] = "no cartridges installed";
+  static const char website[] = "prism.preyneyv.dev";
+
+  u8g2_SetDrawColor(u8g2, 1);
+  u8g2_SetFont(u8g2, u8g2_font_5x7_tr);
+  u8g2_DrawStr(u8g2, (DISP_WIDTH - u8g2_GetStrWidth(u8g2, message)) / 2,
+               31, message);
+  u8g2_DrawStr(u8g2, (DISP_WIDTH - u8g2_GetStrWidth(u8g2, website)) / 2,
+               43, website);
+}
+
 static void enter()
 {
   state.ignore_release = false;
   state.held_width = 0;
+  state.hold_sound_step = 0;
 }
 
 static void frame()
 {
   uint8_t count = app_count();
+  u8g2_t *u8g2 = platform_display_get_u8g2();
   if (count == 0)
+  {
+    state.active = 0;
+    state.held_width = 0;
+    state.hold_sound_step = 0;
+    draw_empty(u8g2);
+    draw_header(u8g2);
     return;
+  }
   if (state.active < 0 || state.active >= count)
   {
     state.active = 0;
@@ -88,21 +122,32 @@ static void frame()
   {
     float held = engine_button_held_ratio(button_id);
     state.ignore_release = held > 0.f;
-    if (held >= 1.f)
-    {
-      prism_cartridge_launch(
-          prism_registry_visible_get(state.active)->cartridge);
-    }
     if (held > 0)
     {
+      uint8_t sound_step = (uint8_t)(held * 5.f) + 1u;
+      if (sound_step > 5u)
+        sound_step = 5u;
+      if (sound_step != state.hold_sound_step)
+      {
+        state.hold_sound_step = sound_step;
+        system_sound_hold(sound_step);
+      }
       anim_cancel(&state.held_width, false);
       state.held_width = APP_SIZE * ease_out_cubic(held);
       state.held_button = button_id;
+    }
+    if (held >= 1.f &&
+        prism_cartridge_launch(
+            prism_registry_visible_get(state.active)->cartridge))
+    {
+      state.hold_sound_step = 0;
+      return;
     }
   }
 
   if (BUTTON_KEYUP(BUTTON_LEFT))
   {
+    state.hold_sound_step = 0;
     anim_to(&state.held_width, 0, 150, ANIM_EASE_OUT_CUBIC, NULL, NULL);
     if (!state.ignore_release)
       change_active(-1);
@@ -110,12 +155,11 @@ static void frame()
 
   if (BUTTON_KEYUP(BUTTON_RIGHT))
   {
+    state.hold_sound_step = 0;
     anim_to(&state.held_width, 0, 150, ANIM_EASE_OUT_CUBIC, NULL, NULL);
     if (!state.ignore_release)
       change_active(1);
   }
-
-  u8g2_t *u8g2 = platform_display_get_u8g2();
 
   u8g2_SetDrawColor(u8g2, 1);
   for (int i = 0; i < count; i++)
@@ -159,19 +203,14 @@ static void frame()
   u8g2_DrawStr(u8g2, (DISP_WIDTH - width) / 2, DISP_HEIGHT - 5,
                active->name);
 
-  u8g2_SetDrawColor(u8g2, 1);
-  u8g2_SetFont(u8g2, u8g2_font_5x7_tr);
-
-  platform_power_state_t power_state = platform_peripheral_get_power_state();
-  power_indicator_draw(u8g2, DISP_WIDTH, 0, power_state);
-
-  u8g2_DrawStr(u8g2, 0, 6, "prism");
+  draw_header(u8g2);
 }
 
 static void pause()
 {
   anim_cancel(&state.held_width, false);
   state.held_width = 0;
+  state.hold_sound_step = 0;
 }
 
 app_t app_launcher = {

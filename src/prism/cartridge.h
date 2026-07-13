@@ -12,6 +12,8 @@
 #define PRISM_CARTRIDGE_MAGIC 0x50524354u /* PRCT */
 #define PRISM_API_ABI_V1 1u
 #define PRISM_API_ABI_VERSION PRISM_API_ABI_V1
+#define PRISM_API_V1_FUNCTION_COUNT 23u
+#define PRISM_API_V1_STRUCT_SIZE 100u
 #define PRISM_CARTRIDGE_ABI_V1 1u
 #define PRISM_CARTRIDGE_ABI_VERSION PRISM_CARTRIDGE_ABI_V1
 
@@ -22,6 +24,13 @@ enum
   PRISM_BUTTON_LEFT = 1,
   PRISM_BUTTON_RIGHT = 2,
   PRISM_BUTTON_MENU = 3,
+};
+
+typedef uint8_t prism_ui_sound_t;
+enum
+{
+  PRISM_UI_SOUND_NAVIGATE = 0,
+  PRISM_UI_SOUND_HOLD_TICK = 1,
 };
 
 typedef struct prism_api_v1
@@ -59,6 +68,7 @@ typedef struct prism_api_v1
   bool (*button_keyup)(prism_button_t button);
   uint32_t (*button_keydown_tick)(prism_button_t button);
   uint32_t (*button_keyup_tick)(prism_button_t button);
+  void (*ui_sound)(prism_ui_sound_t sound, uint8_t value);
 } prism_api_v1_t;
 
 typedef struct prism_context
@@ -99,7 +109,7 @@ _Static_assert(sizeof(prism_button_t) == 1,
                "prism_button_t is part of the ABI");
 
 #if UINTPTR_MAX == UINT32_MAX
-_Static_assert(sizeof(prism_api_v1_t) == 96,
+_Static_assert(sizeof(prism_api_v1_t) == PRISM_API_V1_STRUCT_SIZE,
                "prism_api_v1_t layout changed");
 _Static_assert(sizeof(prism_t) == 16, "prism_t layout changed");
 _Static_assert(sizeof(prism_cartridge_t) == 60,
@@ -187,6 +197,12 @@ static inline uint32_t prism_button_keyup_tick(prism_t *prism,
                                                 prism_button_t button)
 {
   return prism->api->button_keyup_tick(button);
+}
+
+static inline void prism_ui_sound(prism_t *prism, prism_ui_sound_t sound,
+                                  uint8_t value)
+{
+  prism->api->ui_sound(sound, value);
 }
 
 static inline float prism_button_hold_ratio(prism_t *prism,

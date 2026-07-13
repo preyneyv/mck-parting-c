@@ -9,6 +9,10 @@
 
 #define AUDIO_SYNTH_OPERATOR_COUNT 4
 #define AUDIO_SYNTH_PATCH_COUNT 32
+/* Cartridge-authored patches occupy 0-15. The OS owns 16-31 so system UI
+ * sounds remain available regardless of the active cartridge. */
+#define AUDIO_SYNTH_CARTRIDGE_PATCH_COUNT 16
+#define AUDIO_SYNTH_SYSTEM_PATCH_FIRST AUDIO_SYNTH_CARTRIDGE_PATCH_COUNT
 
 typedef struct audio_synth_t audio_synth_t;
 

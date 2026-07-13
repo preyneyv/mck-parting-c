@@ -25,6 +25,7 @@
 #include "os/pause_menu.h"
 #include "os/settings.h"
 #include "os/wake_confirmation.h"
+#include "os/system_sound.h"
 #include <prism/runtime.h>
 #include "engine.h"
 
@@ -229,6 +230,7 @@ void engine_init()
 {
   // initialize all subsystems
   audio_synth_init(&g_engine.synth, AUDIO_SAMPLE_RATE, 1000);
+  system_sound_init(&g_engine.synth);
   for (uint8_t i = 0; i < LED_COUNT; i++)
   {
     g_engine.led_colors[i] = (color_t){.hex = 0x000000};
@@ -521,6 +523,7 @@ static uint32_t app_tick_divider(void)
 static inline void engine_do_tick(uint32_t elapsed_us)
 {
   anim_tick_us(elapsed_us); // system animations continue while apps are paused
+  system_sound_tick(g_engine.now);
   if (wake_confirmation_active())
   {
     wake_confirmation_tick();
@@ -615,8 +618,10 @@ static inline void engine_do_frame()
     trace_end(trace);
   }
 
-  // Apply the final OS-owned idle fade after the app and menu have rendered.
-  platform_display_set_contrast(engine_output_brightness_scale());
+  // Apply final OS-owned fades after the app and menu have rendered.
+  uint8_t output_brightness = wake_confirmation_brightness_scale(
+      engine_output_brightness_scale());
+  platform_display_set_contrast(output_brightness);
   // write display
   watchdog_trace_t display_trace =
       trace_begin(ENGINE_TRACE_DISPLAY, g_engine.app);
@@ -626,7 +631,7 @@ static inline void engine_do_frame()
   color_t output_leds[LED_COUNT];
   for (uint8_t i = 0; i < LED_COUNT; ++i)
     output_leds[i] = engine_led_color(i);
-  platform_leds_set_brightness(engine_output_brightness_scale());
+  platform_leds_set_brightness(output_brightness);
   platform_leds_show(output_leds, LED_COUNT);
   wake_confirmation_release_tick();
 

@@ -100,6 +100,7 @@ set(SHARED_SOURCES
     src/shared/os/midi_mode.c
     src/shared/os/pause_menu.c
     src/shared/os/power_indicator.c
+    src/shared/os/system_sound.c
     src/shared/os/wake_confirmation.c
 )
 add_library(shared STATIC ${SHARED_SOURCES})
@@ -151,6 +152,7 @@ if(PICO_PLATFORM STREQUAL "host")
             "-DCMAKE_SYSTEM_NAME=Generic"
             "-DCMAKE_TRY_COMPILE_TARGET_TYPE=STATIC_LIBRARY"
         BUILD_COMMAND ${CMAKE_COMMAND} --build <BINARY_DIR>
+        BUILD_ALWAYS 1
         INSTALL_COMMAND ""
         BUILD_BYPRODUCTS
             "${PRISM_HOST_BONGOCAT}"
@@ -281,6 +283,15 @@ if(PICO_PLATFORM STREQUAL "host")
         prism_enable_warnings(prism_host_cartridge_abi_tests)
         add_test(NAME prism_host_cartridge_abi
                  COMMAND prism_host_cartridge_abi_tests)
+
+        add_executable(prism_ui_feedback_tests
+            tests/ui_feedback_test.c
+        )
+        target_link_libraries(prism_ui_feedback_tests PRIVATE
+            prism_cartridge_headers
+        )
+        prism_enable_warnings(prism_ui_feedback_tests)
+        add_test(NAME prism_ui_feedback COMMAND prism_ui_feedback_tests)
 
         add_test(NAME prism_factory_uf2
             COMMAND ${Python3_EXECUTABLE}

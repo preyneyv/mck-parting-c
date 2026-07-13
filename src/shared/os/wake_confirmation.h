@@ -8,6 +8,7 @@
 
 bool wake_confirmation_active(void);
 bool wake_confirmation_expired(void);
+uint8_t wake_confirmation_brightness_scale(uint8_t configured);
 void wake_confirmation_start(platform_input_mask_t button);
 void wake_confirmation_cancel(void);
 void wake_confirmation_tick(void);

@@ -9,18 +9,28 @@
 #include <shared/config.h>
 #include <shared/engine.h>
 #include <shared/os/settings.h>
+#include <shared/os/system_sound.h>
 
 #include "engine_internal.h"
+
+enum
+{
+  WAKE_TIMEOUT_MS = 10000,
+  WAKE_HINT_DELAY_MS = 3000,
+};
 
 static struct
 {
   bool active;
   bool completing;
+  bool hint_visible;
   platform_input_mask_t button;
   uint8_t count;
   platform_time_t idle_deadline;
+  platform_time_t hint_deadline;
   platform_time_t led_flash_started;
   volatile int32_t circle_radius[3];
+  volatile int32_t hint_offset_y;
   volatile int32_t container_y;
 } wake;
 
@@ -84,28 +94,60 @@ bool wake_confirmation_expired(void)
   return wake.active && platform_time_reached(wake.idle_deadline);
 }
 
+uint8_t wake_confirmation_brightness_scale(uint8_t configured)
+{
+  if (!wake.active || wake.completing)
+    return configured;
+
+  int64_t remaining_us =
+      platform_time_diff_us(platform_now_us(), wake.idle_deadline);
+  const int64_t fade_us = (int64_t)AUTO_SLEEP_FADE_MS * 1000;
+  if (remaining_us >= fade_us)
+    return configured;
+  if (remaining_us <= 0)
+    return 0;
+  return (uint8_t)(((uint32_t)configured * (uint32_t)remaining_us) /
+                   (uint32_t)fade_us);
+}
+
+static void show_hint(void)
+{
+  if (wake.hint_visible)
+    return;
+  wake.hint_visible = true;
+  wake.hint_offset_y = 5;
+  anim_sys_to(&wake.hint_offset_y, 0, 220, ANIM_EASE_OUT_CUBIC, NULL, NULL);
+}
+
 void wake_confirmation_start(platform_input_mask_t button)
 {
+  platform_time_t now = platform_now_us();
   wake.active = true;
   wake.completing = false;
+  wake.hint_visible = false;
   wake.button = button;
   wake.count = 1;
+  wake.hint_offset_y = 0;
   wake.container_y = 0;
-  wake.idle_deadline = platform_time_add_ms(platform_now_us(), 5000);
-  wake.led_flash_started = platform_now_us();
+  wake.idle_deadline = platform_time_add_ms(now, WAKE_TIMEOUT_MS);
+  wake.hint_deadline = platform_time_add_ms(now, WAKE_HINT_DELAY_MS);
+  wake.led_flash_started = now;
   for (uint8_t i = 0; i < 3; ++i)
   {
     anim_cancel(&wake.circle_radius[i], false);
     wake.circle_radius[i] = 5;
   }
+  anim_cancel(&wake.hint_offset_y, false);
   anim_cancel(&wake.container_y, false);
   pop_circle(0);
+  system_sound_wake(1);
 }
 
 void wake_confirmation_cancel(void)
 {
   for (uint8_t i = 0; i < 3; ++i)
     anim_cancel(&wake.circle_radius[i], false);
+  anim_cancel(&wake.hint_offset_y, false);
   anim_cancel(&wake.container_y, false);
   wake.active = false;
   wake.completing = false;
@@ -126,6 +168,9 @@ void wake_confirmation_tick(void)
 {
   if (wake.completing)
     return;
+  if (!wake.hint_visible && platform_time_reached(wake.hint_deadline))
+    show_hint();
+
   platform_input_mask_t pressed = pressed_button();
   if (pressed == 0)
     return;
@@ -134,6 +179,7 @@ void wake_confirmation_tick(void)
     ++wake.count;
   else
   {
+    show_hint();
     wake.button = pressed;
     wake.count = 1;
     for (uint8_t i = 0; i < 3; ++i)
@@ -142,8 +188,9 @@ void wake_confirmation_tick(void)
       wake.circle_radius[i] = 5;
     }
   }
-  wake.idle_deadline = platform_time_add_ms(platform_now_us(), 5000);
-  wake.led_flash_started = platform_now_us();
+  platform_time_t now = platform_now_us();
+  wake.idle_deadline = platform_time_add_ms(now, WAKE_TIMEOUT_MS);
+  wake.led_flash_started = now;
 
   if (wake.count >= 3)
   {
@@ -155,6 +202,7 @@ void wake_confirmation_tick(void)
   {
     pop_circle(wake.count - 1);
   }
+  system_sound_wake(wake.count);
 }
 
 void wake_confirmation_frame(const uint8_t *app_framebuffer)
@@ -185,6 +233,17 @@ void wake_confirmation_frame(const uint8_t *app_framebuffer)
     if (i < wake.count)
       u8g2_DrawStr(u8g2, x - u8g2_GetStrWidth(u8g2, button) / 2, y + 4,
                    button);
+  }
+
+  if (wake.hint_visible)
+  {
+    const char *hint = "press the same button 3 times";
+    u8g2_SetFont(u8g2, u8g2_font_4x6_tf);
+    int16_t hint_y = 61 + wake.container_y + wake.hint_offset_y;
+    if (hint_y > 0 && hint_y < DISP_HEIGHT + 6)
+      u8g2_DrawStr(u8g2,
+                   (DISP_WIDTH - u8g2_GetStrWidth(u8g2, hint)) / 2,
+                   hint_y, hint);
   }
   u8g2_DrawHLine(u8g2, 0, DISP_HEIGHT + wake.container_y, DISP_WIDTH);
 

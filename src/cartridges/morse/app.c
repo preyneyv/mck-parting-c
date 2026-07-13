@@ -8,6 +8,7 @@
 #include "sprites/icon.h"
 
 static prism_t *app_prism;
+static prism_ui_hold_feedback_t results_hold_feedback;
 
 static void set_both_leds(color_t color)
 {
@@ -641,12 +642,19 @@ static void frame_results()
   elm_qrcode(&root, vec2(128 - 5, 5), ELM_ALIGN_TOP_RIGHT, state.qr_code, 2, 1);
 
   u8g2_SetFont(u8g2, u8g2_font_5x7_tr);
+  float left_hold =
+      prism_button_hold_ratio(app_prism, PRISM_BUTTON_LEFT);
+  float right_hold =
+      prism_button_hold_ratio(app_prism, PRISM_BUTTON_RIGHT);
+  prism_ui_hold_feedback_update(
+      app_prism, &results_hold_feedback,
+      left_hold > right_hold ? left_hold : right_hold);
   bool pressed;
   elm_btn(&root, vec2(64, 64), "NEW GAME?", ELM_ALIGN_BOTTOM_CENTER,
-          prism_button_hold_ratio(app_prism, PRISM_BUTTON_LEFT),
-          prism_button_hold_ratio(app_prism, PRISM_BUTTON_RIGHT), &pressed);
+          left_hold, right_hold, &pressed);
   if (pressed)
   {
+    prism_ui_hold_feedback_reset(&results_hold_feedback);
     prism_buttons_reset(app_prism);
     _start_game();
   }

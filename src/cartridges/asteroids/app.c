@@ -11,6 +11,7 @@
 #include "sprites/icon.h"
 
 static prism_t *app_prism;
+static prism_ui_hold_feedback_t results_hold_feedback;
 
 // --- Tunables ---
 static const float SHIP_RADIUS = 4.0f;
@@ -1295,12 +1296,19 @@ static void draw_results(u8g2_t *u8g2)
     format_distance(buf, sizeof(buf), state.distance);
     elm_score(&root, vec2(36, 20), "DIST", buf);
 
+    float left_hold =
+        prism_button_hold_ratio(app_prism, PRISM_BUTTON_LEFT);
+    float right_hold =
+        prism_button_hold_ratio(app_prism, PRISM_BUTTON_RIGHT);
+    prism_ui_hold_feedback_update(
+        app_prism, &results_hold_feedback,
+        left_hold > right_hold ? left_hold : right_hold);
     bool pressed = false;
     elm_btn(&root, vec2(64, 64), "PLAY AGAIN?", ELM_ALIGN_BOTTOM_CENTER,
-            prism_button_hold_ratio(app_prism, PRISM_BUTTON_LEFT),
-            prism_button_hold_ratio(app_prism, PRISM_BUTTON_RIGHT), &pressed);
+            left_hold, right_hold, &pressed);
     if (pressed)
     {
+        prism_ui_hold_feedback_reset(&results_hold_feedback);
         reset_state();
         play_bgm_song(true);
     }

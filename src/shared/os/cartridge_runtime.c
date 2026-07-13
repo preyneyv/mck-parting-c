@@ -13,6 +13,7 @@
 #include <shared/anim.h>
 #include <shared/engine.h>
 #include <shared/leaderboard/leaderboard.h>
+#include <shared/os/system_sound.h>
 
 static const prism_cartridge_t *current;
 static const prism_cartridge_t *pending;
@@ -76,6 +77,20 @@ static void api_persist(void)
   persistent_dirty_at = platform_now_us();
 }
 
+static void api_ui_sound(prism_ui_sound_t sound, uint8_t value)
+{
+  switch (sound)
+  {
+  case PRISM_UI_SOUND_NAVIGATE:
+    system_sound_navigation();
+    break;
+  case PRISM_UI_SOUND_HOLD_TICK:
+    system_sound_hold(value);
+    break;
+  default: break;
+  }
+}
+
 static const prism_api_v1_t api_v1 = {
     .abi_version = PRISM_API_ABI_VERSION,
     .struct_size = sizeof(prism_api_v1_t),
@@ -101,6 +116,7 @@ static const prism_api_v1_t api_v1 = {
     .button_keyup = api_button_keyup,
     .button_keydown_tick = api_button_keydown_tick,
     .button_keyup_tick = api_button_keyup_tick,
+    .ui_sound = api_ui_sound,
 };
 
 static void adapter_enter(void)

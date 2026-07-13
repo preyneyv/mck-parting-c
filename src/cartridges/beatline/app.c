@@ -37,9 +37,12 @@ static struct
     int32_t scroll_offset;
     int32_t fill_w;
     prism_button_t fill_btn;
+    prism_ui_hold_feedback_t hold_feedback;
     bool was_pressed;
     bool ignore_release;
 } sel;
+
+static prism_ui_hold_feedback_t results_hold_feedback;
 
 static inline int32_t select_card_x(uint8_t idx)
 {
@@ -107,9 +110,12 @@ static void select_tick(void)
 {
     // handle hold-to-select
     prism_button_t btn = prism_button_first_pressed(beatline_prism);
+    float held = 0.f;
     if (btn != PRISM_BUTTON_NONE)
     {
-        float held = prism_button_hold_ratio(beatline_prism, btn);
+        held = prism_button_hold_ratio(beatline_prism, btn);
+        prism_ui_hold_feedback_update(beatline_prism, &sel.hold_feedback,
+                                      held);
         sel.ignore_release = held > 0.f;
         if (held > 0.f)
         {
@@ -128,6 +134,10 @@ static void select_tick(void)
             return;
         }
     }
+    else
+    {
+        prism_ui_hold_feedback_update(beatline_prism, &sel.hold_feedback, 0.f);
+    }
 
     // handle scroll on release
     if (prism_button_keyup(beatline_prism, PRISM_BUTTON_LEFT))
@@ -140,6 +150,7 @@ static void select_tick(void)
             if (state.selected_track < 0)
                 state.selected_track = BEATLINE_TRACK_COUNT - 1;
             select_retarget(false);
+            prism_ui_navigate(beatline_prism);
             prism_led_set(beatline_prism, PRISM_LED_LEFT, rgba(30, 30, 30, 255));
         }
     }
@@ -153,6 +164,7 @@ static void select_tick(void)
             if (state.selected_track >= BEATLINE_TRACK_COUNT)
                 state.selected_track = 0;
             select_retarget(false);
+            prism_ui_navigate(beatline_prism);
             prism_led_set(beatline_prism, PRISM_LED_RIGHT, rgba(30, 30, 30, 255));
         }
     }
@@ -691,12 +703,19 @@ static void results_frame(void)
         elm_str(&root, vec2(106 - error_w / 2, 24), error);
     }
 
+    float left_hold =
+        prism_button_hold_ratio(beatline_prism, PRISM_BUTTON_LEFT);
+    float right_hold =
+        prism_button_hold_ratio(beatline_prism, PRISM_BUTTON_RIGHT);
+    prism_ui_hold_feedback_update(
+        beatline_prism, &results_hold_feedback,
+        left_hold > right_hold ? left_hold : right_hold);
     bool pressed = false;
     elm_btn(&root, vec2(128, 64), "MENU", ELM_ALIGN_BOTTOM_RIGHT,
-            prism_button_hold_ratio(beatline_prism, PRISM_BUTTON_LEFT),
-            prism_button_hold_ratio(beatline_prism, PRISM_BUTTON_RIGHT), &pressed);
+            left_hold, right_hold, &pressed);
     if (pressed)
     {
+        prism_ui_hold_feedback_reset(&results_hold_feedback);
         // Do not let the press that dismissed results become a hold-to-play.
         prism_buttons_reset(beatline_prism);
         beatline_game_init(&state);
