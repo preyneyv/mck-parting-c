@@ -28,7 +28,7 @@ void management_protocol_device_info(
       .capabilities = PRISM_CAP_MIRROR | PRISM_CAP_REMOTE_INPUT |
                       PRISM_CAP_LOGS | PRISM_CAP_SETTINGS |
                       PRISM_CAP_CARTRIDGES | PRISM_CAP_COMPACTION |
-                      PRISM_CAP_APP_LAUNCH,
+                      PRISM_CAP_APP_LAUNCH | PRISM_CAP_REBOOT,
   };
   platform_device_id(info.serial);
   management_transport_queue(request->type, PRISM_MGMT_FLAG_RESPONSE,
@@ -36,16 +36,20 @@ void management_protocol_device_info(
 }
 
 void management_protocol_cartridges(
-    const prism_management_header_t *request, uint16_t start_index)
+    const prism_management_header_t *request, uint16_t start_index,
+    uint16_t flags)
 {
   static uint8_t payload[PRISM_MANAGEMENT_MAX_PAYLOAD];
+  bool include_hidden =
+      (flags & PRISM_CARTRIDGE_LIST_INCLUDE_HIDDEN) != 0;
   uint16_t bundled_count = 0;
   for (size_t i = 0; i < prism_registry_count(); ++i)
   {
     const prism_registry_entry_t *registry = prism_registry_get(i);
     if (registry != NULL &&
         (registry->policy & PRISM_REGISTRY_POLICY_BUNDLED) != 0 &&
-        (registry->policy & PRISM_REGISTRY_POLICY_HIDDEN) == 0)
+        (include_hidden ||
+         (registry->policy & PRISM_REGISTRY_POLICY_HIDDEN) == 0))
       ++bundled_count;
   }
   size_t installed_count = cartridge_storage_count();
@@ -64,7 +68,8 @@ void management_protocol_cartridges(
     const prism_registry_entry_t *registry = prism_registry_get(i);
     if (registry == NULL ||
         (registry->policy & PRISM_REGISTRY_POLICY_BUNDLED) == 0 ||
-        (registry->policy & PRISM_REGISTRY_POLICY_HIDDEN) != 0)
+        (!include_hidden &&
+         (registry->policy & PRISM_REGISTRY_POLICY_HIDDEN) != 0))
       continue;
     if (logical_index++ < start_index)
       continue;

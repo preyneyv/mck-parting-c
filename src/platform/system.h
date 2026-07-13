@@ -9,3 +9,4 @@ void platform_watchdog_trace(uint32_t stage, uint32_t detail);
 uint32_t platform_watchdog_trace_stage(void);
 uint32_t platform_watchdog_trace_detail(void);
 void platform_system_reset(void);
+void platform_system_bootsel(void);

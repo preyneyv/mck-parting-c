@@ -105,18 +105,33 @@ void management_commands_handle(const prism_management_header_t *request,
             sizeof(prism_management_cartridge_list_request_t))
       management_transport_result(request, PRISM_MGMT_ERROR_BAD_MESSAGE);
     else
+    {
+      const prism_management_cartridge_list_request_t *list_request =
+          request->payload_len == 0 ? NULL : (const void *)payload;
       management_protocol_cartridges(
-          request, request->payload_len == 0
-                       ? 0
-                       : ((const prism_management_cartridge_list_request_t *)
-                              payload)
-                             ->start_index);
+          request, list_request == NULL ? 0 : list_request->start_index,
+          list_request == NULL ? 0 : list_request->flags);
+    }
     break;
   case PRISM_MGMT_CARTRIDGE_ICON:
     if (request->payload_len != PRISM_APP_KEY_BYTES)
       management_transport_result(request, PRISM_MGMT_ERROR_BAD_MESSAGE);
     else
       management_protocol_cartridge_icon(request, payload);
+    break;
+  case PRISM_MGMT_REBOOT:
+    if (request->payload_len != sizeof(prism_management_reboot_t) ||
+        ((const prism_management_reboot_t *)payload)->mode >
+            PRISM_REBOOT_BOOTSEL)
+      management_transport_result(request, PRISM_MGMT_ERROR_BAD_MESSAGE);
+    else
+    {
+      const prism_management_reboot_t *reboot = (const void *)payload;
+      management_transport_result(request, PRISM_MGMT_OK);
+      session->reboot_bootsel = reboot->mode == PRISM_REBOOT_BOOTSEL;
+      session->reboot_at = platform_time_add_ms(platform_now_us(), 100);
+      session->reboot_deferred = true;
+    }
     break;
   case PRISM_MGMT_STORAGE_INFO:
   {

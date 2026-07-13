@@ -1,5 +1,6 @@
 #include <hardware/watchdog.h>
 #include <hardware/structs/watchdog.h>
+#include <pico/bootrom.h>
 
 #include <platform/system.h>
 
@@ -23,3 +24,5 @@ void platform_system_reset(void) {
   while (1) {
   }
 }
+
+void platform_system_bootsel(void) { reset_usb_boot(0, 0); }

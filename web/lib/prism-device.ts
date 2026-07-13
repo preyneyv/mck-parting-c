@@ -8,14 +8,17 @@ const ERROR = 4;
 const ICON_WIDTH = 36;
 const ICON_HEIGHT = 36;
 const ICON_BYTES = Math.ceil(ICON_WIDTH / 8) * ICON_HEIGHT;
+const CARTRIDGE_LIST_INCLUDE_HIDDEN = 1;
 
 export const Message = {
-  hello: 0x01, deviceInfo: 0x02, storageInfo: 0x03, cartridges: 0x04, cartridgeIcon: 0x05,
+  hello: 0x01, deviceInfo: 0x02, storageInfo: 0x03, cartridges: 0x04, cartridgeIcon: 0x05, reboot: 0x06,
   installBegin: 0x10, installChunk: 0x11, installCommit: 0x12, delete: 0x13, compact: 0x14, operationProgress: 0x15, launch: 0x16,
   settingsGet: 0x20, settingsPreview: 0x21,
   mirrorSubscribe: 0x30, mirrorUnsubscribe: 0x31, mirrorFrame: 0x32,
   remoteInput: 0x33, heartbeat: 0x34, log: 0x35,
 } as const;
+
+export const Capability = { reboot: 1 << 7 } as const;
 
 export type DeviceInfo = { serial: string; protocolVersion: number; firmware: string; flashBytes: number; blockBytes: number; capabilities: number };
 export type CartridgeMetadata = { id: string; name: string; version: number; appKey: Uint8Array; icon: Uint8Array };
@@ -258,13 +261,14 @@ export class PrismDevice {
     return { serial: hex(data.subarray(0, 8)), protocolVersion: value.getUint16(8, true), firmware: `${value.getUint16(10, true)}.${value.getUint16(12, true)}.${value.getUint16(14, true)}`, flashBytes: value.getUint32(16, true), blockBytes: value.getUint32(20, true), capabilities: value.getUint32(24, true) };
   }
 
-  async cartridges(): Promise<Cartridge[]> {
+  async cartridges(includeHidden = false): Promise<Cartridge[]> {
     const result: Cartridge[] = [];
     let startIndex = 0;
     let totalCount = 0;
     do {
       const request = new Uint8Array(4);
       view(request).setUint16(0, startIndex, true);
+      view(request).setUint16(2, includeHidden ? CARTRIDGE_LIST_INCLUDE_HIDDEN : 0, true);
       const data = await this.request(Message.cartridges, request);
       if (data.length < 8) throw new Error("Prism returned an invalid cartridge list.");
       const list = view(data), count = list.getUint16(4, true);
@@ -308,6 +312,7 @@ export class PrismDevice {
   async unsubscribeMirror() { await this.request(Message.mirrorUnsubscribe); }
   async remoteInput(buttons: number) { await this.request(Message.remoteInput, Uint8Array.of(buttons, 0, 0, 0)); }
   async launchCartridge(appKey: Uint8Array) { await this.request(Message.launch, appKey); }
+  async restart(bootsel = false) { await this.request(Message.reboot, Uint8Array.of(bootsel ? 1 : 0, 0, 0, 0)); }
   async deleteCartridge(appKey: Uint8Array) { await this.request(Message.delete, appKey); }
   async compact(onProgress: (ratio: number) => void) {
     const previous = this.onOperationProgress;

@@ -28,6 +28,7 @@ typedef enum
   PRISM_MGMT_STORAGE_INFO = 0x03,
   PRISM_MGMT_CARTRIDGE_LIST = 0x04,
   PRISM_MGMT_CARTRIDGE_ICON = 0x05,
+  PRISM_MGMT_REBOOT = 0x06,
 
   PRISM_MGMT_INSTALL_BEGIN = 0x10,
   PRISM_MGMT_INSTALL_CHUNK = 0x11,
@@ -122,6 +123,7 @@ enum
   PRISM_CAP_CARTRIDGES = 1u << 4,
   PRISM_CAP_COMPACTION = 1u << 5,
   PRISM_CAP_APP_LAUNCH = 1u << 6,
+  PRISM_CAP_REBOOT = 1u << 7,
 };
 #define PRISM_FLASH_SCRATCH_POOL_MAX 7u
 
@@ -150,8 +152,13 @@ typedef struct PRISM_PACKED
 typedef struct PRISM_PACKED
 {
   uint16_t start_index;
-  uint16_t reserved;
+  uint16_t flags;
 } prism_management_cartridge_list_request_t;
+
+enum
+{
+  PRISM_CARTRIDGE_LIST_INCLUDE_HIDDEN = 1u << 0,
+};
 
 typedef enum
 {
@@ -201,6 +208,18 @@ typedef struct PRISM_PACKED
   uint8_t buttons;
   uint8_t reserved[3];
 } prism_management_remote_input_t;
+
+typedef enum
+{
+  PRISM_REBOOT_NORMAL = 0,
+  PRISM_REBOOT_BOOTSEL = 1,
+} prism_management_reboot_mode_t;
+
+typedef struct PRISM_PACKED
+{
+  uint8_t mode;
+  uint8_t reserved[3];
+} prism_management_reboot_t;
 
 typedef struct PRISM_PACKED
 {
@@ -252,9 +271,13 @@ _Static_assert(sizeof(prism_management_cartridge_list_t) == 8,
                "cartridge lists are part of the wire format");
 _Static_assert(sizeof(prism_management_cartridge_entry_t) == 40,
                "cartridge entries are part of the wire format");
+_Static_assert(sizeof(prism_management_cartridge_list_request_t) == 4,
+               "cartridge list requests are part of the wire format");
 _Static_assert(sizeof(prism_led_settings_t) == 56,
                "LED settings are part of the wire format");
 _Static_assert(sizeof(prism_management_settings_t) == 116,
                "settings are part of the wire format");
 _Static_assert(sizeof(prism_management_mirror_frame_t) == 1036,
                "mirror frames are consumed directly by the browser");
+_Static_assert(sizeof(prism_management_reboot_t) == 4,
+               "reboot requests are part of the wire format");

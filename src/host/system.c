@@ -21,3 +21,4 @@ uint32_t platform_watchdog_trace_stage(void) { return watchdog_stage; }
 uint32_t platform_watchdog_trace_detail(void) { return watchdog_detail; }
 
 void platform_system_reset(void) { exit(0); }
+void platform_system_bootsel(void) { exit(0); }

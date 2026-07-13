@@ -67,6 +67,21 @@ void management_init(void)
 
 void management_task(void)
 {
+  if (session.reboot_deferred &&
+      platform_time_reached(session.reboot_at) &&
+      management_transport_empty())
+  {
+    bool bootsel = session.reboot_bootsel;
+    session.reboot_deferred = false;
+    prism_settings_flush();
+    prism_cartridge_persistence_flush();
+    if (bootsel)
+      platform_system_bootsel();
+    else
+      platform_system_reset();
+    return;
+  }
+
   if (!tud_mounted())
   {
     if (session.active)

@@ -1,20 +1,32 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Cable, Loader2, Moon, RefreshCw, Trash2, Unplug, Upload } from "lucide-react";
+import { Cable, ChevronDown, Loader2, Moon, RefreshCw, RotateCcw, Trash2, Unplug, Upload, Usb } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Slider } from "@/components/ui/slider";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { PrismScreen, type PrismScreenHandle } from "@/components/prism-screen";
-import { PrismDevice, type Cartridge, type CartridgeMetadata, type DeviceInfo, type LedEffect, type LedSettings, type Settings, type StorageInfo } from "@/lib/prism-device";
+import { Capability, PrismDevice, type Cartridge, type CartridgeMetadata, type DeviceInfo, type LedEffect, type LedSettings, type Settings, type StorageInfo } from "@/lib/prism-device";
 
 const defaultSettings: Settings = { volume: 4, brightness: 8, linked: true, leds: [{ effect: 3, speedMs: 8000, phaseOffset: 0, colors: ["#1860ff"] }, { effect: 3, speedMs: 8000, phaseOffset: 14, colors: ["#1860ff"] }] };
 const effects = [{ value: "0", label: "static" }, { value: "1", label: "breathing" }, { value: "2", label: "crossfade" }, { value: "3", label: "rainbow" }];
+const developerModeKey = "prism:developer-mode:v1";
+
+function loadDeveloperMode() {
+  try { return window.localStorage.getItem(developerModeKey) === "1"; }
+  catch { return false; }
+}
+
+function saveDeveloperMode(enabled: boolean) {
+  try { window.localStorage.setItem(developerModeKey, enabled ? "1" : "0"); }
+  catch { }
+}
 
 export function ManagementWorkspace() {
   const deviceRef = useRef<PrismDevice | undefined>(undefined);
@@ -37,13 +49,20 @@ export function ManagementWorkspace() {
   const [installProgress, setInstallProgress] = useState<number>();
   const [installingCartridge, setInstallingCartridge] = useState<CartridgeMetadata>();
   const [compactProgress, setCompactProgress] = useState<number>();
+  const [developerMode, setDeveloperMode] = useState(loadDeveloperMode);
 
-  async function refresh(device = deviceRef.current) {
+  async function refresh(device = deviceRef.current, includeHidden = developerMode) {
     if (!device) return;
-    const [apps, deviceSettings, deviceStorage] = await Promise.allSettled([device.cartridges(), device.settings(), device.storage()]);
+    const [apps, deviceSettings, deviceStorage] = await Promise.allSettled([device.cartridges(includeHidden), device.settings(), device.storage()]);
     if (apps.status === "fulfilled") setCartridges(apps.value);
     if (deviceSettings.status === "fulfilled") { suppressSettingsPreview.current = true; setSettings(deviceSettings.value); setSettingsReady(true); }
     if (deviceStorage.status === "fulfilled") setStorage(deviceStorage.value);
+  }
+
+  async function refreshCartridges(device = deviceRef.current, includeHidden = developerMode) {
+    if (!device) return;
+    try { setCartridges(await device.cartridges(includeHidden)); }
+    catch (caught) { setError(caught instanceof Error ? caught.message : "could not refresh cartridges."); }
   }
 
   function showLeds(colors: [string, string]) {
@@ -107,6 +126,14 @@ export function ManagementWorkspace() {
     finally { setBusy(false); }
   }
 
+  async function restart(bootsel: boolean) {
+    if (!deviceRef.current) return;
+    setBusy(true); setError(""); setStatus(bootsel ? "entering bootsel" : "restarting");
+    try { await deviceRef.current.restart(bootsel); }
+    catch (caught) { setError(caught instanceof Error ? caught.message : "restart failed."); }
+    finally { setBusy(false); }
+  }
+
   async function compact() {
     if (!deviceRef.current) return;
     setBusy(true); setError(""); setCompactProgress(0);
@@ -118,6 +145,7 @@ export function ManagementWorkspace() {
   function changeLed(index: 0 | 1, next: LedSettings) { setSettings(current => { const leds = [...current.leds] as [LedSettings, LedSettings]; if (current.linked) { leds[0] = { ...next, phaseOffset: 0 }; leds[1] = { ...next, phaseOffset: current.leds[1].phaseOffset }; } else leds[index] = next; return { ...current, leds }; }); }
   function setLinked(linked: boolean) { setSettings(current => linked ? { ...current, linked, leds: [{ ...current.leds[0], phaseOffset: 0 }, { ...current.leds[0], phaseOffset: current.leds[1].phaseOffset }] } : { ...current, linked }); }
   function changeRainbowOffset(phaseOffset: number) { setSettings(current => ({ ...current, leds: [current.leds[0], { ...current.leds[1], phaseOffset }] })); }
+  function changeDeveloperMode(enabled: boolean) { setDeveloperMode(enabled); saveDeveloperMode(enabled); void refreshCartridges(deviceRef.current, enabled); }
 
   function remote(bit: number, pressed: boolean) {
     if (pressed) remoteMask.current |= bit; else remoteMask.current &= ~bit;
@@ -133,17 +161,27 @@ export function ManagementWorkspace() {
     (storage.deadBlocks > 0 || storage.largestFreeRun < storage.erasedBlocks);
 
   return <div className="space-y-6">
-    <Card><CardHeader className="flex-row items-start justify-between gap-4"><div className="space-y-1.5"><CardTitle>prism</CardTitle><CardDescription>{info ? `${info.serial} · firmware ${info.firmware}` : "connect over USB to get started."}</CardDescription></div>{info ? <Button variant="outline" onClick={disconnect}><Unplug className="size-4" />disconnect</Button> : <Button onClick={connect} disabled={busy}>{busy ? <Loader2 className="size-4 animate-spin" /> : <Cable className="size-4" />}connect</Button>}</CardHeader>
+    <Card><CardHeader className="flex-row flex-wrap items-start justify-between gap-4"><div className="space-y-1.5"><CardTitle>prism</CardTitle><CardDescription>{info ? `${info.serial} · firmware ${info.firmware}` : "connect over USB to get started."}</CardDescription></div><div className="flex flex-wrap items-center justify-end gap-3"><div className="flex items-center gap-2"><Label htmlFor="developer-mode">developer mode</Label><Switch id="developer-mode" checked={developerMode} onCheckedChange={changeDeveloperMode} /></div>{info && (info.capabilities & Capability.reboot) ? <RestartControl developerMode={developerMode} busy={busy} onRestart={restart} /> : null}{info ? <Button variant="outline" onClick={disconnect}><Unplug className="size-4" />disconnect</Button> : <Button onClick={connect} disabled={busy}>{busy ? <Loader2 className="size-4 animate-spin" /> : <Cable className="size-4" />}connect</Button>}</div></CardHeader>
       {info ? <CardContent className="grid gap-3 border-t pt-5 text-sm sm:grid-cols-3"><Info label="serial number" value={info.serial} mono /><Info label="flash" value={`${(info.flashBytes / 1024 / 1024).toFixed(0)} MiB`} /><Info label="status" value={status} /></CardContent> : null}
     </Card>
     {error ? <div className="rounded-md border border-destructive/40 bg-destructive/5 px-4 py-3 text-sm text-destructive">{error}</div> : null}
     <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_20rem]">
       <Tabs defaultValue="apps" className="min-w-0"><TabsList><TabsTrigger value="apps">cartridges</TabsTrigger><TabsTrigger value="appearance">appearance</TabsTrigger></TabsList>
-        <TabsContent value="apps"><Card><CardHeader className="space-y-4"><div className="flex items-center justify-between gap-4"><div><CardTitle>cartridges</CardTitle><CardDescription>apps currently installed on this prism.</CardDescription></div><Button size="icon" variant="ghost" onClick={() => refresh()} disabled={!info}><RefreshCw className="size-4" /></Button></div><div className="flex items-center gap-2">{storage ? <StorageMeter storage={storage} /> : <div className="h-3 min-w-0 flex-1 rounded-full border bg-muted/30" />}<Button size="sm" variant="outline" className="shrink-0" disabled={!storageNeedsCompaction || busy} onClick={() => void compact()}>{compactProgress === undefined ? "compact" : `compacting ${Math.round(compactProgress * 100)}%`}</Button></div></CardHeader><CardContent className="space-y-4"><Label className="flex min-h-24 cursor-pointer items-center justify-center rounded-md border border-dashed p-3 transition-colors hover:bg-muted/40">{installingCartridge ? <div className="flex w-full items-center gap-4"><CartridgeIcon icon={installingCartridge.icon} className="size-14 shrink-0" /><div className="min-w-0 flex-1 space-y-2"><div><p className="truncate font-medium">{installingCartridge.name}</p><p className="text-xs text-muted-foreground">installing · {Math.round((installProgress ?? 0) * 100)}%</p></div><div className="h-1.5 overflow-hidden rounded-full bg-muted"><div className="h-full bg-foreground transition-[width] duration-150" style={{ width: `${Math.round((installProgress ?? 0) * 100)}%` }} /></div></div></div> : <span className="flex items-center gap-2"><Upload className="size-4" />choose a .prism file</span>}<Input type="file" accept=".prism" className="sr-only" disabled={!info || busy} onChange={event => void install(event.target.files?.[0])} /></Label><div className="divide-y rounded-md border">{cartridges.length ? cartridges.map(app => <div key={Array.from(app.appKey, byte => byte.toString(16).padStart(2, "0")).join("")} className="flex items-center justify-between gap-4 p-3"><Button variant="ghost" className="-m-2 h-auto min-w-0 flex-1 justify-start p-2 text-left" disabled={busy} title={`launch ${app.name}`} onClick={() => void launch(app)}><CartridgeIcon icon={app.icon} className="size-12 shrink-0" /><div className="min-w-0"><p className="truncate font-medium">{app.name}</p><p className="truncate text-xs text-muted-foreground">{app.id}</p><p className="text-xs text-muted-foreground">v{app.version}{app.blocks ? ` · ${app.blocks} blocks` : " · bundled"}</p></div></Button><Button variant="ghost" size="icon" disabled={busy || Boolean(app.policy & 2)} title={app.policy & 2 ? "bundled cartridges cannot be deleted" : `delete ${app.name}`} onClick={() => void remove(app)}><Trash2 className="size-4" /></Button></div>) : <p className="p-4 text-sm text-muted-foreground">{info ? "no cartridges reported." : "connect to see installed cartridges."}</p>}</div></CardContent></Card></TabsContent>
+        <TabsContent value="apps"><Card><CardHeader className="space-y-4"><div className="flex items-center justify-between gap-4"><div><CardTitle>cartridges</CardTitle><CardDescription>apps currently installed on this prism.</CardDescription></div><Button size="icon" variant="ghost" onClick={() => refresh()} disabled={!info}><RefreshCw className="size-4" /></Button></div><div className="flex items-center gap-2">{storage ? <StorageMeter storage={storage} /> : <div className="h-3 min-w-0 flex-1 rounded-full border bg-muted/30" />}<Button size="sm" variant="outline" className="shrink-0" disabled={!storageNeedsCompaction || busy} onClick={() => void compact()}>{compactProgress === undefined ? "compact" : `compacting ${Math.round(compactProgress * 100)}%`}</Button></div></CardHeader><CardContent className="space-y-4"><Label className="flex min-h-24 cursor-pointer items-center justify-center rounded-md border border-dashed p-3 transition-colors hover:bg-muted/40">{installingCartridge ? <div className="flex w-full items-center gap-4"><CartridgeIcon icon={installingCartridge.icon} className="size-14 shrink-0" /><div className="min-w-0 flex-1 space-y-2"><div><p className="truncate font-medium">{installingCartridge.name}</p><p className="text-xs text-muted-foreground">installing · {Math.round((installProgress ?? 0) * 100)}%</p></div><div className="h-1.5 overflow-hidden rounded-full bg-muted"><div className="h-full bg-foreground transition-[width] duration-150" style={{ width: `${Math.round((installProgress ?? 0) * 100)}%` }} /></div></div></div> : <span className="flex items-center gap-2"><Upload className="size-4" />choose a .prism file</span>}<Input type="file" accept=".prism" className="sr-only" disabled={!info || busy} onChange={event => void install(event.target.files?.[0])} /></Label><div className="divide-y rounded-md border">{cartridges.length ? cartridges.map(app => <div key={Array.from(app.appKey, byte => byte.toString(16).padStart(2, "0")).join("")} className="flex items-center justify-between gap-4 p-3"><Button variant="ghost" className="-m-2 h-auto min-w-0 flex-1 justify-start p-2 text-left" disabled={busy} title={`launch ${app.name}`} onClick={() => void launch(app)}><CartridgeIcon icon={app.icon} className="size-12 shrink-0" /><div className="min-w-0"><p className="truncate font-medium">{app.name}</p>{developerMode ? <p className="truncate text-xs text-muted-foreground">{app.id}</p> : null}<p className="text-xs text-muted-foreground">v{app.version}{app.blocks ? ` · ${app.blocks} blocks` : " · bundled"}</p></div></Button><Button variant="ghost" size="icon" disabled={busy || Boolean(app.policy & 2)} title={app.policy & 2 ? "bundled cartridges cannot be deleted" : `delete ${app.name}`} onClick={() => void remove(app)}><Trash2 className="size-4" /></Button></div>) : <p className="p-4 text-sm text-muted-foreground">{info ? "no cartridges reported." : "connect to see installed cartridges."}</p>}</div></CardContent></Card></TabsContent>
         <TabsContent value="appearance"><Card><CardHeader><CardTitle>idle appearance</CardTitle><CardDescription>changes preview immediately and save automatically on the device.</CardDescription></CardHeader><CardContent className="space-y-7"><div className="flex items-center justify-between"><div><Label>link LEDs</Label><p className="mt-1 text-sm text-muted-foreground">share effect, colors, speed, and phase.</p></div><Switch checked={settings.linked} onCheckedChange={setLinked} /></div><div className="grid gap-5 sm:grid-cols-2"><LedEditor label="left LED" value={settings.leds[0]} linkedOffset={settings.linked ? settings.leds[1].phaseOffset : undefined} onLinkedOffsetChange={changeRainbowOffset} onChange={value => changeLed(0, value)} /><LedEditor label="right LED" value={settings.leds[1]} disabled={settings.linked} onChange={value => changeLed(1, value)} /></div></CardContent></Card></TabsContent>
       </Tabs>
       <div className="space-y-4"><Card><CardHeader><CardTitle>screen</CardTitle></CardHeader><CardContent className="space-y-4"><div className="relative overflow-hidden rounded-md"><PrismScreen ref={screenRef} />{sleeping ? <div className="absolute inset-0 grid place-items-center bg-black/75 text-white"><span className="flex items-center gap-2 rounded-full border border-white/20 bg-black/60 px-3 py-1.5 text-sm font-medium"><Moon className="size-4" />sleeping</span></div> : null}</div><div className="flex justify-center gap-5"><Led elementRef={element => { ledRefs.current[0] = element; }} /><Led elementRef={element => { ledRefs.current[1] = element; }} /></div><div className="grid grid-cols-3 gap-2"><Remote label="L" active={Boolean((buttons | remoteButtons) & 1)} onPress={pressed => remote(1, pressed)} /><Remote label="menu" active={Boolean((buttons | remoteButtons) & 4)} onPress={pressed => remote(4, pressed)} /><Remote label="R" active={Boolean((buttons | remoteButtons) & 2)} onPress={pressed => remote(2, pressed)} /></div></CardContent></Card></div>
     </div>
+  </div>;
+}
+
+function RestartControl({ developerMode, busy, onRestart }: { developerMode: boolean; busy: boolean; onRestart(bootsel: boolean): void }) {
+  if (!developerMode)
+    return <Button variant="outline" disabled={busy} onClick={() => onRestart(false)}><RotateCcw className="size-4" />restart</Button>;
+
+  return <div className="inline-flex">
+    <Button variant="outline" disabled={busy} className="rounded-r-none" onClick={() => onRestart(false)}><RotateCcw className="size-4" />restart</Button>
+    <DropdownMenu><DropdownMenuTrigger asChild><Button variant="outline" size="icon" disabled={busy} className="-ml-px rounded-l-none" aria-label="restart options"><ChevronDown className="size-4" /></Button></DropdownMenuTrigger><DropdownMenuContent align="end"><DropdownMenuItem onSelect={() => onRestart(true)}><Usb className="size-4" />restart into bootsel</DropdownMenuItem></DropdownMenuContent></DropdownMenu>
   </div>;
 }
 
