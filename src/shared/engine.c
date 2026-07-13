@@ -774,18 +774,17 @@ void engine_run_forever()
 void engine_set_app(app_t *app)
 {
   if (wake_confirmation_active())
-  {
     wake_confirmation_cancel();
-    g_engine.paused = false;
-    anim_sys_set_paused(false);
-    pause_menu_hide_immediate();
-  }
   if (g_engine.app != NULL && g_engine.app->leave != NULL)
   {
     g_engine.app->leave();
   }
   anim_sys_clear_all();
-  reset_buttons(false);
+  /* App switches can be driven asynchronously by USB MIDI and management.
+   * Never leave a partially animated pause shade attached to the next app,
+   * and do not carry a menu edge across the transition. */
+  pause_menu_hide_immediate();
+  reset_buttons(true);
 
   if (app == NULL)
   {
