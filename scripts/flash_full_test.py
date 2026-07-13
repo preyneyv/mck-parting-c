@@ -71,7 +71,7 @@ def flash(picotool: Path, firmware: Path) -> None:
     last_error: subprocess.CalledProcessError | None = None
     while time.monotonic() < deadline:
         try:
-            run_picotool(picotool, ["load", str(firmware), "-fx"])
+            run_picotool(picotool, ["load", str(firmware), "-x"])
             return
         except subprocess.CalledProcessError as error:
             last_error = error
@@ -262,8 +262,11 @@ def main() -> int:
     parser.add_argument(
         "--firmware",
         type=Path,
-        default=root / "build" / "prism.elf",
-        help="Prism ELF or UF2 to flash (default: build/prism.elf)",
+        default=root / "build" / "prism_factory.uf2",
+        help=(
+            "Prism ELF or UF2 to flash "
+            "(default: build/prism_factory.uf2)"
+        ),
     )
     parser.add_argument("--picotool", help="path to picotool")
     parser.add_argument("--app-id", default=DEFAULT_APP_ID)
