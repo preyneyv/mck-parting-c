@@ -623,7 +623,6 @@ static void results_frame(void)
     // Keep the result data in a fixed left column and reserve the right rail
     // for sharing/dismissal controls.
     const int16_t rail_x = 84;
-    elm_vline(&root, vec2(rail_x, 0), DISP_HEIGHT);
 
     // Song and difficulty identify which chart produced the result.
     u8g2_SetFont(u8g2, u8g2_font_5x7_tr);
@@ -644,7 +643,7 @@ static void results_frame(void)
     u8g2_SetDrawColor(u8g2, 0);
     u8g2_SetFont(u8g2, u8g2_font_7x14B_mr);
     uint16_t rank_w = u8g2_GetStrWidth(u8g2, rank);
-    elm_str(&root, vec2(1 + (14 - rank_w) / 2, 33), rank);
+    elm_str(&root, vec2(2 + (14 - rank_w) / 2, 33), rank);
     u8g2_SetDrawColor(u8g2, 1);
 
     char score[16];
@@ -654,20 +653,29 @@ static void results_frame(void)
 
     // Supporting stats use fixed rows so the values remain easy to scan.
     u8g2_SetFont(u8g2, u8g2_font_5x7_tr);
-    char buf[32];
+    char buf[16];
 
-    snprintf(buf, sizeof(buf), "max combo %u", state.max_combo);
-    elm_str(&root, vec2(1, 42), buf);
+    elm_str(&root, vec2(0, 42), "MAX COMBO");
+    snprintf(buf, sizeof(buf), "%u", state.max_combo);
+    elm_rstr(&root, vec2(rail_x - 2, 42), buf);
 
-    snprintf(buf, sizeof(buf), "P %-3u G %u",
-             state.grade_counts[BEATLINE_GRADE_PERFECT],
+    elm_str(&root, vec2(0, 51), "P");
+    snprintf(buf, sizeof(buf), "%u",
+             state.grade_counts[BEATLINE_GRADE_PERFECT]);
+    elm_str(&root, vec2(10, 51), buf);
+    elm_str(&root, vec2(49, 51), "G");
+    snprintf(buf, sizeof(buf), "%u",
              state.grade_counts[BEATLINE_GRADE_GOOD]);
-    elm_str(&root, vec2(1, 51), buf);
+    elm_rstr(&root, vec2(rail_x - 2, 51), buf);
 
-    snprintf(buf, sizeof(buf), "B %-3u M %u",
-             state.grade_counts[BEATLINE_GRADE_BAD],
+    elm_str(&root, vec2(0, 60), "B");
+    snprintf(buf, sizeof(buf), "%u",
+             state.grade_counts[BEATLINE_GRADE_BAD]);
+    elm_str(&root, vec2(10, 60), buf);
+    elm_str(&root, vec2(49, 60), "M");
+    snprintf(buf, sizeof(buf), "%u",
              state.grade_counts[BEATLINE_GRADE_MISS]);
-    elm_str(&root, vec2(1, 60), buf);
+    elm_rstr(&root, vec2(rail_x - 2, 60), buf);
 
     // Leaderboard QR and menu control occupy the utility rail.
     if (state.qr_ready)
@@ -684,7 +692,7 @@ static void results_frame(void)
     }
 
     bool pressed = false;
-    elm_btn(&root, vec2(106, 63), "MENU", ELM_ALIGN_BOTTOM_CENTER,
+    elm_btn(&root, vec2(128, 64), "MENU", ELM_ALIGN_BOTTOM_RIGHT,
             prism_button_hold_ratio(beatline_prism, PRISM_BUTTON_LEFT),
             prism_button_hold_ratio(beatline_prism, PRISM_BUTTON_RIGHT), &pressed);
     if (pressed)

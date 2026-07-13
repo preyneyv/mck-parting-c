@@ -410,6 +410,8 @@ void beatline_game_select_track(beatline_state_t *st, int8_t track_idx,
     st->av_offset_ticks = BEATLINE_DEFAULT_AV_OFFSET_TICKS;
     memset(st->grade_counts, 0, sizeof(st->grade_counts));
     memset(st->note_grades, BEATLINE_NOTE_UNJUDGED, sizeof(st->note_grades));
+    memset(st->note_score_multipliers, 0,
+           sizeof(st->note_score_multipliers));
     memset(st->hold_state, 0, sizeof(st->hold_state));
     memset(st->feedback, 0, sizeof(st->feedback));
     st->qr_ready = false;
@@ -433,6 +435,8 @@ void beatline_game_start_countdown(beatline_state_t *st)
     // Generate notes now so they appear scrolling during the count-in.
     beatline_generate_notes_from_song(st);
     memset(st->note_grades, BEATLINE_NOTE_UNJUDGED, sizeof(st->note_grades));
+    memset(st->note_score_multipliers, 0,
+           sizeof(st->note_score_multipliers));
     st->next_judge_idx = 0;
     memset(st->hold_state, 0, sizeof(st->hold_state));
 
@@ -480,12 +484,13 @@ static void register_grade(beatline_state_t *st, uint16_t note_idx,
     st->grade_counts[grade]++;
 
     uint8_t lane = st->generated_notes[note_idx].lane;
+    uint16_t awarded_score = 0;
 
     // scoring
     if (grade == BEATLINE_GRADE_MISS || grade == BEATLINE_GRADE_BAD)
     {
         if (grade == BEATLINE_GRADE_BAD)
-            st->score += BEATLINE_SCORE_BAD;
+            awarded_score = BEATLINE_SCORE_BAD;
         st->combo = 0;
     }
     else
@@ -498,13 +503,53 @@ static void register_grade(beatline_state_t *st, uint16_t note_idx,
         uint16_t base = (grade == BEATLINE_GRADE_PERFECT)
                             ? BEATLINE_SCORE_PERFECT
                             : BEATLINE_SCORE_GOOD;
-        st->score += base * mult;
+        awarded_score = (uint16_t)(base * mult);
+        st->note_score_multipliers[note_idx] = (uint8_t)mult;
     }
+    st->score += awarded_score;
 
     // feedback
     st->feedback[lane].grade = grade;
     st->feedback[lane].timing_late = (timing_delta_ticks < 0);
     st->feedback[lane].until_tick = prism_ticks(beatline_prism) + BEATLINE_FEEDBACK_DURATION;
+}
+
+static void register_early_hold_release(beatline_state_t *st,
+                                        uint16_t note_idx)
+{
+    beatline_grade_t previous_grade =
+        (beatline_grade_t)st->note_grades[note_idx];
+    uint8_t lane = st->generated_notes[note_idx].lane;
+
+    if (previous_grade != BEATLINE_GRADE_BAD)
+    {
+        if (previous_grade < BEATLINE_GRADE_COUNT &&
+            st->grade_counts[previous_grade] > 0)
+        {
+            st->grade_counts[previous_grade]--;
+        }
+        st->grade_counts[BEATLINE_GRADE_BAD]++;
+
+        uint16_t previous_base =
+            previous_grade == BEATLINE_GRADE_PERFECT
+                ? BEATLINE_SCORE_PERFECT
+                : BEATLINE_SCORE_GOOD;
+        uint16_t previous_award =
+            previous_base * st->note_score_multipliers[note_idx];
+        if (st->score >= previous_award)
+            st->score -= previous_award;
+        else
+            st->score = 0;
+        st->score += BEATLINE_SCORE_BAD;
+        st->note_score_multipliers[note_idx] = 0;
+        st->note_grades[note_idx] = BEATLINE_GRADE_BAD;
+    }
+
+    st->combo = 0;
+    st->feedback[lane].grade = BEATLINE_GRADE_BAD;
+    st->feedback[lane].timing_late = false;
+    st->feedback[lane].until_tick =
+        prism_ticks(beatline_prism) + BEATLINE_FEEDBACK_DURATION;
 }
 
 static void register_empty_miss(beatline_state_t *st, uint8_t lane)
@@ -637,13 +682,9 @@ static void process_holds(beatline_state_t *st)
         if (!prism_button_pressed(beatline_prism, btn))
         {
             // released early — if significantly early, penalize
-            if (game_time + 77 < end_tick)
+            if (game_time + BEATLINE_HOLD_RELEASE_GRACE < end_tick)
             {
-                // override grade to BAD
-                st->note_grades[idx] = BEATLINE_GRADE_BAD;
-                // adjust counts: remove one from whatever we gave, add BAD
-                // (simplified: we already scored on initial hit, just reset combo)
-                st->combo = 0;
+                register_early_hold_release(st, idx);
             }
             st->hold_state[lane].holding = false;
         }

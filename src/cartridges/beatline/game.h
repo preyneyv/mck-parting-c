@@ -25,6 +25,7 @@ typedef enum
 #define BEATLINE_WINDOW_PERFECT 58
 #define BEATLINE_WINDOW_GOOD 96
 #define BEATLINE_WINDOW_BAD 135
+#define BEATLINE_HOLD_RELEASE_GRACE 77
 
 // Negative values delay game-time relative to wall clock to compensate output/input latency.
 #define BEATLINE_DEFAULT_AV_OFFSET_TICKS 19
@@ -113,6 +114,7 @@ typedef struct
     uint32_t generated_duration_ticks;
     uint16_t next_judge_idx; // next unjudged note (for miss scanning)
     uint8_t note_grades[BEATLINE_MAX_NOTES];
+    uint8_t note_score_multipliers[BEATLINE_MAX_NOTES];
 
     // hold state per lane
     struct
