@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Provision ordinary Prism cartridges directly into a factory UF2 image."""
+"""Provision Prism cartridges and asset packs into a factory UF2 image."""
 
 from __future__ import annotations
 
@@ -22,15 +22,18 @@ XIP_BASE = 0x10000000
 FLASH_BYTES = 16 * 1024 * 1024
 FIRMWARE_BYTES = 2 * 1024 * 1024
 CARTRIDGE_OFFSET = FIRMWARE_BYTES
-CARTRIDGE_BLOCK_BYTES = 128 * 1024
-CARTRIDGE_BLOCK_COUNT = 96
+STORAGE_BLOCK_BYTES = 64 * 1024
+STORAGE_BLOCK_COUNT = 192
+CARTRIDGE_BLOCK_BYTES = STORAGE_BLOCK_BYTES
+CARTRIDGE_BLOCK_COUNT = STORAGE_BLOCK_COUNT
 CARTRIDGE_END = CARTRIDGE_OFFSET + (
-    CARTRIDGE_BLOCK_BYTES * CARTRIDGE_BLOCK_COUNT
+    STORAGE_BLOCK_BYTES * STORAGE_BLOCK_COUNT
 )
 FLASH_SECTOR_BYTES = 4096
-CATALOG0_OFFSET = CARTRIDGE_END + CARTRIDGE_BLOCK_BYTES
-CATALOG1_OFFSET = CATALOG0_OFFSET + FLASH_SECTOR_BYTES
-MOVE_JOURNAL_OFFSET = CATALOG1_OFFSET + FLASH_SECTOR_BYTES
+CATALOG_SLOT_BYTES = 2 * FLASH_SECTOR_BYTES
+CATALOG0_OFFSET = CARTRIDGE_END + STORAGE_BLOCK_BYTES
+CATALOG1_OFFSET = CATALOG0_OFFSET + CATALOG_SLOT_BYTES
+MOVE_JOURNAL_OFFSET = CATALOG1_OFFSET + CATALOG_SLOT_BYTES
 MOVE_JOURNAL_SECTORS = 8
 MOVE_JOURNAL_BYTES = MOVE_JOURNAL_SECTORS * FLASH_SECTOR_BYTES
 CARTRIDGE_DATA_OFFSET = 15 * 1024 * 1024
@@ -50,11 +53,15 @@ PACKAGE_FORMAT_VERSION = 1
 PACKAGE_HEADER_BYTES = 256
 PACKAGE_APP_KEY_OFFSET = 16
 APP_KEY_BYTES = 16
+ASSET_PACK_MAGIC = 0x4B415050
+ASSET_PACK_FORMAT_VERSION = 1
+ASSET_PACK_HEADER_BYTES = 256
+OBJECT_CARTRIDGE = 1
+OBJECT_ASSET_PACK = 2
 
 CATALOG_MAGIC = 0x54414350
 CATALOG_VERSION = 1
-CATALOG_MAX_ENTRIES = 120
-CATALOG_MAX_LIVE = 32
+CATALOG_MAX_ENTRIES = STORAGE_BLOCK_COUNT
 CATALOG_ENTRY_BYTES = 32
 CATALOG_HEADER_BYTES = 20
 CATALOG_ENTRY_LIVE = 1
@@ -79,7 +86,8 @@ class Uf2Block:
 class FactoryPackage:
     path: Path
     data: bytes
-    app_key: bytes
+    object_key: bytes
+    kind: int
     start_block: int
     block_count: int
     crc32: int
@@ -134,15 +142,25 @@ def _read_package(path: Path, start_block: int) -> FactoryPackage:
     if len(data) < PACKAGE_HEADER_BYTES:
         raise FactoryImageError(f"package is smaller than its header: {path}")
     magic, format_version, header_size = struct.unpack_from("<IHH", data)
-    package_size = struct.unpack_from("<I", data, 12)[0]
-    if magic != PACKAGE_MAGIC:
-        raise FactoryImageError(f"invalid package magic: {path}")
-    if format_version != PACKAGE_FORMAT_VERSION:
+    if magic == PACKAGE_MAGIC:
+        expected_format = PACKAGE_FORMAT_VERSION
+        expected_header = PACKAGE_HEADER_BYTES
+        package_size_offset = 12
+        kind = OBJECT_CARTRIDGE
+    elif magic == ASSET_PACK_MAGIC:
+        expected_format = ASSET_PACK_FORMAT_VERSION
+        expected_header = ASSET_PACK_HEADER_BYTES
+        package_size_offset = 8
+        kind = OBJECT_ASSET_PACK
+    else:
+        raise FactoryImageError(f"invalid stored-object magic: {path}")
+    package_size = struct.unpack_from("<I", data, package_size_offset)[0]
+    if format_version != expected_format:
         raise FactoryImageError(
-            f"unsupported package format {format_version}: {path}"
+            f"unsupported stored-object format {format_version}: {path}"
         )
-    if header_size != PACKAGE_HEADER_BYTES:
-        raise FactoryImageError(f"invalid package header size: {path}")
+    if header_size != expected_header:
+        raise FactoryImageError(f"invalid stored-object header size: {path}")
     if package_size != len(data):
         raise FactoryImageError(
             f"package header says {package_size} bytes but file has "
@@ -150,17 +168,18 @@ def _read_package(path: Path, start_block: int) -> FactoryPackage:
         )
 
     block_count = (
-        len(data) + CARTRIDGE_BLOCK_BYTES - 1
-    ) // CARTRIDGE_BLOCK_BYTES
-    app_key = data[
+        len(data) + STORAGE_BLOCK_BYTES - 1
+    ) // STORAGE_BLOCK_BYTES
+    object_key = data[
         PACKAGE_APP_KEY_OFFSET : PACKAGE_APP_KEY_OFFSET + APP_KEY_BYTES
     ]
-    if len(app_key) != APP_KEY_BYTES:
-        raise FactoryImageError(f"package is missing its app key: {path}")
+    if len(object_key) != APP_KEY_BYTES:
+        raise FactoryImageError(f"stored object is missing its key: {path}")
     return FactoryPackage(
         path=path,
         data=data,
-        app_key=app_key,
+        object_key=object_key,
+        kind=kind,
         start_block=start_block,
         block_count=block_count,
         crc32=zlib.crc32(data),
@@ -171,16 +190,17 @@ def _catalog(packages: list[FactoryPackage], generation: int) -> bytes:
     entries = bytearray(CATALOG_MAX_ENTRIES * CATALOG_ENTRY_BYTES)
     for index, package in enumerate(packages):
         struct.pack_into(
-            "<16sHHIIB3s",
+            "<16sHHIIBBH",
             entries,
             index * CATALOG_ENTRY_BYTES,
-            package.app_key,
+            package.object_key,
             package.start_block,
             package.block_count,
             len(package.data),
             package.crc32,
             CATALOG_ENTRY_LIVE,
-            b"\0\0\0",
+            package.kind,
+            0,
         )
 
     live_entries = bytes(entries[: len(packages) * CATALOG_ENTRY_BYTES])
@@ -194,9 +214,9 @@ def _catalog(packages: list[FactoryPackage], generation: int) -> bytes:
         zlib.crc32(live_entries),
     )
     catalog = header + entries
-    if len(catalog) > FLASH_SECTOR_BYTES:
-        raise FactoryImageError("factory catalog does not fit in one sector")
-    return catalog + bytes([0xFF]) * (FLASH_SECTOR_BYTES - len(catalog))
+    if len(catalog) > CATALOG_SLOT_BYTES:
+        raise FactoryImageError("factory catalog does not fit in its slot")
+    return catalog + bytes([0xFF]) * (CATALOG_SLOT_BYTES - len(catalog))
 
 
 def _data_blocks(target: int, contents: bytes, fill: int = 0xFF):
@@ -251,10 +271,10 @@ def build_factory_uf2(
     firmware_blocks = _parse_uf2(firmware_path)
     if not package_paths:
         raise FactoryImageError("at least one factory package is required")
-    if len(package_paths) > CATALOG_MAX_LIVE:
+    if len(package_paths) > CATALOG_MAX_ENTRIES:
         raise FactoryImageError(
             f"factory image has {len(package_paths)} packages; maximum is "
-            f"{CATALOG_MAX_LIVE}"
+            f"{CATALOG_MAX_ENTRIES}"
         )
 
     family_ids = {
@@ -280,28 +300,29 @@ def build_factory_uf2(
 
     packages: list[FactoryPackage] = []
     next_block = 0
-    app_keys: set[bytes] = set()
+    object_keys: set[tuple[int, bytes]] = set()
     for raw_path in package_paths:
         package = _read_package(raw_path.resolve(), next_block)
-        if package.app_key in app_keys:
+        identity = (package.kind, package.object_key)
+        if identity in object_keys:
             raise FactoryImageError(
-                f"duplicate factory cartridge app key: {package.path}"
+                f"duplicate factory stored-object key: {package.path}"
             )
-        app_keys.add(package.app_key)
+        object_keys.add(identity)
         packages.append(package)
         next_block += package.block_count
-    if next_block > CARTRIDGE_BLOCK_COUNT:
+    if next_block > STORAGE_BLOCK_COUNT:
         raise FactoryImageError(
             f"factory packages require {next_block} blocks; maximum is "
-            f"{CARTRIDGE_BLOCK_COUNT}"
+            f"{STORAGE_BLOCK_COUNT}"
         )
 
     additions: list[tuple[int, bytes]] = []
     for package in packages:
-        allocated = package.block_count * CARTRIDGE_BLOCK_BYTES
+        allocated = package.block_count * STORAGE_BLOCK_BYTES
         padded = package.data + bytes([0xFF]) * (allocated - len(package.data))
         target = XIP_BASE + CARTRIDGE_OFFSET + (
-            package.start_block * CARTRIDGE_BLOCK_BYTES
+            package.start_block * STORAGE_BLOCK_BYTES
         )
         additions.extend(_data_blocks(target, padded))
     additions.extend(

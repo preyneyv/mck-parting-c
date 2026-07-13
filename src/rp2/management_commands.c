@@ -15,7 +15,13 @@
 #include <prism/runtime.h>
 #include <shared/engine.h>
 #include <shared/os/settings.h>
+#include <shared/os/sprites/prismpack.h>
 #include <u8g2.h>
+
+_Static_assert(prismpack__0_width == PRISM_CARTRIDGE_ICON_WIDTH &&
+                   prismpack__0_height == PRISM_CARTRIDGE_ICON_HEIGHT &&
+                   sizeof(prismpack__0_bits) == PRISM_CARTRIDGE_ICON_BYTES,
+               "asset-pack icon must match cartridge icons");
 
 static void compact_progress(uint16_t completed, uint16_t total, void *user)
 {
@@ -113,6 +119,19 @@ void management_commands_handle(const prism_management_header_t *request,
           list_request == NULL ? 0 : list_request->flags);
     }
     break;
+  case PRISM_MGMT_ASSET_PACK_LIST:
+    if (request->payload_len != 0 &&
+        request->payload_len !=
+            sizeof(prism_management_cartridge_list_request_t))
+      management_transport_result(request, PRISM_MGMT_ERROR_BAD_MESSAGE);
+    else
+    {
+      const prism_management_cartridge_list_request_t *list_request =
+          request->payload_len == 0 ? NULL : (const void *)payload;
+      management_protocol_asset_packs(
+          request, list_request == NULL ? 0 : list_request->start_index);
+    }
+    break;
   case PRISM_MGMT_CARTRIDGE_ICON:
     if (request->payload_len != PRISM_APP_KEY_BYTES)
       management_transport_result(request, PRISM_MGMT_ERROR_BAD_MESSAGE);
@@ -199,6 +218,37 @@ void management_commands_handle(const prism_management_header_t *request,
       management_transport_result(request, status);
     }
     break;
+  case PRISM_MGMT_ASSET_PACK_DELETE:
+    if (request->payload_len != sizeof(prism_management_asset_pack_id_t))
+      management_transport_result(request, PRISM_MGMT_ERROR_BAD_MESSAGE);
+    else
+    {
+      const prism_management_asset_pack_id_t *pack_id =
+          (const void *)payload;
+      const char *pack_name = NULL;
+      prism_management_asset_pack_entry_t entry;
+      for (size_t i = 0; i < cartridge_storage_pack_count(); ++i)
+      {
+        const char *id;
+        const char *name;
+        const char *target_id;
+        if (cartridge_storage_pack_entry(i, &entry, &id, &name,
+                                         &target_id) &&
+            memcmp(entry.pack_key, pack_id->pack_key,
+                   PRISM_PACK_KEY_BYTES) == 0)
+        {
+          pack_name = name;
+          break;
+        }
+      }
+      management_overlay_start(
+          MANAGEMENT_OVERLAY_DELETE, 1, pack_name, prismpack__0_bits);
+      prism_management_status_t status =
+          cartridge_storage_pack_delete(pack_id->pack_key);
+      management_overlay_finish(status);
+      management_transport_result(request, status);
+    }
+    break;
   case PRISM_MGMT_INSTALL_BEGIN:
     if (request->payload_len != sizeof(prism_management_install_begin_t))
       management_transport_result(request, PRISM_MGMT_ERROR_BAD_MESSAGE);
@@ -208,9 +258,15 @@ void management_commands_handle(const prism_management_header_t *request,
       prism_management_status_t status =
           cartridge_storage_install_begin(begin);
       if (status == PRISM_MGMT_OK)
+      {
+        const uint8_t *icon =
+            begin->object_kind == PRISM_STORED_OBJECT_ASSET_PACK
+                ? prismpack__0_bits
+                : begin->icon;
         management_overlay_start(MANAGEMENT_OVERLAY_INSTALL,
                                  begin->package_bytes, begin->name,
-                                 begin->icon);
+                                 icon);
+      }
       management_transport_result(request, status);
     }
     break;

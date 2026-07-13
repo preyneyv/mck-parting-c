@@ -16,6 +16,7 @@
 
 #include <platform/persistence.h>
 #include <platform/system.h>
+#include <prism/asset_pack.h>
 #include <prism/cartridge_identity.h>
 #include <prism/package.h>
 #include <prism/registry.h>
@@ -23,19 +24,20 @@
 #include <shared/audio/song.h>
 #include <shared/audio/synth_internal.h>
 #include <shared/os/cartridge_image.h>
+#include <shared/os/asset_pack.h>
 #include <u8g2.h>
 
 #define CARTRIDGE_SECTORS_PER_BLOCK                                      \
-  (PRISM_CARTRIDGE_BLOCK_BYTES / FLASH_SECTOR_SIZE)
+  (PRISM_STORAGE_BLOCK_BYTES / FLASH_SECTOR_SIZE)
 #define CARTRIDGE_SECTOR_COUNT                                           \
-  (PRISM_CARTRIDGE_BLOCK_COUNT * CARTRIDGE_SECTORS_PER_BLOCK)
+  (PRISM_STORAGE_BLOCK_COUNT * CARTRIDGE_SECTORS_PER_BLOCK)
 #define MOVE_JOURNAL_PAGES_PER_SECTOR (FLASH_SECTOR_SIZE / FLASH_PAGE_SIZE)
 #define MOVE_JOURNAL_PAGE_COUNT                                          \
   (PRISM_FLASH_MOVE_JOURNAL_SECTORS * MOVE_JOURNAL_PAGES_PER_SECTOR)
 #define CATALOG_MAGIC 0x54414350u /* PCAT */
 #define CATALOG_VERSION 1u
-#define CATALOG_MAX_ENTRIES 120u
-#define CATALOG_MAX_LIVE 32u
+#define CATALOG_MAX_ENTRIES PRISM_STORAGE_BLOCK_COUNT
+#define RUNTIME_DESCRIPTOR_CACHE_SIZE 8u
 #define ENTRY_LIVE 1u
 #define ENTRY_DEAD 2u
 #define MOVE_MAGIC 0x314f4d50u /* PMO1 */
@@ -51,13 +53,14 @@
 
 typedef struct __attribute__((packed))
 {
-  uint8_t app_key[PRISM_APP_KEY_BYTES];
+  uint8_t object_key[PRISM_APP_KEY_BYTES];
   uint16_t start_block;
   uint16_t block_count;
   uint32_t package_bytes;
   uint32_t package_crc32;
   uint8_t state;
-  uint8_t reserved[3];
+  uint8_t kind;
+  uint16_t flags;
 } catalog_entry_t;
 
 typedef struct __attribute__((packed))
@@ -71,8 +74,8 @@ typedef struct __attribute__((packed))
   catalog_entry_t entries[CATALOG_MAX_ENTRIES];
 } catalog_t;
 
-_Static_assert(sizeof(catalog_t) <= FLASH_SECTOR_SIZE,
-               "cartridge catalog must fit in one flash sector");
+_Static_assert(sizeof(catalog_t) <= PRISM_FLASH_CATALOG_SLOT_BYTES,
+               "object catalog must fit in one catalog slot");
 
 typedef struct
 {
@@ -82,7 +85,7 @@ typedef struct
   uint32_t received;
   uint32_t crc;
   int16_t replacement_slot;
-  bool erased[CARTRIDGE_SECTOR_COUNT];
+  uint16_t erased_sector_count;
 } install_session_t;
 
 typedef struct __attribute__((packed))
@@ -104,10 +107,14 @@ typedef struct __attribute__((packed))
 
 _Static_assert(sizeof(move_record_t) <= FLASH_PAGE_SIZE,
                "move journal records must fit one flash page");
-static catalog_t catalog;
+static const catalog_t *catalog_current;
+#define catalog (*catalog_current)
+static const catalog_t empty_catalog = {
+    .magic = CATALOG_MAGIC,
+    .version = CATALOG_VERSION,
+};
 static uint8_t catalog_slot;
 static install_session_t installation;
-static uint8_t catalog_sector[FLASH_SECTOR_SIZE];
 static move_record_t move_record;
 static uint8_t move_journal_sector;
 static uint8_t move_journal_page;
@@ -123,13 +130,21 @@ static uint8_t install_program_buffer[1024u];
 typedef struct
 {
   bool valid;
+  bool pinned;
+  uint16_t catalog_slot;
+  uint32_t last_used;
   prism_cartridge_t descriptor;
 } runtime_descriptor_t;
 
-static runtime_descriptor_t runtime_descriptors[CATALOG_MAX_ENTRIES];
+static runtime_descriptor_t
+    runtime_descriptors[RUNTIME_DESCRIPTOR_CACHE_SIZE];
+static uint32_t runtime_descriptor_clock;
 
 static void reconcile_catalog(void);
-static bool catalog_save(void);
+static catalog_t *catalog_edit_begin(void);
+static bool catalog_save(catalog_t *updated);
+static bool object_key_equal(const uint8_t a[PRISM_APP_KEY_BYTES],
+                             const uint8_t b[PRISM_APP_KEY_BYTES]);
 
 static void trace_set(uint32_t stage, uint32_t detail)
 {
@@ -165,7 +180,7 @@ static bool range_valid(uint32_t offset, uint32_t size, uint32_t limit)
 static const uint8_t *entry_package(const catalog_entry_t *entry)
 {
   return (const uint8_t *)XIP_BASE + PRISM_FLASH_CARTRIDGE_OFFSET +
-         entry->start_block * PRISM_CARTRIDGE_BLOCK_BYTES;
+         entry->start_block * PRISM_STORAGE_BLOCK_BYTES;
 }
 
 static uintptr_t resolve_import(uint16_t symbol);
@@ -333,19 +348,62 @@ static bool catalog_valid(const catalog_t *value)
                    value->entry_count * sizeof(catalog_entry_t));
 }
 
-static bool catalog_save(void)
+static catalog_t *catalog_edit_begin(void)
 {
-  catalog.generation++;
-  catalog.entries_crc32 =
-      crc32(catalog.entries, catalog.entry_count * sizeof(catalog_entry_t));
-  memset(catalog_sector, 0xff, sizeof(catalog_sector));
-  memcpy(catalog_sector, &catalog, sizeof(catalog));
+  catalog_t *updated = malloc(sizeof(*updated));
+  if (updated != NULL)
+    memcpy(updated, catalog_current, sizeof(*updated));
+  return updated;
+}
+
+static bool catalog_save(catalog_t *updated)
+{
+  if (updated == NULL)
+    return false;
+  updated->magic = CATALOG_MAGIC;
+  updated->version = CATALOG_VERSION;
+  updated->generation = catalog.generation + 1u;
+  updated->entries_crc32 =
+      crc32(updated->entries,
+            updated->entry_count * sizeof(catalog_entry_t));
   uint8_t next_slot = catalog_slot ^ 1u;
   uint32_t offset = catalog_offset(next_slot);
-  if (!prism_flash_erase(offset, FLASH_SECTOR_SIZE) ||
-      !prism_flash_program(offset, catalog_sector, FLASH_SECTOR_SIZE))
+  bool saved = prism_flash_erase(offset, PRISM_FLASH_CATALOG_SLOT_BYTES);
+  for (uint32_t page_offset = FLASH_PAGE_SIZE;
+       saved && page_offset < PRISM_FLASH_CATALOG_SLOT_BYTES;
+       page_offset += FLASH_PAGE_SIZE)
+  {
+    memset(move_page, 0xff, sizeof(move_page));
+    if (page_offset < sizeof(*updated))
+    {
+      size_t copied = sizeof(*updated) - page_offset;
+      if (copied > sizeof(move_page))
+        copied = sizeof(move_page);
+      memcpy(move_page, (const uint8_t *)updated + page_offset, copied);
+    }
+    saved = prism_flash_program(offset + page_offset, move_page,
+                                sizeof(move_page));
+  }
+  if (saved)
+  {
+    memset(move_page, 0xff, sizeof(move_page));
+    size_t copied = sizeof(*updated);
+    if (copied > sizeof(move_page))
+      copied = sizeof(move_page);
+    memcpy(move_page, updated, copied);
+    saved = prism_flash_program(offset, move_page, sizeof(move_page));
+  }
+  const catalog_t *written =
+      (const void *)((const uint8_t *)XIP_BASE + offset);
+  saved = saved && catalog_valid(written);
+  free(updated);
+  if (!saved)
     return false;
+  catalog_current = written;
   catalog_slot = next_slot;
+  for (size_t i = 0; i < RUNTIME_DESCRIPTOR_CACHE_SIZE; ++i)
+    if (!runtime_descriptors[i].pinned)
+      memset(&runtime_descriptors[i], 0, sizeof(runtime_descriptors[i]));
   return true;
 }
 
@@ -438,23 +496,23 @@ static uint32_t scratch_offset(uint8_t index)
   if (index == 0)
     return PRISM_FLASH_COMPACTION_SCRATCH_OFFSET;
   return PRISM_FLASH_EXTRA_SCRATCH_OFFSET +
-         (index - 1u) * PRISM_CARTRIDGE_BLOCK_BYTES;
+         (index - 1u) * PRISM_STORAGE_BLOCK_BYTES;
 }
 
 static uint32_t block_flash_offset(uint16_t block)
 {
-  return PRISM_FLASH_CARTRIDGE_OFFSET + block * PRISM_CARTRIDGE_BLOCK_BYTES;
+  return PRISM_FLASH_CARTRIDGE_OFFSET + block * PRISM_STORAGE_BLOCK_BYTES;
 }
 
 static uint32_t block_crc(uint32_t flash_offset)
 {
   return crc32((const uint8_t *)XIP_BASE + flash_offset,
-               PRISM_CARTRIDGE_BLOCK_BYTES);
+               PRISM_STORAGE_BLOCK_BYTES);
 }
 
 static bool erase_block_at(uint32_t flash_offset)
 {
-  for (uint32_t sector = 0; sector < PRISM_CARTRIDGE_BLOCK_BYTES;
+  for (uint32_t sector = 0; sector < PRISM_STORAGE_BLOCK_BYTES;
        sector += FLASH_SECTOR_SIZE)
     if (!prism_flash_erase(flash_offset + sector, FLASH_SECTOR_SIZE))
       return false;
@@ -466,7 +524,7 @@ static bool copy_block(uint32_t source_offset, uint32_t destination_offset)
   if (!erase_block_at(destination_offset))
     return false;
   uint8_t page[FLASH_PAGE_SIZE];
-  for (uint32_t offset = 0; offset < PRISM_CARTRIDGE_BLOCK_BYTES;
+  for (uint32_t offset = 0; offset < PRISM_STORAGE_BLOCK_BYTES;
        offset += FLASH_PAGE_SIZE)
   {
     memcpy(page, (const uint8_t *)XIP_BASE + source_offset + offset,
@@ -484,7 +542,8 @@ static bool recover_move(cartridge_storage_progress_fn progress, void *user,
   {
     if (move_record.entry_index >= catalog.entry_count)
       return false;
-    catalog_entry_t *entry = &catalog.entries[move_record.entry_index];
+    const catalog_entry_t *entry =
+        &catalog.entries[move_record.entry_index];
     if (entry->state != ENTRY_LIVE)
       return false;
     if (entry->start_block == move_record.target_start)
@@ -494,8 +553,12 @@ static bool recover_move(cartridge_storage_progress_fn progress, void *user,
     }
     if (move_record.next_block >= move_record.total_blocks)
     {
-      entry->start_block = move_record.target_start;
-      if (!catalog_save())
+      catalog_t *updated = catalog_edit_begin();
+      if (updated == NULL)
+        return false;
+      updated->entries[move_record.entry_index].start_block =
+          move_record.target_start;
+      if (!catalog_save(updated))
         return false;
       move_record.stage = MOVE_NONE;
       return move_save();
@@ -568,18 +631,17 @@ void cartridge_storage_init(void)
       (const void *)((const uint8_t *)XIP_BASE + PRISM_FLASH_CATALOG1_OFFSET);
   bool valid0 = catalog_valid(slot0);
   bool valid1 = catalog_valid(slot1);
-  memset(&catalog, 0, sizeof(catalog));
-  catalog.magic = CATALOG_MAGIC;
-  catalog.version = CATALOG_VERSION;
+  catalog_current = &empty_catalog;
+  catalog_slot = 0;
   if (valid1 && (!valid0 ||
                  (int32_t)(slot1->generation - slot0->generation) > 0))
   {
-    catalog = *slot1;
+    catalog_current = slot1;
     catalog_slot = 1;
   }
   else if (valid0)
   {
-    catalog = *slot0;
+    catalog_current = slot0;
     catalog_slot = 0;
   }
   memset(&installation, 0, sizeof(installation));
@@ -608,14 +670,14 @@ void cartridge_storage_init(void)
       }
     }
   allocation_cursor =
-      (uint16_t)(catalog.generation % PRISM_CARTRIDGE_BLOCK_COUNT);
+      (uint16_t)(catalog.generation % PRISM_STORAGE_BLOCK_COUNT);
   recover_move(NULL, NULL, NULL, 0);
   reconcile_catalog();
 }
 
-static void block_map(uint8_t map[PRISM_CARTRIDGE_BLOCK_COUNT])
+static void block_map(uint8_t map[PRISM_STORAGE_BLOCK_COUNT])
 {
-  memset(map, 0, PRISM_CARTRIDGE_BLOCK_COUNT);
+  memset(map, 0, PRISM_STORAGE_BLOCK_COUNT);
   for (uint16_t i = 0; i < catalog.entry_count; ++i)
   {
     const catalog_entry_t *entry = &catalog.entries[i];
@@ -623,7 +685,7 @@ static void block_map(uint8_t map[PRISM_CARTRIDGE_BLOCK_COUNT])
       continue;
     for (uint16_t block = entry->start_block;
          block < entry->start_block + entry->block_count &&
-         block < PRISM_CARTRIDGE_BLOCK_COUNT;
+         block < PRISM_STORAGE_BLOCK_COUNT;
          ++block)
       map[block] = ENTRY_LIVE;
   }
@@ -634,7 +696,7 @@ static void block_map(uint8_t map[PRISM_CARTRIDGE_BLOCK_COUNT])
       continue;
     for (uint16_t block = entry->start_block;
          block < entry->start_block + entry->block_count &&
-         block < PRISM_CARTRIDGE_BLOCK_COUNT;
+         block < PRISM_STORAGE_BLOCK_COUNT;
          ++block)
       if (map[block] == 0)
         map[block] = ENTRY_DEAD;
@@ -645,11 +707,11 @@ void cartridge_storage_info(prism_management_storage_info_t *info)
 {
   memset(info, 0, sizeof(*info));
   block_map(info->block_states);
-  info->total_blocks = PRISM_CARTRIDGE_BLOCK_COUNT;
+  info->total_blocks = PRISM_STORAGE_BLOCK_COUNT;
   info->scratch_blocks = PRISM_FLASH_SCRATCH_POOL_COUNT;
   info->required_blocks = installation.active ? installation.begin.required_blocks : 0;
   uint16_t free_run = 0, reclaimable_run = 0;
-  for (uint16_t block = 0; block < PRISM_CARTRIDGE_BLOCK_COUNT; ++block)
+  for (uint16_t block = 0; block < PRISM_STORAGE_BLOCK_COUNT; ++block)
   {
     if (info->block_states[block] == ENTRY_LIVE)
     {
@@ -715,25 +777,46 @@ static bool bytes_in_image(const void *pointer, uint32_t size,
 
 static const prism_cartridge_t *load_descriptor(uint16_t slot)
 {
-  if (slot >= catalog.entry_count || catalog.entries[slot].state != ENTRY_LIVE)
+  if (slot >= catalog.entry_count ||
+      catalog.entries[slot].state != ENTRY_LIVE ||
+      catalog.entries[slot].kind != PRISM_STORED_OBJECT_CARTRIDGE)
     return NULL;
-  runtime_descriptor_t *runtime = &runtime_descriptors[slot];
-  if (runtime->valid)
-    return &runtime->descriptor;
+  runtime_descriptor_t *runtime = NULL;
+  runtime_descriptor_t *oldest = NULL;
+  for (size_t i = 0; i < RUNTIME_DESCRIPTOR_CACHE_SIZE; ++i)
+  {
+    runtime_descriptor_t *candidate = &runtime_descriptors[i];
+    if (candidate->valid && candidate->catalog_slot == slot)
+    {
+      candidate->last_used = ++runtime_descriptor_clock;
+      return &candidate->descriptor;
+    }
+    if (!candidate->pinned &&
+        (!candidate->valid || oldest == NULL ||
+         candidate->last_used < oldest->last_used))
+      oldest = candidate;
+  }
+  if (oldest == NULL)
+    return NULL;
+  runtime = oldest;
+  memset(runtime, 0, sizeof(*runtime));
+  runtime->catalog_slot = slot;
+  runtime->last_used = ++runtime_descriptor_clock;
 
   const catalog_entry_t *entry = &catalog.entries[slot];
   if (entry->block_count == 0 ||
-      entry->start_block >= PRISM_CARTRIDGE_BLOCK_COUNT ||
+      entry->start_block >= PRISM_STORAGE_BLOCK_COUNT ||
       entry->block_count >
-          PRISM_CARTRIDGE_BLOCK_COUNT - entry->start_block)
+          PRISM_STORAGE_BLOCK_COUNT - entry->start_block)
     return NULL;
   const uint8_t *package = entry_package(entry);
-  uint32_t allocated = entry->block_count * PRISM_CARTRIDGE_BLOCK_BYTES;
+  uint32_t allocated = entry->block_count * PRISM_STORAGE_BLOCK_BYTES;
   if (!package_valid(package, allocated))
     return NULL;
   const prism_package_header_t *header = (const void *)package;
   if (header->package_size != entry->package_bytes ||
-      memcmp(header->app_key, entry->app_key, sizeof(entry->app_key)) != 0)
+      memcmp(header->app_key, entry->object_key,
+             sizeof(entry->object_key)) != 0)
     return NULL;
   const uint8_t *image = package + header->image_offset;
   memcpy(&runtime->descriptor, package + header->descriptor_offset,
@@ -791,6 +874,27 @@ static const prism_cartridge_t *load_descriptor(uint16_t slot)
   return descriptor;
 }
 
+static bool load_pack_view(uint16_t slot, prism_asset_pack_view_t *view)
+{
+  if (slot >= catalog.entry_count ||
+      catalog.entries[slot].state != ENTRY_LIVE ||
+      catalog.entries[slot].kind != PRISM_STORED_OBJECT_ASSET_PACK)
+    return false;
+  const catalog_entry_t *entry = &catalog.entries[slot];
+  if (entry->block_count == 0 ||
+      entry->start_block >= PRISM_STORAGE_BLOCK_COUNT ||
+      entry->block_count > PRISM_STORAGE_BLOCK_COUNT - entry->start_block)
+    return false;
+  const uint8_t *package = entry_package(entry);
+  if (!prism_asset_pack_parse(
+          package, entry->block_count * PRISM_STORAGE_BLOCK_BYTES, view) ||
+      view->header->package_size != entry->package_bytes ||
+      memcmp(view->header->pack_key, entry->object_key,
+             sizeof(entry->object_key)) != 0)
+    return false;
+  return true;
+}
+
 /* The catalog is the source of block ownership, while the launcher only
  * exposes packages that pass the complete package and descriptor checks.
  * Reconcile the two at boot so interrupted or obsolete installs cannot hide
@@ -798,18 +902,27 @@ static const prism_cartridge_t *load_descriptor(uint16_t slot)
  * until the next compaction. */
 static void reconcile_catalog(void)
 {
-  bool changed = false;
+  catalog_t *updated = NULL;
   for (uint16_t slot = 0; slot < catalog.entry_count; ++slot)
   {
-    if (catalog.entries[slot].state != ENTRY_LIVE ||
-        load_descriptor(slot) != NULL)
+    const catalog_entry_t *entry = &catalog.entries[slot];
+    if (entry->state != ENTRY_LIVE)
       continue;
-    catalog.entries[slot].state = ENTRY_DEAD;
-    memset(&runtime_descriptors[slot], 0, sizeof(runtime_descriptors[slot]));
-    changed = true;
+    prism_asset_pack_view_t pack;
+    bool valid = entry->kind == PRISM_STORED_OBJECT_CARTRIDGE
+                     ? load_descriptor(slot) != NULL
+                     : entry->kind == PRISM_STORED_OBJECT_ASSET_PACK &&
+                           load_pack_view(slot, &pack);
+    if (valid)
+      continue;
+    if (updated == NULL)
+      updated = catalog_edit_begin();
+    if (updated == NULL)
+      return;
+    updated->entries[slot].state = ENTRY_DEAD;
   }
-  if (changed)
-    catalog_save();
+  if (updated != NULL)
+    catalog_save(updated);
 }
 
 static int installed_slot(size_t index)
@@ -849,7 +962,8 @@ const prism_cartridge_t *cartridge_storage_find_app_key(
     return NULL;
   for (uint16_t slot = 0; slot < catalog.entry_count; ++slot)
     if (catalog.entries[slot].state == ENTRY_LIVE &&
-        memcmp(catalog.entries[slot].app_key, app_key,
+        catalog.entries[slot].kind == PRISM_STORED_OBJECT_CARTRIDGE &&
+        memcmp(catalog.entries[slot].object_key, app_key,
                PRISM_APP_KEY_BYTES) == 0)
       return load_descriptor(slot);
   return NULL;
@@ -859,9 +973,13 @@ bool cartridge_storage_owns(const prism_cartridge_t *cartridge)
 {
   if (cartridge == NULL)
     return false;
+  prism_app_key_t key;
+  if (!prism_app_key_derive(cartridge->id, key))
+    return false;
   for (uint16_t slot = 0; slot < catalog.entry_count; ++slot)
     if (catalog.entries[slot].state == ENTRY_LIVE &&
-        load_descriptor(slot) == cartridge)
+        catalog.entries[slot].kind == PRISM_STORED_OBJECT_CARTRIDGE &&
+        object_key_equal(catalog.entries[slot].object_key, key))
       return true;
   return false;
 }
@@ -871,15 +989,32 @@ bool cartridge_storage_prepare(const prism_cartridge_t *cartridge,
 {
   if (execution == NULL)
     return false;
+  prism_app_key_t key;
+  if (cartridge == NULL || !prism_app_key_derive(cartridge->id, key))
+    return false;
   int owner = -1;
   for (uint16_t slot = 0; slot < catalog.entry_count; ++slot)
     if (catalog.entries[slot].state == ENTRY_LIVE &&
-        load_descriptor(slot) == cartridge)
+        catalog.entries[slot].kind == PRISM_STORED_OBJECT_CARTRIDGE &&
+        object_key_equal(catalog.entries[slot].object_key, key))
     {
       owner = slot;
       break;
     }
   if (owner < 0)
+    return false;
+
+  runtime_descriptor_t *runtime = NULL;
+  for (size_t i = 0; i < RUNTIME_DESCRIPTOR_CACHE_SIZE; ++i)
+    if (runtime_descriptors[i].valid &&
+        runtime_descriptors[i].catalog_slot == (uint16_t)owner)
+    {
+      runtime = &runtime_descriptors[i];
+      runtime->pinned = true;
+      execution->backend = runtime;
+      break;
+    }
+  if (runtime == NULL)
     return false;
 
   const catalog_entry_t *entry = &catalog.entries[owner];
@@ -893,6 +1028,8 @@ bool cartridge_storage_prepare(const prism_cartridge_t *cartridge,
   uint8_t *allocation = malloc(allocation_size);
   if (allocation == NULL)
   {
+    runtime->pinned = false;
+    execution->backend = NULL;
     printf("cartridge launch rejected: need %lu bytes (%lu GOT + %lu RW/BSS)\n",
            (unsigned long)allocation_size,
            (unsigned long)header->got_size,
@@ -906,6 +1043,8 @@ bool cartridge_storage_prepare(const prism_cartridge_t *cartridge,
           (uint32_t)(uintptr_t)rw, rw, resolve_launch_import, NULL))
   {
     free(allocation);
+    runtime->pinned = false;
+    execution->backend = NULL;
     return false;
   }
 
@@ -913,6 +1052,16 @@ bool cartridge_storage_prepare(const prism_cartridge_t *cartridge,
   execution->got_base =
       header->got_size > 0 ? got + header->got_base_offset : NULL;
   return true;
+}
+
+void cartridge_storage_release_execution(
+    platform_cartridge_execution_t *execution)
+{
+  if (execution == NULL || execution->backend == NULL)
+    return;
+  runtime_descriptor_t *runtime = execution->backend;
+  runtime->pinned = false;
+  execution->backend = NULL;
 }
 
 static const catalog_entry_t *live_entry(size_t index)
@@ -930,7 +1079,7 @@ bool cartridge_storage_entry(size_t index,
     return false;
   const prism_package_header_t *header =
       (const void *)((const uint8_t *)XIP_BASE + PRISM_FLASH_CARTRIDGE_OFFSET +
-                     stored->start_block * PRISM_CARTRIDGE_BLOCK_BYTES);
+                     stored->start_block * PRISM_STORAGE_BLOCK_BYTES);
   if (header->magic != PRISM_PACKAGE_MAGIC)
     return false;
   const prism_cartridge_t *descriptor =
@@ -938,7 +1087,7 @@ bool cartridge_storage_entry(size_t index,
   if (descriptor == NULL || id == NULL || name == NULL)
     return false;
   memset(entry, 0, sizeof(*entry));
-  memcpy(entry->app_key, stored->app_key, sizeof(entry->app_key));
+  memcpy(entry->app_key, stored->object_key, sizeof(entry->app_key));
   entry->package_bytes = stored->package_bytes;
   entry->persistent_bytes = header->persistent_size;
   entry->version = descriptor->version;
@@ -948,23 +1097,158 @@ bool cartridge_storage_entry(size_t index,
   return true;
 }
 
-static bool app_key_equal(const uint8_t a[PRISM_APP_KEY_BYTES],
-                          const uint8_t b[PRISM_APP_KEY_BYTES])
+static int pack_slot(size_t index)
+{
+  for (uint16_t slot = 0; slot < catalog.entry_count; ++slot)
+  {
+    if (catalog.entries[slot].state != ENTRY_LIVE ||
+        catalog.entries[slot].kind != PRISM_STORED_OBJECT_ASSET_PACK)
+      continue;
+    prism_asset_pack_view_t view;
+    if (load_pack_view(slot, &view) && index-- == 0)
+      return slot;
+  }
+  return -1;
+}
+
+size_t cartridge_storage_pack_count(void)
+{
+  size_t count = 0;
+  for (uint16_t slot = 0; slot < catalog.entry_count; ++slot)
+  {
+    if (catalog.entries[slot].state != ENTRY_LIVE ||
+        catalog.entries[slot].kind != PRISM_STORED_OBJECT_ASSET_PACK)
+      continue;
+    prism_asset_pack_view_t view;
+    if (load_pack_view(slot, &view))
+      ++count;
+  }
+  return count;
+}
+
+static bool pack_targets_cartridge(const prism_asset_pack_view_t *view,
+                                   const prism_cartridge_t *cartridge)
+{
+  if (view == NULL || cartridge == NULL ||
+      strcmp(view->target_id, cartridge->id) != 0)
+    return false;
+  return cartridge->version >= view->header->target_min_version &&
+         (view->header->target_max_version == 0 ||
+          cartridge->version <= view->header->target_max_version);
+}
+
+bool cartridge_storage_pack_entry(
+    size_t index, prism_management_asset_pack_entry_t *entry,
+    const char **id, const char **name, const char **target_id)
+{
+  int slot = pack_slot(index);
+  if (slot < 0 || entry == NULL || id == NULL || name == NULL ||
+      target_id == NULL)
+    return false;
+  prism_asset_pack_view_t view;
+  if (!load_pack_view((uint16_t)slot, &view))
+    return false;
+  const catalog_entry_t *stored = &catalog.entries[slot];
+  memset(entry, 0, sizeof(*entry));
+  memcpy(entry->pack_key, stored->object_key, sizeof(entry->pack_key));
+  memcpy(entry->target_app_key, view.header->target_app_key,
+         sizeof(entry->target_app_key));
+  entry->package_bytes = stored->package_bytes;
+  entry->version = view.header->version;
+  entry->blocks = stored->block_count;
+  const prism_registry_entry_t *target =
+      prism_registry_find(view.target_id);
+  if (target == NULL)
+    entry->status = PRISM_ASSET_PACK_STATUS_TARGET_MISSING;
+  else if (!pack_targets_cartridge(&view, target->cartridge))
+    entry->status = PRISM_ASSET_PACK_STATUS_INCOMPATIBLE;
+  *id = view.id;
+  *name = view.name;
+  *target_id = view.target_id;
+  return true;
+}
+
+size_t cartridge_storage_asset_pack_count(
+    const prism_cartridge_t *cartridge)
+{
+  size_t count = 0;
+  if (cartridge == NULL)
+    return 0;
+  for (uint16_t slot = 0; slot < catalog.entry_count; ++slot)
+  {
+    if (catalog.entries[slot].state != ENTRY_LIVE ||
+        catalog.entries[slot].kind != PRISM_STORED_OBJECT_ASSET_PACK)
+      continue;
+    prism_asset_pack_view_t view;
+    if (load_pack_view(slot, &view) &&
+        pack_targets_cartridge(&view, cartridge))
+      ++count;
+  }
+  return count;
+}
+
+bool cartridge_storage_asset_pack_get(
+    const prism_cartridge_t *cartridge, size_t index,
+    prism_asset_pack_info_t *info)
+{
+  if (cartridge == NULL || info == NULL)
+    return false;
+  for (uint16_t slot = 0; slot < catalog.entry_count; ++slot)
+  {
+    if (catalog.entries[slot].state != ENTRY_LIVE ||
+        catalog.entries[slot].kind != PRISM_STORED_OBJECT_ASSET_PACK)
+      continue;
+    prism_asset_pack_view_t view;
+    if (!load_pack_view(slot, &view) ||
+        !pack_targets_cartridge(&view, cartridge))
+      continue;
+    if (index-- != 0)
+      continue;
+    *info = (prism_asset_pack_info_t){
+        .handle = (prism_asset_pack_handle_t)slot + 1u,
+        .version = view.header->version,
+        .file_count = view.header->file_count,
+        .id = view.id,
+        .name = view.name,
+    };
+    return true;
+  }
+  return false;
+}
+
+bool cartridge_storage_asset_file_get(
+    const prism_cartridge_t *cartridge, prism_asset_pack_handle_t pack,
+    uint32_t index, prism_asset_file_t *file)
+{
+  if (cartridge == NULL || pack == 0 || pack > catalog.entry_count)
+    return false;
+  uint16_t slot = (uint16_t)(pack - 1u);
+  if (catalog.entries[slot].state != ENTRY_LIVE ||
+      catalog.entries[slot].kind != PRISM_STORED_OBJECT_ASSET_PACK)
+    return false;
+  prism_asset_pack_view_t view;
+  return load_pack_view(slot, &view) &&
+         pack_targets_cartridge(&view, cartridge) &&
+         prism_asset_pack_file_at(&view, index, file);
+}
+
+static bool object_key_equal(const uint8_t a[PRISM_APP_KEY_BYTES],
+                             const uint8_t b[PRISM_APP_KEY_BYTES])
 {
   return memcmp(a, b, PRISM_APP_KEY_BYTES) == 0;
 }
 
 static int find_run(uint16_t required)
 {
-  uint8_t map[PRISM_CARTRIDGE_BLOCK_COUNT];
+  uint8_t map[PRISM_STORAGE_BLOCK_COUNT];
   block_map(map);
-  for (uint16_t distance = 0; distance < PRISM_CARTRIDGE_BLOCK_COUNT;
+  for (uint16_t distance = 0; distance < PRISM_STORAGE_BLOCK_COUNT;
        ++distance)
   {
     uint16_t start =
         (uint16_t)((allocation_cursor + distance) %
-                   PRISM_CARTRIDGE_BLOCK_COUNT);
-    if (start + required > PRISM_CARTRIDGE_BLOCK_COUNT)
+                   PRISM_STORAGE_BLOCK_COUNT);
+    if (start + required > PRISM_STORAGE_BLOCK_COUNT)
       continue;
     bool available = true;
     for (uint16_t block = start; block < start + required; ++block)
@@ -989,27 +1273,35 @@ prism_management_status_t cartridge_storage_install_begin(
     return PRISM_MGMT_ERROR_BUSY;
   }
   uint16_t required = (uint16_t)((begin->package_bytes +
-                                  PRISM_CARTRIDGE_BLOCK_BYTES - 1u) /
-                                 PRISM_CARTRIDGE_BLOCK_BYTES);
-  if (required == 0 || required > PRISM_CARTRIDGE_BLOCK_COUNT ||
-      begin->required_blocks != required)
+                                  PRISM_STORAGE_BLOCK_BYTES - 1u) /
+                                 PRISM_STORAGE_BLOCK_BYTES);
+  if (required == 0 || required > PRISM_STORAGE_BLOCK_COUNT ||
+      begin->required_blocks != required ||
+      (begin->object_kind != PRISM_STORED_OBJECT_CARTRIDGE &&
+       begin->object_kind != PRISM_STORED_OBJECT_ASSET_PACK))
   {
     trace_clear();
     return PRISM_MGMT_ERROR_BAD_MESSAGE;
   }
   int16_t replacement = -1;
-  uint16_t live_count = 0;
   for (uint16_t i = 0; i < catalog.entry_count; ++i)
     if (catalog.entries[i].state == ENTRY_LIVE)
     {
-      ++live_count;
-      if (app_key_equal(catalog.entries[i].app_key, begin->app_key))
+      if (catalog.entries[i].kind == begin->object_kind &&
+          object_key_equal(catalog.entries[i].object_key,
+                           begin->object_key))
         replacement = (int16_t)i;
     }
-  if (replacement < 0 && live_count >= CATALOG_MAX_LIVE)
+  if (replacement < 0)
   {
-    trace_clear();
-    return PRISM_MGMT_ERROR_NO_SPACE;
+    bool available_entry = catalog.entry_count < CATALOG_MAX_ENTRIES;
+    for (uint16_t i = 0; i < catalog.entry_count && !available_entry; ++i)
+      available_entry = catalog.entries[i].state != ENTRY_LIVE;
+    if (!available_entry)
+    {
+      trace_clear();
+      return PRISM_MGMT_ERROR_NO_SPACE;
+    }
   }
   int start = find_run(required);
   if (start < 0)
@@ -1025,7 +1317,7 @@ prism_management_status_t cartridge_storage_install_begin(
   installation.replacement_slot = replacement;
   allocation_cursor =
       (uint16_t)((installation.start_block + required) %
-                 PRISM_CARTRIDGE_BLOCK_COUNT);
+                 PRISM_STORAGE_BLOCK_COUNT);
   trace_clear();
   return PRISM_MGMT_OK;
 }
@@ -1035,14 +1327,16 @@ static bool ensure_install_sector_erased(uint16_t relative_sector)
   if (relative_sector >=
       installation.begin.required_blocks * CARTRIDGE_SECTORS_PER_BLOCK)
     return false;
-  if (installation.erased[relative_sector])
+  if (relative_sector < installation.erased_sector_count)
     return true;
+  if (relative_sector != installation.erased_sector_count)
+    return false;
   uint32_t offset =
       block_flash_offset(installation.start_block) +
       relative_sector * FLASH_SECTOR_SIZE;
   if (!prism_flash_erase(offset, FLASH_SECTOR_SIZE))
     return false;
-  installation.erased[relative_sector] = true;
+  installation.erased_sector_count++;
   return true;
 }
 
@@ -1058,7 +1352,7 @@ prism_management_status_t cartridge_storage_install_chunk(
       chunk->data_len <= 1024 &&
       chunk->offset + chunk->data_len == installation.received &&
       memcmp((const uint8_t *)XIP_BASE + PRISM_FLASH_CARTRIDGE_OFFSET +
-                 installation.start_block * PRISM_CARTRIDGE_BLOCK_BYTES +
+                 installation.start_block * PRISM_STORAGE_BLOCK_BYTES +
                  chunk->offset,
              chunk->data, chunk->data_len) == 0)
   {
@@ -1093,7 +1387,7 @@ prism_management_status_t cartridge_storage_install_chunk(
   memcpy(install_program_buffer, chunk->data, chunk->data_len);
   uint32_t flash_offset = PRISM_FLASH_CARTRIDGE_OFFSET +
                           installation.start_block *
-                              PRISM_CARTRIDGE_BLOCK_BYTES +
+                              PRISM_STORAGE_BLOCK_BYTES +
                           chunk->offset;
   if (!prism_flash_program(flash_offset, install_program_buffer,
                            program_bytes))
@@ -1136,104 +1430,140 @@ prism_management_status_t cartridge_storage_install_commit(void)
   uint32_t final_crc = installation.crc ^ UINT32_MAX;
   if (final_crc != installation.begin.package_crc32)
     return finish_install(PRISM_MGMT_ERROR_VERIFY);
-  const prism_package_header_t *header =
-      (const void *)((const uint8_t *)XIP_BASE +
-                     PRISM_FLASH_CARTRIDGE_OFFSET +
-                     installation.start_block * PRISM_CARTRIDGE_BLOCK_BYTES);
-  const prism_cartridge_t *package_descriptor = NULL;
-  const char *package_id = NULL;
-  if (!package_valid((const uint8_t *)header,
-                     installation.begin.required_blocks *
-                         PRISM_CARTRIDGE_BLOCK_BYTES) ||
-      header->package_size != installation.begin.package_bytes ||
-      !app_key_equal(header->app_key, installation.begin.app_key) ||
-      !package_metadata((const uint8_t *)header, header,
-                        &package_descriptor, &package_id, NULL))
-    return finish_install(PRISM_MGMT_ERROR_INVALID_CARTRIDGE);
-
-  const prism_registry_entry_t *id_owner = prism_registry_find(package_id);
-  const prism_registry_entry_t *key_owner =
-      prism_registry_find_app_key(header->app_key);
-  const prism_cartridge_t *replacement =
-      installation.replacement_slot >= 0
-          ? load_descriptor((uint16_t)installation.replacement_slot)
-          : NULL;
-  if ((id_owner != NULL && id_owner->cartridge != replacement) ||
-      (key_owner != NULL && key_owner->cartridge != replacement) ||
-      (replacement != NULL &&
-       prism_cartridge_update_check(
-           catalog.entries[installation.replacement_slot].app_key,
-           replacement->id, replacement->version, header->app_key,
-           package_id, package_descriptor->version) !=
-           PRISM_CARTRIDGE_UPDATE_MATCH))
-    return finish_install(PRISM_MGMT_ERROR_INVALID_CARTRIDGE);
-
-  if (catalog.entry_count >= CATALOG_MAX_ENTRIES)
-    return finish_install(PRISM_MGMT_ERROR_NO_SPACE);
-  uint16_t slot = catalog.entry_count;
-  uint16_t old_count = catalog.entry_count;
-  uint32_t old_generation = catalog.generation;
-  catalog_entry_t replaced = {0};
-  if (installation.replacement_slot >= 0)
+  const uint8_t *package =
+      (const uint8_t *)XIP_BASE + PRISM_FLASH_CARTRIDGE_OFFSET +
+      installation.start_block * PRISM_STORAGE_BLOCK_BYTES;
+  uint32_t allocated = installation.begin.required_blocks *
+                       PRISM_STORAGE_BLOCK_BYTES;
+  if (installation.begin.object_kind == PRISM_STORED_OBJECT_CARTRIDGE)
   {
-    replaced = catalog.entries[installation.replacement_slot];
-    catalog.entries[installation.replacement_slot].state = ENTRY_DEAD;
+    const prism_package_header_t *header = (const void *)package;
+    const prism_cartridge_t *package_descriptor = NULL;
+    const char *package_id = NULL;
+    if (!package_valid(package, allocated) ||
+        header->package_size != installation.begin.package_bytes ||
+        !object_key_equal(header->app_key,
+                          installation.begin.object_key) ||
+        !package_metadata(package, header, &package_descriptor,
+                          &package_id, NULL))
+      return finish_install(PRISM_MGMT_ERROR_INVALID_CARTRIDGE);
+
+    const prism_registry_entry_t *id_owner = prism_registry_find(package_id);
+    const prism_registry_entry_t *key_owner =
+        prism_registry_find_app_key(header->app_key);
+    const prism_cartridge_t *replacement =
+        installation.replacement_slot >= 0
+            ? load_descriptor((uint16_t)installation.replacement_slot)
+            : NULL;
+    if ((id_owner != NULL && id_owner->cartridge != replacement) ||
+        (key_owner != NULL && key_owner->cartridge != replacement) ||
+        (replacement != NULL &&
+         prism_cartridge_update_check(
+             catalog.entries[installation.replacement_slot].object_key,
+             replacement->id, replacement->version, header->app_key,
+             package_id, package_descriptor->version) !=
+             PRISM_CARTRIDGE_UPDATE_MATCH))
+      return finish_install(PRISM_MGMT_ERROR_INVALID_CARTRIDGE);
   }
-  catalog_entry_t *entry = &catalog.entries[slot];
+  else
+  {
+    prism_asset_pack_view_t candidate;
+    if (!prism_asset_pack_parse(package, allocated, &candidate) ||
+        candidate.header->package_size != installation.begin.package_bytes ||
+        !object_key_equal(candidate.header->pack_key,
+                          installation.begin.object_key))
+      return finish_install(PRISM_MGMT_ERROR_INVALID_ASSET_PACK);
+    if (installation.replacement_slot >= 0)
+    {
+      prism_asset_pack_view_t replacement;
+      if (!load_pack_view((uint16_t)installation.replacement_slot,
+                          &replacement) ||
+          strcmp(replacement.id, candidate.id) != 0 ||
+          strcmp(replacement.target_id, candidate.target_id) != 0 ||
+          candidate.header->version < replacement.header->version)
+        return finish_install(PRISM_MGMT_ERROR_INVALID_ASSET_PACK);
+    }
+  }
+
+  uint16_t slot;
+  if (installation.replacement_slot >= 0)
+    slot = (uint16_t)installation.replacement_slot;
+  else
+  {
+    slot = catalog.entry_count;
+    for (uint16_t i = 0; i < catalog.entry_count; ++i)
+      if (catalog.entries[i].state != ENTRY_LIVE)
+      {
+        slot = i;
+        break;
+      }
+    if (slot >= CATALOG_MAX_ENTRIES)
+      return finish_install(PRISM_MGMT_ERROR_NO_SPACE);
+  }
+  catalog_t *updated = catalog_edit_begin();
+  if (updated == NULL)
+    return finish_install(PRISM_MGMT_ERROR_NO_SPACE);
+  if (slot == updated->entry_count)
+    updated->entry_count++;
+  catalog_entry_t *entry = &updated->entries[slot];
   memset(entry, 0, sizeof(*entry));
-  memcpy(entry->app_key, installation.begin.app_key,
-         PRISM_APP_KEY_BYTES);
+  memcpy(entry->object_key, installation.begin.object_key,
+         sizeof(entry->object_key));
   entry->start_block = installation.start_block;
   entry->block_count = installation.begin.required_blocks;
   entry->package_bytes = installation.begin.package_bytes;
   entry->package_crc32 = installation.begin.package_crc32;
   entry->state = ENTRY_LIVE;
-  catalog.entry_count++;
-  memset(&runtime_descriptors[slot], 0, sizeof(runtime_descriptors[slot]));
-  if (!catalog_save())
-  {
-    catalog.entry_count = old_count;
-    catalog.generation = old_generation;
-    memset(entry, 0, sizeof(*entry));
-    if (installation.replacement_slot >= 0)
-      catalog.entries[installation.replacement_slot] = replaced;
+  entry->kind = installation.begin.object_kind;
+  if (!catalog_save(updated))
     return finish_install(PRISM_MGMT_ERROR_VERIFY);
-  }
-  if (installation.replacement_slot >= 0)
-    memset(&runtime_descriptors[installation.replacement_slot], 0,
-           sizeof(runtime_descriptors[installation.replacement_slot]));
   return finish_install(PRISM_MGMT_OK);
 }
 
-prism_management_status_t cartridge_storage_delete(
-    const uint8_t app_key[PRISM_APP_KEY_BYTES])
+static prism_management_status_t stored_object_delete(
+    uint8_t kind, const uint8_t object_key[PRISM_APP_KEY_BYTES])
 {
   trace_set(TRACE_DELETE, 0);
   for (uint16_t i = 0; i < catalog.entry_count; ++i)
     if (catalog.entries[i].state == ENTRY_LIVE &&
-        app_key_equal(catalog.entries[i].app_key, app_key))
+        catalog.entries[i].kind == kind &&
+        object_key_equal(catalog.entries[i].object_key, object_key))
     {
-      if (!platform_cartridge_data_delete(catalog.entries[i].app_key))
+      if (kind == PRISM_STORED_OBJECT_CARTRIDGE &&
+          !platform_cartridge_data_delete(catalog.entries[i].object_key))
       {
         trace_clear();
         return PRISM_MGMT_ERROR_VERIFY;
       }
-      catalog_entry_t previous = catalog.entries[i];
-      uint32_t old_generation = catalog.generation;
-      catalog.entries[i].state = ENTRY_DEAD;
-      if (!catalog_save())
+      catalog_t *updated = catalog_edit_begin();
+      if (updated == NULL)
       {
-        catalog.entries[i] = previous;
-        catalog.generation = old_generation;
+        trace_clear();
+        return PRISM_MGMT_ERROR_NO_SPACE;
+      }
+      updated->entries[i].state = ENTRY_DEAD;
+      if (!catalog_save(updated))
+      {
         trace_clear();
         return PRISM_MGMT_ERROR_VERIFY;
       }
-      memset(&runtime_descriptors[i], 0, sizeof(runtime_descriptors[i]));
       trace_clear();
       return PRISM_MGMT_OK;
     }
   trace_clear();
   return PRISM_MGMT_ERROR_NOT_FOUND;
+}
+
+prism_management_status_t cartridge_storage_delete(
+    const uint8_t app_key[PRISM_APP_KEY_BYTES])
+{
+  return stored_object_delete(PRISM_STORED_OBJECT_CARTRIDGE, app_key);
+}
+
+prism_management_status_t cartridge_storage_pack_delete(
+    const uint8_t pack_key[PRISM_PACK_KEY_BYTES])
+{
+  return stored_object_delete(PRISM_STORED_OBJECT_ASSET_PACK, pack_key);
 }
 
 prism_management_status_t cartridge_storage_compact(
@@ -1277,7 +1607,7 @@ prism_management_status_t cartridge_storage_compact(
   for (uint16_t i = 0; i < live_count; ++i)
   {
     uint16_t index = compaction_indices[i];
-    catalog_entry_t *entry = &catalog.entries[index];
+    const catalog_entry_t *entry = &catalog.entries[index];
     if (entry->start_block != target)
     {
       move_record.magic = MOVE_MAGIC;
@@ -1302,19 +1632,23 @@ prism_management_status_t cartridge_storage_compact(
     target += entry->block_count;
   }
 
-  /* Compact the catalog in place.  The previous implementation put a
-   * 120-entry (3840-byte) temporary catalog on the 2048-byte core-0 stack,
-   * corrupting the stack as soon as management invoked compaction. */
+  /* Compact the catalog in place. A full temporary catalog does not fit on
+   * the 2048-byte core-0 stack used by management operations. */
+  catalog_t *updated = catalog_edit_begin();
+  if (updated == NULL)
+  {
+    trace_clear();
+    return PRISM_MGMT_ERROR_NO_SPACE;
+  }
   uint16_t count = 0;
   for (uint16_t i = 0; i < catalog.entry_count; ++i)
     if (catalog.entries[i].state == ENTRY_LIVE)
-      catalog.entries[count++] = catalog.entries[i];
-  memset(&catalog.entries[count], 0,
-         (CATALOG_MAX_ENTRIES - count) * sizeof(catalog.entries[0]));
-  catalog.entry_count = count;
-  memset(runtime_descriptors, 0, sizeof(runtime_descriptors));
+      updated->entries[count++] = catalog.entries[i];
+  memset(&updated->entries[count], 0,
+         (CATALOG_MAX_ENTRIES - count) * sizeof(updated->entries[0]));
+  updated->entry_count = count;
   prism_management_status_t status =
-      catalog_save() ? PRISM_MGMT_OK : PRISM_MGMT_ERROR_VERIFY;
+      catalog_save(updated) ? PRISM_MGMT_OK : PRISM_MGMT_ERROR_VERIFY;
   if (status == PRISM_MGMT_OK && progress != NULL)
     progress(total == 0 ? 1 : total, total == 0 ? 1 : total, user);
   trace_clear();

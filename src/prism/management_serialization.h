@@ -15,3 +15,11 @@ bool prism_management_cartridge_list_append(
     const char *name);
 size_t prism_management_cartridge_list_size(const void *payload);
 
+void prism_management_asset_pack_list_init(void *payload, size_t capacity,
+                                           uint16_t total_count,
+                                           uint16_t start_index);
+bool prism_management_asset_pack_list_append(
+    void *payload, size_t capacity,
+    const prism_management_asset_pack_entry_t *entry, const char *id,
+    const char *name, const char *target_id);
+size_t prism_management_asset_pack_list_size(const void *payload);

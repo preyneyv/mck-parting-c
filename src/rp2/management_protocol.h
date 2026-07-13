@@ -11,5 +11,7 @@ void management_protocol_cartridges(
     uint16_t flags);
 void management_protocol_cartridge_icon(
     const prism_management_header_t *request, const uint8_t *app_key);
+void management_protocol_asset_packs(
+    const prism_management_header_t *request, uint16_t start_index);
 void management_protocol_mirror(void);
 void management_protocol_progress(uint16_t completed, uint16_t total);

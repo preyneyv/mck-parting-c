@@ -14,17 +14,18 @@
 
 #define PRISM_FLASH_CARTRIDGE_OFFSET PRISM_FLASH_FIRMWARE_END
 #define PRISM_FLASH_CARTRIDGE_BYTES                                        \
-  (PRISM_CARTRIDGE_BLOCK_COUNT * PRISM_CARTRIDGE_BLOCK_BYTES)
+  (PRISM_STORAGE_BLOCK_COUNT * PRISM_STORAGE_BLOCK_BYTES)
 #define PRISM_FLASH_CARTRIDGE_END                                          \
   (PRISM_FLASH_CARTRIDGE_OFFSET + PRISM_FLASH_CARTRIDGE_BYTES)
 
 #define PRISM_FLASH_COMPACTION_SCRATCH_OFFSET PRISM_FLASH_CARTRIDGE_END
 #define PRISM_FLASH_CATALOG0_OFFSET                                        \
-  (PRISM_FLASH_COMPACTION_SCRATCH_OFFSET + PRISM_CARTRIDGE_BLOCK_BYTES)
+  (PRISM_FLASH_COMPACTION_SCRATCH_OFFSET + PRISM_STORAGE_BLOCK_BYTES)
+#define PRISM_FLASH_CATALOG_SLOT_BYTES (2u * FLASH_SECTOR_SIZE)
 #define PRISM_FLASH_CATALOG1_OFFSET                                        \
-  (PRISM_FLASH_CATALOG0_OFFSET + FLASH_SECTOR_SIZE)
+  (PRISM_FLASH_CATALOG0_OFFSET + PRISM_FLASH_CATALOG_SLOT_BYTES)
 #define PRISM_FLASH_MOVE_JOURNAL_OFFSET                                    \
-  (PRISM_FLASH_CATALOG1_OFFSET + FLASH_SECTOR_SIZE)
+  (PRISM_FLASH_CATALOG1_OFFSET + PRISM_FLASH_CATALOG_SLOT_BYTES)
 #define PRISM_FLASH_MOVE_JOURNAL_SECTORS 8u
 #define PRISM_FLASH_MOVE_JOURNAL_BYTES                                     \
   (PRISM_FLASH_MOVE_JOURNAL_SECTORS * FLASH_SECTOR_SIZE)
@@ -33,13 +34,13 @@
 
 #define PRISM_FLASH_EXTRA_SCRATCH_OFFSET                                   \
   (PRISM_FLASH_COMPACTION_SCRATCH_OFFSET +                                \
-   2u * PRISM_CARTRIDGE_BLOCK_BYTES)
+   2u * PRISM_STORAGE_BLOCK_BYTES)
 #define PRISM_FLASH_SCRATCH_POOL_COUNT PRISM_FLASH_SCRATCH_POOL_MAX
 #define PRISM_FLASH_EXTRA_SCRATCH_COUNT                                    \
   (PRISM_FLASH_SCRATCH_POOL_COUNT - 1u)
 #define PRISM_FLASH_EXTRA_SCRATCH_END                                      \
   (PRISM_FLASH_EXTRA_SCRATCH_OFFSET +                                     \
-   PRISM_FLASH_EXTRA_SCRATCH_COUNT * PRISM_CARTRIDGE_BLOCK_BYTES)
+   PRISM_FLASH_EXTRA_SCRATCH_COUNT * PRISM_STORAGE_BLOCK_BYTES)
 
 #define PRISM_FLASH_CARTRIDGE_DATA_OFFSET (15u * 1024u * 1024u)
 #define PRISM_FLASH_SETTINGS_SLOT_COUNT 2u
@@ -67,13 +68,15 @@ _Static_assert(PRISM_FLASH_CARTRIDGE_END == 14u * 1024u * 1024u,
 _Static_assert(PRISM_FLASH_FIRMWARE_END <= PRISM_FLASH_CARTRIDGE_OFFSET,
                "firmware overlaps cartridge storage");
 _Static_assert(PRISM_FLASH_COMPACTION_SCRATCH_OFFSET +
-                       PRISM_CARTRIDGE_BLOCK_BYTES <=
+                       PRISM_STORAGE_BLOCK_BYTES <=
                    PRISM_FLASH_CATALOG0_OFFSET,
                "compaction scratch overlaps the catalog");
-_Static_assert(PRISM_FLASH_CATALOG0_OFFSET + FLASH_SECTOR_SIZE <=
+_Static_assert(PRISM_FLASH_CATALOG0_OFFSET +
+                       PRISM_FLASH_CATALOG_SLOT_BYTES <=
                    PRISM_FLASH_CATALOG1_OFFSET,
                "catalog slots overlap");
-_Static_assert(PRISM_FLASH_CATALOG1_OFFSET + FLASH_SECTOR_SIZE <=
+_Static_assert(PRISM_FLASH_CATALOG1_OFFSET +
+                       PRISM_FLASH_CATALOG_SLOT_BYTES <=
                    PRISM_FLASH_MOVE_JOURNAL_OFFSET,
                "catalog overlaps the move journal");
 _Static_assert(PRISM_FLASH_MOVE_JOURNAL_END <=
@@ -100,7 +103,7 @@ _Static_assert(PRISM_FLASH_FIRMWARE_END % FLASH_SECTOR_SIZE == 0,
                "firmware boundary must be sector aligned");
 _Static_assert(PRISM_FLASH_CARTRIDGE_OFFSET % FLASH_SECTOR_SIZE == 0,
                "cartridge storage must be sector aligned");
-_Static_assert(PRISM_CARTRIDGE_BLOCK_BYTES % FLASH_SECTOR_SIZE == 0,
+_Static_assert(PRISM_STORAGE_BLOCK_BYTES % FLASH_SECTOR_SIZE == 0,
                "cartridge blocks must contain whole sectors");
 _Static_assert(PRISM_FLASH_COMPACTION_SCRATCH_OFFSET % FLASH_SECTOR_SIZE == 0,
                "compaction scratch must be sector aligned");

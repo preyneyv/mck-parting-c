@@ -3,6 +3,7 @@
 #include <stdint.h>
 
 #include <prism/cartridge_identity.h>
+#include <prism/asset_pack.h>
 #include <prism/types.h>
 
 #define PRISM_MANAGEMENT_MAGIC 0x4d535250u /* "PRSM", little endian */
@@ -10,8 +11,8 @@
 #define PRISM_MANAGEMENT_MAX_PAYLOAD 4096u
 #define PRISM_SCREEN_BYTES 1024u
 #define PRISM_SERIAL_BYTES 8u
-#define PRISM_CARTRIDGE_BLOCK_BYTES (128u * 1024u)
-#define PRISM_CARTRIDGE_BLOCK_COUNT 96u
+#define PRISM_STORAGE_BLOCK_BYTES (64u * 1024u)
+#define PRISM_STORAGE_BLOCK_COUNT 192u
 #define PRISM_LED_PALETTE_MAX 16u
 #define PRISM_CARTRIDGE_NAME_MAX 31u
 
@@ -29,6 +30,7 @@ typedef enum
   PRISM_MGMT_CARTRIDGE_LIST = 0x04,
   PRISM_MGMT_CARTRIDGE_ICON = 0x05,
   PRISM_MGMT_REBOOT = 0x06,
+  PRISM_MGMT_ASSET_PACK_LIST = 0x07,
 
   PRISM_MGMT_INSTALL_BEGIN = 0x10,
   PRISM_MGMT_INSTALL_CHUNK = 0x11,
@@ -37,6 +39,7 @@ typedef enum
   PRISM_MGMT_COMPACT = 0x14,
   PRISM_MGMT_OPERATION_PROGRESS = 0x15,
   PRISM_MGMT_CARTRIDGE_LAUNCH = 0x16,
+  PRISM_MGMT_ASSET_PACK_DELETE = 0x17,
 
   PRISM_MGMT_SETTINGS_GET = 0x20,
   PRISM_MGMT_SETTINGS_PREVIEW = 0x21,
@@ -66,6 +69,7 @@ typedef enum
   PRISM_MGMT_ERROR_NOT_FOUND = 5,
   PRISM_MGMT_ERROR_VERIFY = 6,
   PRISM_MGMT_ERROR_INVALID_CARTRIDGE = 7,
+  PRISM_MGMT_ERROR_INVALID_ASSET_PACK = 8,
 } prism_management_status_t;
 
 typedef struct PRISM_PACKED
@@ -97,7 +101,7 @@ typedef struct PRISM_PACKED
   uint16_t firmware_minor;
   uint16_t firmware_patch;
   uint32_t flash_bytes;
-  uint32_t cartridge_block_bytes;
+  uint32_t storage_block_bytes;
   uint32_t capabilities;
 } prism_management_device_info_t;
 
@@ -111,7 +115,7 @@ typedef struct PRISM_PACKED
   uint16_t largest_reclaimable_run;
   uint16_t scratch_blocks;
   uint16_t required_blocks;
-  uint8_t block_states[PRISM_CARTRIDGE_BLOCK_COUNT];
+  uint8_t block_states[PRISM_STORAGE_BLOCK_COUNT];
 } prism_management_storage_info_t;
 
 enum
@@ -124,8 +128,9 @@ enum
   PRISM_CAP_COMPACTION = 1u << 5,
   PRISM_CAP_APP_LAUNCH = 1u << 6,
   PRISM_CAP_REBOOT = 1u << 7,
+  PRISM_CAP_ASSET_PACKS = 1u << 8,
 };
-#define PRISM_FLASH_SCRATCH_POOL_MAX 7u
+#define PRISM_FLASH_SCRATCH_POOL_MAX 15u
 
 typedef struct PRISM_PACKED
 {
@@ -148,6 +153,29 @@ typedef struct PRISM_PACKED
   uint16_t name_offset;
   uint16_t name_length;
 } prism_management_cartridge_entry_t;
+
+typedef struct PRISM_PACKED
+{
+  uint8_t pack_key[PRISM_PACK_KEY_BYTES];
+  uint8_t target_app_key[PRISM_APP_KEY_BYTES];
+  uint32_t package_bytes;
+  uint32_t version;
+  uint16_t blocks;
+  uint16_t status;
+  uint16_t id_offset;
+  uint16_t id_length;
+  uint16_t name_offset;
+  uint16_t name_length;
+  uint16_t target_id_offset;
+  uint16_t target_id_length;
+} prism_management_asset_pack_entry_t;
+
+enum
+{
+  PRISM_ASSET_PACK_STATUS_ENABLED = 0,
+  PRISM_ASSET_PACK_STATUS_TARGET_MISSING = 1u << 0,
+  PRISM_ASSET_PACK_STATUS_INCOMPATIBLE = 1u << 1,
+};
 
 typedef struct PRISM_PACKED
 {
@@ -223,11 +251,12 @@ typedef struct PRISM_PACKED
 
 typedef struct PRISM_PACKED
 {
-  uint8_t app_key[PRISM_APP_KEY_BYTES];
+  uint8_t object_key[PRISM_APP_KEY_BYTES];
   uint32_t package_bytes;
   uint32_t package_crc32;
   uint16_t required_blocks;
-  uint16_t reserved;
+  uint8_t object_kind;
+  uint8_t reserved;
   char name[PRISM_CARTRIDGE_NAME_MAX + 1];
   uint8_t icon[PRISM_CARTRIDGE_ICON_BYTES];
 } prism_management_install_begin_t;
@@ -244,6 +273,11 @@ typedef struct PRISM_PACKED
 {
   uint8_t app_key[PRISM_APP_KEY_BYTES];
 } prism_management_cartridge_id_t;
+
+typedef struct PRISM_PACKED
+{
+  uint8_t pack_key[PRISM_PACK_KEY_BYTES];
+} prism_management_asset_pack_id_t;
 
 enum
 {
@@ -271,6 +305,8 @@ _Static_assert(sizeof(prism_management_cartridge_list_t) == 8,
                "cartridge lists are part of the wire format");
 _Static_assert(sizeof(prism_management_cartridge_entry_t) == 40,
                "cartridge entries are part of the wire format");
+_Static_assert(sizeof(prism_management_asset_pack_entry_t) == 56,
+               "asset pack entries are part of the wire format");
 _Static_assert(sizeof(prism_management_cartridge_list_request_t) == 4,
                "cartridge list requests are part of the wire format");
 _Static_assert(sizeof(prism_led_settings_t) == 56,

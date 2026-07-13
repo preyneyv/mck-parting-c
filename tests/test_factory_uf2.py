@@ -66,6 +66,26 @@ def package(app_key: bytes, size: int) -> bytes:
     return bytes(contents)
 
 
+def asset_pack(pack_key: bytes, size: int) -> bytes:
+    assert len(pack_key) == factory.APP_KEY_BYTES
+    assert size >= factory.ASSET_PACK_HEADER_BYTES
+    contents = bytearray(size)
+    struct.pack_into(
+        "<IHHI",
+        contents,
+        0,
+        factory.ASSET_PACK_MAGIC,
+        factory.ASSET_PACK_FORMAT_VERSION,
+        factory.ASSET_PACK_HEADER_BYTES,
+        size,
+    )
+    contents[
+        factory.PACKAGE_APP_KEY_OFFSET :
+        factory.PACKAGE_APP_KEY_OFFSET + factory.APP_KEY_BYTES
+    ] = pack_key
+    return bytes(contents)
+
+
 def parse_uf2(contents: bytes):
     blocks = []
     assert len(contents) % factory.UF2_BLOCK_BYTES == 0
@@ -89,6 +109,41 @@ def read_region(blocks, target: int, size: int) -> bytes:
 
 
 class FactoryUf2Tests(unittest.TestCase):
+    def test_cartridges_and_asset_packs_share_factory_slots(self):
+        with tempfile.TemporaryDirectory() as raw_directory:
+            directory = Path(raw_directory)
+            firmware_path = directory / "prism.uf2"
+            cartridge_path = directory / "game.prism"
+            pack_path = directory / "tracks.prismpack"
+            output_path = directory / "prism_factory.uf2"
+            firmware_path.write_bytes(firmware_uf2())
+            shared_key = bytes(range(16))
+            cartridge_path.write_bytes(package(shared_key, 256))
+            pack_path.write_bytes(asset_pack(shared_key, 300))
+
+            objects = factory.build_factory_uf2(
+                firmware_path, output_path, [cartridge_path, pack_path]
+            )
+            self.assertEqual(
+                [value.kind for value in objects],
+                [factory.OBJECT_CARTRIDGE, factory.OBJECT_ASSET_PACK],
+            )
+            self.assertEqual([value.start_block for value in objects], [0, 1])
+
+            blocks = parse_uf2(output_path.read_bytes())
+            catalog = read_region(
+                blocks,
+                factory.XIP_BASE + factory.CATALOG1_OFFSET,
+                factory.CATALOG_SLOT_BYTES,
+            )
+            entries = catalog[factory.CATALOG_HEADER_BYTES:]
+            first = struct.unpack_from("<16sHHIIBBH", entries, 0)
+            second = struct.unpack_from(
+                "<16sHHIIBBH", entries, factory.CATALOG_ENTRY_BYTES
+            )
+            self.assertEqual(first[6], factory.OBJECT_CARTRIDGE)
+            self.assertEqual(second[6], factory.OBJECT_ASSET_PACK)
+
     def test_packages_are_normal_catalog_entries_in_final_blocks(self):
         with tempfile.TemporaryDirectory() as raw_directory:
             directory = Path(raw_directory)
@@ -140,7 +195,7 @@ class FactoryUf2Tests(unittest.TestCase):
                 catalog = read_region(
                     blocks,
                     factory.XIP_BASE + slot_offset,
-                    factory.FLASH_SECTOR_BYTES,
+                    factory.CATALOG_SLOT_BYTES,
                 )
                 magic, version, count, actual_generation, flags, entries_crc = (
                     struct.unpack_from("<IHHIII", catalog)
@@ -157,14 +212,23 @@ class FactoryUf2Tests(unittest.TestCase):
                 ]
                 self.assertEqual(zlib.crc32(live_entries), entries_crc)
 
-                entry0 = struct.unpack_from("<16sHHIIB3s", live_entries, 0)
+                entry0 = struct.unpack_from("<16sHHIIBBH", live_entries, 0)
                 entry1 = struct.unpack_from(
-                    "<16sHHIIB3s", live_entries, factory.CATALOG_ENTRY_BYTES
+                    "<16sHHIIBBH", live_entries,
+                    factory.CATALOG_ENTRY_BYTES
                 )
                 self.assertEqual(entry0[:3], (bytes(range(16)), 0, 1))
                 self.assertEqual(entry1[:3], (bytes(range(16, 32)), 1, 2))
-                self.assertEqual(entry0[3:6], (len(first), zlib.crc32(first), 1))
-                self.assertEqual(entry1[3:6], (len(second), zlib.crc32(second), 1))
+                self.assertEqual(
+                    entry0[3:7],
+                    (len(first), zlib.crc32(first), 1,
+                     factory.OBJECT_CARTRIDGE),
+                )
+                self.assertEqual(
+                    entry1[3:7],
+                    (len(second), zlib.crc32(second), 1,
+                     factory.OBJECT_CARTRIDGE),
+                )
 
             self.assertEqual(
                 read_region(
@@ -207,7 +271,7 @@ class FactoryUf2Tests(unittest.TestCase):
             second_path.write_bytes(package(duplicate_key, 512))
 
             with self.assertRaisesRegex(
-                factory.FactoryImageError, "duplicate factory cartridge"
+                factory.FactoryImageError, "duplicate factory stored-object"
             ):
                 factory.build_factory_uf2(
                     firmware_path,

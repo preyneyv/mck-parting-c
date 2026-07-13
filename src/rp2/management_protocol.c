@@ -24,15 +24,43 @@ void management_protocol_device_info(
       .firmware_minor = 0,
       .firmware_patch = 0,
       .flash_bytes = PICO_FLASH_SIZE_BYTES,
-      .cartridge_block_bytes = PRISM_CARTRIDGE_BLOCK_BYTES,
+      .storage_block_bytes = PRISM_STORAGE_BLOCK_BYTES,
       .capabilities = PRISM_CAP_MIRROR | PRISM_CAP_REMOTE_INPUT |
                       PRISM_CAP_LOGS | PRISM_CAP_SETTINGS |
                       PRISM_CAP_CARTRIDGES | PRISM_CAP_COMPACTION |
-                      PRISM_CAP_APP_LAUNCH | PRISM_CAP_REBOOT,
+                      PRISM_CAP_APP_LAUNCH | PRISM_CAP_REBOOT |
+                      PRISM_CAP_ASSET_PACKS,
   };
   platform_device_id(info.serial);
   management_transport_queue(request->type, PRISM_MGMT_FLAG_RESPONSE,
                              request->request_id, &info, sizeof(info));
+}
+
+void management_protocol_asset_packs(
+    const prism_management_header_t *request, uint16_t start_index)
+{
+  static uint8_t payload[PRISM_MANAGEMENT_MAX_PAYLOAD];
+  size_t count = cartridge_storage_pack_count();
+  uint16_t total_count = count > UINT16_MAX ? UINT16_MAX : (uint16_t)count;
+  if (start_index > total_count)
+    start_index = total_count;
+  prism_management_asset_pack_list_init(payload, sizeof(payload),
+                                         total_count, start_index);
+  for (size_t i = start_index; i < count; ++i)
+  {
+    prism_management_asset_pack_entry_t entry;
+    const char *id;
+    const char *name;
+    const char *target_id;
+    if (!cartridge_storage_pack_entry(i, &entry, &id, &name, &target_id))
+      continue;
+    if (!prism_management_asset_pack_list_append(
+            payload, sizeof(payload), &entry, id, name, target_id))
+      break;
+  }
+  management_transport_queue(
+      request->type, PRISM_MGMT_FLAG_RESPONSE, request->request_id, payload,
+      (uint32_t)prism_management_asset_pack_list_size(payload));
 }
 
 void management_protocol_cartridges(
