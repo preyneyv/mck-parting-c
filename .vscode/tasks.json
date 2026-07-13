@@ -10,8 +10,25 @@
         "-B", "${workspaceFolder}/build",
         "-G", "Ninja",
         "-DCMAKE_BUILD_TYPE=Release",
+        "-DPRISM_ASSET_AUTHORING=ON",
         "-DCMAKE_MAKE_PROGRAM=${userHome}/.pico-sdk/ninja/v1.12.1/ninja"
       ],
+      "problemMatcher": "$gcc",
+      "windows": {
+        "command": "${env:USERPROFILE}/.pico-sdk/cmake/v3.31.5/bin/cmake.exe"
+      }
+    },
+    {
+      "label": "rp2: author assets",
+      "type": "process",
+      "command": "${userHome}/.pico-sdk/cmake/v3.31.5/bin/cmake",
+      "args": [
+        "--build", "${workspaceFolder}/build",
+        "--target", "generate_sounds", "generate_sprites",
+        "--parallel", "8"
+      ],
+      "dependsOn": ["rp2: configure release"],
+      "dependsOrder": "sequence",
       "problemMatcher": "$gcc",
       "windows": {
         "command": "${env:USERPROFILE}/.pico-sdk/cmake/v3.31.5/bin/cmake.exe"
@@ -22,7 +39,7 @@
       "type": "process",
       "command": "${userHome}/.pico-sdk/ninja/v1.12.1/ninja",
       "args": ["-C", "${workspaceFolder}/build"],
-      "dependsOn": ["rp2: configure release"],
+      "dependsOn": ["rp2: author assets"],
       "dependsOrder": "sequence",
       "group": "build",
       "problemMatcher": "$gcc",
@@ -44,7 +61,7 @@
       "label": "rp2: run",
       "type": "process",
       "command": "${env:HOME}/.pico-sdk/picotool/2.2.0/picotool/picotool",
-      "args": ["load", "${command:raspberry-pi-pico.launchTargetPath}", "-fx"],
+      "args": ["load", "${workspaceFolder}/build/prism.uf2", "-x"],
       "problemMatcher": [],
       "windows": {
         "command": "${env:USERPROFILE}/.pico-sdk/picotool/2.2.0/picotool/picotool.exe"
