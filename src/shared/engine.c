@@ -405,20 +405,26 @@ static void reset_buttons(bool ignore_menu)
 
 static void handle_menu_reset()
 {
+  static platform_time_t pressed_at = PLATFORM_TIME_ZERO;
+
   // if the menu button is held down for a while, reset using watchdog
   platform_watchdog_update();
-  if (g_engine.buttons.menu.pressed)
+  if (!g_engine.buttons.menu.pressed)
   {
-    if (platform_time_reached(
-            platform_time_add_ms(g_engine.buttons.menu.pressed_at, 5000)))
-    {
-      prism_settings_flush();
-      // reset the system
-      platform_system_reset();
-      while (1)
-        ;
-    }
+    pressed_at = PLATFORM_TIME_ZERO;
+    return;
   }
+
+  if (pressed_at == PLATFORM_TIME_ZERO)
+    pressed_at = platform_now_us();
+  if (!platform_time_reached(platform_time_add_ms(pressed_at, 5000)))
+    return;
+
+  prism_settings_flush();
+  // reset the system
+  platform_system_reset();
+  while (1)
+    ;
 }
 
 static platform_wake_result_t engine_sleep_cycle(uint32_t quick_wake_ms)
