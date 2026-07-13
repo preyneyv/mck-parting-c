@@ -1,8 +1,9 @@
 # Prism cartridges
 
 A cartridge is position-independent ARM code packaged in a `.prism` file. The
-same source also runs in the SDL host simulator, so cartridge authors can
-iterate without hardware.
+SDL host simulator runs that same ARM package through Unicorn, so cartridge
+authors get the same static-data lifecycle as hardware while iterating without
+the device.
 
 The main Prism simulator can also execute the packaged ARM artifact itself:
 
@@ -38,7 +39,6 @@ PRISM_CARTRIDGE(cartridge_example,
     .version = 1,
     .tick_divider = 8, // 960 / 8 = 120 Hz
     .icon = example_icon,
-    .state_size = sizeof(example_state_t),
     .enter = enter,
     .tick = tick,
     .frame = frame,
@@ -68,19 +68,29 @@ omitted and default to zero.
 default of one. Divider 1 runs at 960 Hz, 2 at 480 Hz, 4 at 240 Hz, 8 at
 120 Hz, and 16 at 60 Hz. Arbitrary nonzero integer dividers are valid.
 
-The runtime allocates and zeroes `state_size` bytes before `enter`, exposes the
-allocation as `prism->state`, and frees it after `leave`. Persistent state works
-the same way: set `persistent_size` and `persistent_schema_version`, mutate
-`prism->persistent`, then call `prism_persist`. Writes are coalesced by the OS.
-Uninstalling a cartridge deletes its persistent state.
+Use ordinary mutable static objects for launch-scoped state:
+
+```c
+static example_state_t state;
+static uint32_t attempts = 3;
+```
+
+The package records the linked writable-data template and BSS size. Each
+launch recreates that image, so zero-initialized statics start at zero and
+explicit initializers return to their authored values after close/relaunch.
+`static const` data remains in the read-only image. Persistent state is
+separate and explicit: set `persistent_size` and
+`persistent_schema_version`, mutate `prism->persistent`, then call
+`prism_persist`. Writes are coalesced by the OS. Uninstalling a cartridge
+deletes its persistent state.
 
 ## Lifecycle
 
-- `enter`: initialize the cartridge after state is available.
+- `enter`: initialize the cartridge after its mutable static image is ready.
 - `tick`: handle input and simulation at `960 / tick_divider` Hz.
 - `frame`: draw the next 128x64 frame.
 - `pause` / `resume`: surround the system menu and sleep.
-- `leave`: release resources not owned by the state blocks.
+- `leave`: release resources not owned by cartridge statics or persistence.
 
 Input is sampled at 960 Hz independently of the cartridge divider. Key-down
 and key-up transitions remain latched until the next cartridge tick, and their

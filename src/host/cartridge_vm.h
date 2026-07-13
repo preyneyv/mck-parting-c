@@ -26,3 +26,4 @@ host_cartridge_vm_create(const host_cartridge_package_t *package);
 void host_cartridge_vm_destroy(host_cartridge_vm_t *vm);
 bool host_cartridge_vm_call(host_cartridge_vm_t *vm, uint32_t function,
                             prism_t *context);
+bool host_cartridge_vm_take_failure(host_cartridge_vm_t *vm);

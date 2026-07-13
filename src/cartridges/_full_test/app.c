@@ -1,5 +1,6 @@
 #include <inttypes.h>
 #include <stdio.h>
+#include <stdlib.h>
 
 #include <prism/sdk.h>
 
@@ -62,6 +63,10 @@ typedef struct
 
 static state_t *state;
 
+#if defined(PRISM_TESTING)
+static bool test_allocation_failure;
+#endif
+
 static void synth_note(prism_t *prism, uint8_t patch, uint8_t note,
                        bool pressed)
 {
@@ -108,7 +113,16 @@ static audio_synth_patch_config_t diagnostic_patch(void)
 
 static void enter(prism_t *prism)
 {
-  state = prism->state;
+#if defined(PRISM_TESTING)
+  if (test_allocation_failure)
+  {
+    state = NULL;
+    return;
+  }
+#endif
+  state = calloc(1, sizeof(*state));
+  if (state == NULL)
+    return;
   state->fps_window_started = prism_now_us(prism);
   state->next_auto_note_tick = prism_ticks(prism);
   state->auto_note = 60;
@@ -120,6 +134,8 @@ static void enter(prism_t *prism)
 static void tick(prism_t *prism)
 {
   static const uint8_t button_notes[] = {48, 60, 72};
+  if (state == NULL)
+    return;
   uint32_t now = prism_ticks(prism);
 
   if (state->auto_note_active &&
@@ -199,6 +215,15 @@ static void draw_button(u8g2_t *u8g2, int16_t x, const char *label,
 
 static void frame(prism_t *prism)
 {
+  if (state == NULL)
+  {
+    u8g2_t *u8g2 = prism_display(prism);
+    u8g2_SetDrawColor(u8g2, 1);
+    u8g2_SetFont(u8g2, u8g2_font_6x10_tf);
+    u8g2_DrawStr(u8g2, 0, 9, "full test");
+    u8g2_DrawStr(u8g2, 0, 23, "out of memory");
+    return;
+  }
   prism_time_t now = prism_now_us(prism);
   ++state->frame_count;
   int64_t elapsed = prism_time_diff_us(
@@ -247,14 +272,35 @@ static void frame(prism_t *prism)
               prism_button_pressed(prism, PRISM_BUTTON_RIGHT));
 }
 
+static void leave(prism_t *prism)
+{
+  if (state == NULL)
+    return;
+  synth_note(prism, 0, state->auto_note, false);
+  static const uint8_t button_notes[] = {48, 60, 72};
+  for (uint8_t i = 0; i < 3; ++i)
+    synth_note(prism, 1, button_notes[i], false);
+  free(state);
+  state = NULL;
+}
+
 PRISM_CARTRIDGE(cartridge_full_test,
     .id = "dev.preyneyv.prism.full-test",
     .name = "full test",
     .version = 1,
     .tick_divider = 1,
     .icon = diagnostic_icon,
-    .state_size = sizeof(state_t),
     .enter = enter,
     .tick = tick,
     .frame = frame,
+    .leave = leave,
 );
+
+#if defined(PRISM_TESTING)
+void prism_full_test_set_allocation_failure(bool fail)
+{
+  test_allocation_failure = fail;
+}
+
+bool prism_full_test_has_allocation(void) { return state != NULL; }
+#endif

@@ -8,20 +8,6 @@
   (PRISM_REGISTRY_POLICY_BUNDLED | PRISM_REGISTRY_POLICY_UNDELETABLE)
 #define DIAGNOSTIC_POLICY (BUILTIN_POLICY | PRISM_REGISTRY_POLICY_HIDDEN)
 
-#if !defined(PICO_ON_DEVICE) || !PICO_ON_DEVICE
-static const prism_registry_entry_t entries[] = {
-    {&cartridge_bongocat, BUILTIN_POLICY},
-    {&cartridge_morse, BUILTIN_POLICY},
-    {&cartridge_asteroids, BUILTIN_POLICY},
-    {&cartridge_beatline, BUILTIN_POLICY},
-    {&cartridge_full_test, DIAGNOSTIC_POLICY},
-};
-
-static size_t builtin_count(void)
-{
-  return sizeof(entries) / sizeof(entries[0]);
-}
-#else
 static const prism_registry_entry_t entries[] = {
     {&cartridge_full_test, DIAGNOSTIC_POLICY},
 };
@@ -30,7 +16,6 @@ static size_t builtin_count(void)
 {
   return sizeof(entries) / sizeof(entries[0]);
 }
-#endif
 
 size_t prism_registry_count(void)
 {

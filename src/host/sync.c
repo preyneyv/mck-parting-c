@@ -1,4 +1,5 @@
 #include <pthread.h>
+#include <sched.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -92,3 +93,4 @@ bool platform_queue_try_pop(platform_queue_t *queue, void *out) {
 }
 
 void platform_memory_barrier(void) {}
+void platform_yield(void) { sched_yield(); }

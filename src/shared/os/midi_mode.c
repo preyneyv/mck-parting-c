@@ -1,6 +1,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include <platform/display.h>
@@ -73,10 +74,23 @@ typedef struct
   int16_t imaginary[FFT_SIZE];
 } midi_analyzer_t;
 
-static midi_analyzer_t analyzer;
-static int16_t twiddle_real[FFT_SIZE / 2];
-static int16_t twiddle_imaginary[FFT_SIZE / 2];
-static bool twiddles_initialized;
+typedef struct
+{
+  midi_analyzer_t analyzer;
+  int16_t twiddle_real[FFT_SIZE / 2];
+  int16_t twiddle_imaginary[FFT_SIZE / 2];
+  audio_synth_analysis_buffers_t capture;
+} midi_mode_state_t;
+
+static midi_mode_state_t *midi_state;
+
+#if defined(PRISM_TESTING)
+static bool test_allocation_failure;
+#endif
+
+#define analyzer (midi_state->analyzer)
+#define twiddle_real (midi_state->twiddle_real)
+#define twiddle_imaginary (midi_state->twiddle_imaginary)
 
 /* Each pair brackets one logarithmic display band. The 94 Hz to 8 kHz range
  * keeps the useful musical and built-in-speaker spectrum spread across the
@@ -98,10 +112,7 @@ static int16_t q31_to_q15(int32_t value)
 
 static void initialize_twiddles(void)
 {
-  if (twiddles_initialized)
-    return;
-
-  /* Unit rotation by -2*pi/1024 in Q1.31. Building the table once avoids
+  /* Unit rotation by -2*pi/1024 in Q1.31. Building the table on entry avoids
    * floating point and trigonometry in both initialization and the FFT. */
   const int32_t step_real = 2147443221;
   const int32_t step_imaginary = -13176712;
@@ -122,7 +133,6 @@ static void initialize_twiddles(void)
     real = next_real;
     imaginary = next_imaginary;
   }
-  twiddles_initialized = true;
 }
 
 static uint16_t reverse_fft_bits(uint16_t value)
@@ -247,19 +257,36 @@ static void analyzer_update_bands(void)
 
 static void enter(void)
 {
-  memset(&analyzer, 0, sizeof(analyzer));
+#if defined(PRISM_TESTING)
+  if (test_allocation_failure)
+  {
+    midi_state = NULL;
+    return;
+  }
+#endif
+  midi_state = calloc(1, sizeof(*midi_state));
+  if (midi_state == NULL)
+    return;
   initialize_twiddles();
   analyzer.late_count = audio_synth_analysis_late_count(engine_synth());
   analyzer.underrun_count =
       audio_synth_analysis_underrun_count(engine_synth());
   analyzer.queue_full_count =
       audio_synth_message_queue_full_count(engine_synth());
-  audio_synth_analysis_set_enabled(engine_synth(), true);
+  if (!audio_synth_analysis_enable(engine_synth(), &midi_state->capture))
+  {
+    free(midi_state);
+    midi_state = NULL;
+  }
 }
 
 static void leave(void)
 {
-  audio_synth_analysis_set_enabled(engine_synth(), false);
+  if (midi_state == NULL)
+    return;
+  audio_synth_analysis_disable_sync(engine_synth());
+  free(midi_state);
+  midi_state = NULL;
 }
 
 static void tick(void)
@@ -267,6 +294,8 @@ static void tick(void)
   /* MIDI synth is an OS mode, not an idle application: it must remain awake
    * even when the controller leaves a note sustaining without more traffic. */
   engine_mark_input();
+  if (midi_state == NULL)
+    return;
 
   analyzer.tick++;
   uint32_t late_count = audio_synth_analysis_late_count(engine_synth());
@@ -443,9 +472,26 @@ static void draw_vu(u8g2_t *u8g2)
 
 static void frame(void)
 {
-  update_display_levels();
   u8g2_t *u8g2 = platform_display_get_u8g2();
   u8g2_SetDrawColor(u8g2, 1);
+  if (midi_state == NULL)
+  {
+    u8g2_SetFont(u8g2, u8g2_font_5x7_tr);
+    u8g2_DrawStr(u8g2, 0, 7, "synth");
+    uint16_t active = audio_synth_active_voice_mask(engine_synth());
+    for (uint8_t voice = 0; voice < AUDIO_SYNTH_VOICE_COUNT; voice++)
+    {
+      uint8_t x = (uint8_t)(45u + voice * 7u);
+      if ((active & (1u << voice)) != 0)
+        u8g2_DrawBox(u8g2, x, 2, 5, 5);
+      else
+        u8g2_DrawFrame(u8g2, x, 2, 5, 5);
+    }
+    u8g2_SetFont(u8g2, u8g2_font_4x6_tf);
+    u8g2_DrawStr(u8g2, 0, 17, "analysis unavailable");
+    return;
+  }
+  update_display_levels();
   draw_header(u8g2);
   draw_spectrum(u8g2);
   draw_vu(u8g2);
@@ -473,3 +519,17 @@ void prism_midi_mode_usb_disconnected(void)
   if (prism_midi_mode_active())
     engine_set_app(NULL);
 }
+
+#if defined(PRISM_TESTING)
+void prism_midi_mode_test_set_allocation_failure(bool fail)
+{
+  test_allocation_failure = fail;
+}
+
+void prism_midi_mode_test_enter(void) { enter(); }
+void prism_midi_mode_test_leave(void) { leave(); }
+size_t prism_midi_mode_test_allocation_bytes(void)
+{
+  return midi_state == NULL ? 0 : sizeof(*midi_state);
+}
+#endif

@@ -16,7 +16,6 @@
 
 static const prism_cartridge_t *current;
 static const prism_cartridge_t *pending;
-static void *pending_state;
 static void *pending_persistent;
 static platform_cartridge_execution_t current_execution;
 static platform_cartridge_execution_t pending_execution;
@@ -112,9 +111,6 @@ static void adapter_enter(void)
     return;
   context.api = &api_v1;
   context.cartridge = current;
-  context.state_size = current->state_size;
-  context.state = pending_state;
-  pending_state = NULL;
   context.persistent_size = current->persistent_size;
   context.persistent = pending_persistent;
   pending_persistent = NULL;
@@ -154,7 +150,6 @@ static void adapter_leave(void)
   if (current != NULL && current->leave != NULL)
     platform_cartridge_call(&current_execution, current->leave, &context);
   prism_cartridge_persistence_flush();
-  free(context.state);
   free(context.persistent);
   platform_cartridge_release(&current_execution);
   memset(&context, 0, sizeof(context));
@@ -181,27 +176,15 @@ bool prism_cartridge_launch(const prism_cartridge_t *cartridge)
       cartridge->icon == NULL || cartridge->frame == NULL)
     return false;
 
-  void *state = NULL;
   void *persistent = NULL;
   platform_cartridge_execution_t execution = {0};
   if (!platform_cartridge_prepare(cartridge, &execution))
     return false;
-  if (cartridge->state_size > 0)
-  {
-    state = calloc(1, cartridge->state_size);
-    if (state == NULL)
-    {
-      platform_cartridge_release(&execution);
-      return false;
-    }
-  }
-
   if (cartridge->persistent_size > 0)
   {
     persistent = calloc(1, cartridge->persistent_size);
     if (persistent == NULL)
     {
-      free(state);
       platform_cartridge_release(&execution);
       return false;
     }
@@ -209,7 +192,6 @@ bool prism_cartridge_launch(const prism_cartridge_t *cartridge)
     if (!prism_app_key_derive(cartridge->id, app_key))
     {
       free(persistent);
-      free(state);
       platform_cartridge_release(&execution);
       return false;
     }
@@ -218,7 +200,6 @@ bool prism_cartridge_launch(const prism_cartridge_t *cartridge)
   }
 
   pending = cartridge;
-  pending_state = state;
   pending_persistent = persistent;
   pending_execution = execution;
   memset(adapter.name, 0, sizeof(adapter.name));

@@ -1,6 +1,7 @@
 #include <stdlib.h>
 
 #include <hardware/sync.h>
+#include <pico/stdlib.h>
 #include <pico/sync.h>
 #include <pico/util/queue.h>
 
@@ -62,3 +63,4 @@ bool platform_queue_try_pop(platform_queue_t *queue, void *out) {
 }
 
 void platform_memory_barrier(void) { __dmb(); }
+void platform_yield(void) { tight_loop_contents(); }

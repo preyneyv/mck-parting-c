@@ -50,6 +50,11 @@ struct audio_synth_voice
   audio_synth_t *synth;
 };
 
+typedef struct
+{
+  int16_t samples[2][AUDIO_SYNTH_ANALYSIS_SAMPLE_COUNT];
+} audio_synth_analysis_buffers_t;
+
 struct audio_synth_t
 {
   float sample_rate;
@@ -67,13 +72,16 @@ struct audio_synth_t
   uint16_t analysis_peak;
   uint32_t analysis_late_count;
   uint32_t analysis_underrun_count;
+  audio_synth_analysis_buffers_t *analysis_buffers;
+  audio_synth_analysis_buffers_t *analysis_active_buffers;
   bool analysis_requested;
   bool analysis_active;
+  uint32_t analysis_request_generation;
+  uint32_t analysis_ack_generation;
   uint8_t analysis_write_index;
   uint16_t analysis_write_offset;
   uint32_t analysis_generation;
   uint32_t analysis_published;
-  int16_t analysis_samples[2][AUDIO_SYNTH_ANALYSIS_SAMPLE_COUNT];
 };
 
 void audio_synth_init(audio_synth_t *synth, float sample_rate,
@@ -83,7 +91,9 @@ void audio_synth_panic_sync(audio_synth_t *synth);
 void audio_synth_fill_buffer(audio_synth_t *synth, audio_buffer_t buffer,
                              uint32_t buffer_size);
 void audio_synth_set_master_level(audio_synth_t *synth, q1x15 level);
-void audio_synth_analysis_set_enabled(audio_synth_t *synth, bool enabled);
+bool audio_synth_analysis_enable(audio_synth_t *synth,
+                                 audio_synth_analysis_buffers_t *buffers);
+void audio_synth_analysis_disable_sync(audio_synth_t *synth);
 uint16_t audio_synth_active_voice_mask(const audio_synth_t *synth);
 uint16_t audio_synth_analysis_take_peak(audio_synth_t *synth);
 bool audio_synth_analysis_snapshot(

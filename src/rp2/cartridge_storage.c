@@ -1,4 +1,6 @@
 #include "cartridge_storage.h"
+
+#include "shared/os/bundled_package.h"
 #include "cartridge_runtime_exports.h"
 #include "flash_io.h"
 #include "flash_layout.h"
@@ -21,6 +23,7 @@
 #include <qrcodegen.h>
 #include <shared/audio/song.h>
 #include <shared/audio/synth_internal.h>
+#include <shared/os/cartridge_image.h>
 #include <u8g2.h>
 
 #define CARTRIDGE_SECTORS_PER_BLOCK                                      \
@@ -32,7 +35,6 @@
   (PRISM_FLASH_MOVE_JOURNAL_SECTORS * MOVE_JOURNAL_PAGES_PER_SECTOR)
 #define CATALOG_MAGIC 0x54414350u /* PCAT */
 #define CATALOG_VERSION 1u
-#define CATALOG_FLAG_DEFAULTS_SEEDED (1u << 0)
 #define CATALOG_MAX_ENTRIES 120u
 #define CATALOG_MAX_LIVE 32u
 #define ENTRY_LIVE 1u
@@ -194,6 +196,12 @@ static const uint8_t *entry_package(const catalog_entry_t *entry)
 
 static uintptr_t resolve_import(uint16_t symbol);
 
+static uint32_t resolve_launch_import(uint16_t symbol, void *user)
+{
+  (void)user;
+  return (uint32_t)resolve_import(symbol);
+}
+
 static bool package_metadata(const uint8_t *package,
                              const prism_package_header_t *header,
                              const prism_cartridge_t **descriptor_out,
@@ -351,14 +359,14 @@ static bool catalog_valid(const catalog_t *value)
                    value->entry_count * sizeof(catalog_entry_t));
 }
 
-static bool catalog_contains_app_key(
+static int catalog_find_app_key(
     const uint8_t app_key[PRISM_APP_KEY_BYTES])
 {
   for (uint16_t i = 0; i < catalog.entry_count; ++i)
     if (catalog.entries[i].state == ENTRY_LIVE &&
         memcmp(catalog.entries[i].app_key, app_key, PRISM_APP_KEY_BYTES) == 0)
-      return true;
-  return false;
+      return (int)i;
+  return -1;
 }
 
 static bool seed_default_cartridge(const default_cartridge_t *value)
@@ -367,15 +375,33 @@ static bool seed_default_cartridge(const default_cartridge_t *value)
   if (size < sizeof(prism_package_header_t) || size > UINT32_MAX)
     return false;
   const prism_package_header_t *header = (const void *)value->start;
-  if (header->magic != PRISM_PACKAGE_MAGIC || header->package_size != size)
+  const prism_cartridge_t *bundled_descriptor = NULL;
+  if (!package_valid(value->start, (uint32_t)size) ||
+      header->package_size != size ||
+      !package_metadata(value->start, header, &bundled_descriptor, NULL,
+                        NULL))
     return false;
-  if (catalog_contains_app_key(header->app_key))
-    return true;
+
+  uint32_t package_crc32 = crc32(value->start, size);
+  int installed_slot = catalog_find_app_key(header->app_key);
+  if (installed_slot >= 0)
+  {
+    const prism_cartridge_t *installed_descriptor =
+        load_descriptor((uint16_t)installed_slot);
+    if (installed_descriptor == NULL)
+      return false;
+    const catalog_entry_t *installed = &catalog.entries[installed_slot];
+    if (!prism_bundled_package_should_replace(
+            installed_descriptor->version, installed->package_bytes,
+            installed->package_crc32, bundled_descriptor->version,
+            (uint32_t)size, package_crc32))
+      return true;
+  }
 
   prism_management_install_begin_t begin = {0};
   memcpy(begin.app_key, header->app_key, sizeof(begin.app_key));
   begin.package_bytes = (uint32_t)size;
-  begin.package_crc32 = crc32(value->start, size);
+  begin.package_crc32 = package_crc32;
   begin.required_blocks = (uint16_t)((size + PRISM_CARTRIDGE_BLOCK_BYTES - 1u) /
                                      PRISM_CARTRIDGE_BLOCK_BYTES);
   if (cartridge_storage_install_begin(&begin) != PRISM_MGMT_OK)
@@ -409,14 +435,10 @@ static bool seed_default_cartridge(const default_cartridge_t *value)
 
 static void seed_default_cartridges(void)
 {
-  if ((catalog.flags & CATALOG_FLAG_DEFAULTS_SEEDED) != 0)
-    return;
   for (size_t i = 0;
        i < sizeof(default_cartridges) / sizeof(default_cartridges[0]); ++i)
     if (!seed_default_cartridge(&default_cartridges[i]))
       return;
-  catalog.flags |= CATALOG_FLAG_DEFAULTS_SEEDED;
-  catalog_save();
 }
 
 static bool catalog_save(void)
@@ -696,8 +718,8 @@ void cartridge_storage_init(void)
   allocation_cursor =
       (uint16_t)(catalog.generation % PRISM_CARTRIDGE_BLOCK_COUNT);
   recover_move(NULL, NULL, NULL, 0);
-  seed_default_cartridges();
   reconcile_catalog();
+  seed_default_cartridges();
 }
 
 static void block_map(uint8_t map[PRISM_CARTRIDGE_BLOCK_COUNT])
@@ -979,60 +1001,21 @@ bool cartridge_storage_prepare(const prism_cartridge_t *cartridge,
   size_t allocation_size = header->got_size + header->rw_size;
   uint8_t *allocation = malloc(allocation_size);
   if (allocation == NULL)
+  {
+    printf("cartridge launch rejected: need %lu bytes (%lu GOT + %lu RW/BSS)\n",
+           (unsigned long)allocation_size,
+           (unsigned long)header->got_size,
+           (unsigned long)header->rw_size);
     return false;
+  }
   uint8_t *got = allocation;
   uint8_t *rw = allocation + header->got_size;
-  memcpy(got, package + header->got_offset, header->got_size);
-  if (header->rw_size > 0)
+  if (!prism_package_prepare_launch_image(
+          package, header, (uint32_t)(uintptr_t)image, got,
+          (uint32_t)(uintptr_t)rw, rw, resolve_launch_import, NULL))
   {
-    memcpy(rw, package + header->rw_offset, header->rw_init_size);
-    memset(rw + header->rw_init_size, 0,
-           header->rw_size - header->rw_init_size);
-  }
-
-  const prism_package_relocation_t *relocations =
-      (const void *)(package + header->relocations_offset);
-  uint32_t got_end = header->got_offset + header->got_size;
-  uint32_t rw_init_end = header->rw_offset + header->rw_init_size;
-  for (uint32_t i = 0; i < header->relocation_count; ++i)
-  {
-    uint32_t patch = relocations[i].patch_offset;
-    uint32_t *word;
-    if (patch >= header->got_offset && patch < got_end)
-      word = (void *)(got + patch - header->got_offset);
-    else if (patch >= header->rw_offset && patch < rw_init_end)
-      word = (void *)(rw + patch - header->rw_offset);
-    else
-      continue;
-    uint32_t linked = *word & ~1u;
-    uint32_t thumb = *word & 1u;
-    if (linked >= header->image_size)
-    {
-      uint32_t rw_relative = linked - header->image_size;
-      if (rw_relative >= header->rw_size)
-      {
-        free(allocation);
-        return false;
-      }
-      *word = (uint32_t)(uintptr_t)(rw + rw_relative) | thumb;
-    }
-    else
-      *word += (uint32_t)(uintptr_t)image;
-  }
-
-  const prism_package_import_t *imports =
-      (const void *)(package + header->imports_offset);
-  for (uint32_t i = 0; i < header->import_count; ++i)
-  {
-    uintptr_t address = resolve_import(imports[i].symbol);
-    if (address == 0)
-    {
-      free(allocation);
-      return false;
-    }
-    uint32_t *word =
-        (void *)(got + imports[i].patch_offset - header->got_offset);
-    *word = (uint32_t)address;
+    free(allocation);
+    return false;
   }
 
   execution->allocation = allocation;

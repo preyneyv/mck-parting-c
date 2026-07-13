@@ -45,7 +45,7 @@ async function packageMetadata(bytes: Uint8Array): Promise<CartridgeMetadata> {
   const imageOffset = header.getUint32(40, true);
   const imageSize = header.getUint32(44, true);
   const descriptorOffset = header.getUint32(48, true);
-  if (descriptorOffset < imageOffset || descriptorOffset + 64 > imageOffset + imageSize || imageOffset + imageSize > bytes.length)
+  if (descriptorOffset < imageOffset || descriptorOffset + 60 > imageOffset + imageSize || imageOffset + imageSize > bytes.length)
     throw new Error("This cartridge has invalid metadata offsets.");
   const idRelative = header.getUint32(descriptorOffset + 16, true);
   const nameRelative = header.getUint32(descriptorOffset + 20, true);

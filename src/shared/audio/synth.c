@@ -435,8 +435,9 @@ static inline void audio_synth_message_queue_publish_peak(audio_synth_t *synth,
 static inline void audio_synth_analysis_capture(audio_synth_t *synth,
                                                 int16_t sample)
 {
-  synth->analysis_samples[synth->analysis_write_index]
-                         [synth->analysis_write_offset++] = sample;
+  synth->analysis_active_buffers->samples[synth->analysis_write_index]
+                                         [synth->analysis_write_offset++] =
+      sample;
   if (synth->analysis_write_offset < AUDIO_SYNTH_ANALYSIS_SAMPLE_COUNT)
     return;
 
@@ -450,18 +451,29 @@ static inline void audio_synth_analysis_capture(audio_synth_t *synth,
 
 static bool audio_synth_analysis_begin_buffer(audio_synth_t *synth)
 {
+  uint32_t request_generation = __atomic_load_n(
+      &synth->analysis_request_generation, __ATOMIC_ACQUIRE);
+  uint32_t ack_generation = __atomic_load_n(
+      &synth->analysis_ack_generation, __ATOMIC_RELAXED);
   bool requested =
       __atomic_load_n(&synth->analysis_requested, __ATOMIC_ACQUIRE);
-  if (requested == synth->analysis_active)
-    return requested;
+  if (request_generation == ack_generation)
+    return __atomic_load_n(&synth->analysis_active, __ATOMIC_RELAXED);
 
-  synth->analysis_active = requested;
+  audio_synth_analysis_buffers_t *buffers = requested
+      ? __atomic_load_n(&synth->analysis_buffers, __ATOMIC_ACQUIRE)
+      : NULL;
+  bool active = requested && buffers != NULL;
+  synth->analysis_active_buffers = buffers;
   synth->analysis_write_index = 0;
   synth->analysis_write_offset = 0;
   synth->analysis_generation = 0;
   __atomic_store_n(&synth->analysis_published, 0, __ATOMIC_RELEASE);
   __atomic_store_n(&synth->analysis_peak, 0, __ATOMIC_RELAXED);
-  return requested;
+  __atomic_store_n(&synth->analysis_active, active, __ATOMIC_RELEASE);
+  __atomic_store_n(&synth->analysis_ack_generation, request_generation,
+                   __ATOMIC_RELEASE);
+  return active;
 }
 
 void PLATFORM_TIME_CRITICAL_FUNC(audio_synth_fill_buffer)(
@@ -510,7 +522,11 @@ void PLATFORM_TIME_CRITICAL_FUNC(audio_synth_fill_buffer)(
   bool analysis_enabled = audio_synth_analysis_begin_buffer(synth);
   if (active_voice_mask == 0 || master_level == Q1X15_ZERO)
   {
-    // buffer is already zeroed; packed stereo zero frame is 0.
+    /* Active voices have already mixed mono samples into the working buffer.
+     * Clear them again when muted; otherwise the unpacked int32 samples are
+     * exposed as one full-volume SDL channel on the host. */
+    if (master_level == Q1X15_ZERO)
+      memset(buffer, 0, buffer_size * sizeof(*buffer));
     if (analysis_enabled)
     {
       for (uint32_t i = 0; i < buffer_size; i++)
@@ -784,11 +800,31 @@ void audio_synth_set_master_level(audio_synth_t *synth, q1x15 level)
   __atomic_store_n(&synth->master_level, level, __ATOMIC_RELAXED);
 }
 
-void audio_synth_analysis_set_enabled(audio_synth_t *synth, bool enabled)
+bool audio_synth_analysis_enable(audio_synth_t *synth,
+                                 audio_synth_analysis_buffers_t *buffers)
 {
-  if (synth == NULL)
+  if (synth == NULL || buffers == NULL ||
+      __atomic_load_n(&synth->analysis_requested, __ATOMIC_ACQUIRE))
+    return false;
+  __atomic_store_n(&synth->analysis_buffers, buffers, __ATOMIC_RELEASE);
+  __atomic_store_n(&synth->analysis_requested, true, __ATOMIC_RELEASE);
+  __atomic_add_fetch(&synth->analysis_request_generation, 1,
+                     __ATOMIC_RELEASE);
+  return true;
+}
+
+void audio_synth_analysis_disable_sync(audio_synth_t *synth)
+{
+  if (synth == NULL ||
+      !__atomic_load_n(&synth->analysis_requested, __ATOMIC_ACQUIRE))
     return;
-  __atomic_store_n(&synth->analysis_requested, enabled, __ATOMIC_RELEASE);
+  __atomic_store_n(&synth->analysis_requested, false, __ATOMIC_RELEASE);
+  uint32_t request_generation = __atomic_add_fetch(
+      &synth->analysis_request_generation, 1, __ATOMIC_RELEASE);
+  while (__atomic_load_n(&synth->analysis_ack_generation,
+                         __ATOMIC_ACQUIRE) != request_generation)
+    platform_yield();
+  __atomic_store_n(&synth->analysis_buffers, NULL, __ATOMIC_RELEASE);
 }
 
 uint16_t audio_synth_active_voice_mask(const audio_synth_t *synth)
@@ -820,8 +856,11 @@ bool audio_synth_analysis_snapshot(
       return false;
 
     uint8_t index = (uint8_t)(published & 1u);
-    memcpy(samples, synth->analysis_samples[index],
-           sizeof(synth->analysis_samples[index]));
+    const audio_synth_analysis_buffers_t *buffers =
+        __atomic_load_n(&synth->analysis_buffers, __ATOMIC_ACQUIRE);
+    if (buffers == NULL)
+      return false;
+    memcpy(samples, buffers->samples[index], sizeof(buffers->samples[index]));
     if (__atomic_load_n(&synth->analysis_published, __ATOMIC_ACQUIRE) ==
         published)
     {

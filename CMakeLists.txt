@@ -78,22 +78,6 @@ add_library(prism_sdk_header_test OBJECT tests/sdk_public_headers.c)
 target_link_libraries(prism_sdk_header_test PRIVATE prism_sdk)
 prism_enable_warnings(prism_sdk_header_test)
 
-# Built-in host cartridges consume only the public Prism SDK boundary. RP2
-# cartridges are packaged independently and embedded below.
-set(CARTRIDGE_OBJECTS)
-if(PICO_PLATFORM STREQUAL "host")
-    add_library(prism_cartridges OBJECT
-        src/cartridges/bongocat/app.c
-        src/cartridges/morse/app.c
-        src/cartridges/asteroids/app.c
-        src/cartridges/beatline/app.c
-        src/cartridges/beatline/chart.c
-        src/cartridges/beatline/game.c
-    )
-    target_link_libraries(prism_cartridges PRIVATE prism_sdk)
-    prism_enable_warnings(prism_cartridges)
-    set(CARTRIDGE_OBJECTS $<TARGET_OBJECTS:prism_cartridges>)
-endif()
 include(${CMAKE_CURRENT_LIST_DIR}/cmake/cartridge_boundary.cmake)
 prism_check_cartridge_boundary(${CMAKE_CURRENT_LIST_DIR}/src/cartridges)
 
@@ -108,6 +92,7 @@ set(SHARED_SOURCES
     src/shared/engine.c
     src/shared/os/launcher/app.c
     src/shared/os/cartridge_runtime.c
+    src/shared/os/cartridge_image.c
     src/shared/os/cartridge_registry.c
     src/shared/os/cartridge_identity.c
     src/shared/os/management_serialization.c
@@ -116,7 +101,6 @@ set(SHARED_SOURCES
     src/shared/os/pause_menu.c
     src/shared/os/power_indicator.c
     src/shared/os/wake_confirmation.c
-    ${CARTRIDGE_OBJECTS}
 )
 add_library(shared STATIC ${SHARED_SOURCES})
 prism_enable_warnings(shared)
@@ -137,6 +121,44 @@ include(${CMAKE_CURRENT_LIST_DIR}/cmake/assets.cmake)
 if(PICO_PLATFORM STREQUAL "host")
     # --- host build ---
     include(ExternalProject)
+    find_program(PRISM_ARM_GCC arm-none-eabi-gcc
+        HINTS
+            "$ENV{PICO_TOOLCHAIN_PATH}/bin"
+            "$ENV{USERPROFILE}/.pico-sdk/toolchain/14_2_Rel1/bin"
+            "$ENV{HOME}/.pico-sdk/toolchain/14_2_Rel1/bin"
+    )
+    if(NOT PRISM_ARM_GCC)
+        message(FATAL_ERROR
+            "arm-none-eabi-gcc is required for bundled host cartridges"
+        )
+    endif()
+    set(PRISM_HOST_CARTRIDGE_DIR "${CMAKE_BINARY_DIR}/cartridges")
+    set(PRISM_HOST_BONGOCAT "${PRISM_HOST_CARTRIDGE_DIR}/bongocat.prism")
+    set(PRISM_HOST_MORSE "${PRISM_HOST_CARTRIDGE_DIR}/morse.prism")
+    set(PRISM_HOST_ASTEROIDS "${PRISM_HOST_CARTRIDGE_DIR}/asteroids.prism")
+    set(PRISM_HOST_BEATLINE "${PRISM_HOST_CARTRIDGE_DIR}/beatline.prism")
+    set(PRISM_HOST_STATE_LIFECYCLE
+        "${PRISM_HOST_CARTRIDGE_DIR}/state-lifecycle.prism")
+    ExternalProject_Add(prism_host_cartridge_packages
+        SOURCE_DIR "${CMAKE_CURRENT_LIST_DIR}/cmake/host_cartridges"
+        BINARY_DIR "${CMAKE_BINARY_DIR}/host_cartridge_packages"
+        CMAKE_ARGS
+            "-DPRISM_SDK_ROOT=${CMAKE_CURRENT_LIST_DIR}"
+            "-DPRISM_PACKAGE_OUTPUT_DIR=${PRISM_HOST_CARTRIDGE_DIR}"
+            "-DCMAKE_BUILD_TYPE=MinSizeRel"
+            "-DCMAKE_C_COMPILER=${PRISM_ARM_GCC}"
+            "-DPython3_EXECUTABLE=${Python3_EXECUTABLE}"
+            "-DCMAKE_SYSTEM_NAME=Generic"
+            "-DCMAKE_TRY_COMPILE_TARGET_TYPE=STATIC_LIBRARY"
+        BUILD_COMMAND ${CMAKE_COMMAND} --build <BINARY_DIR>
+        INSTALL_COMMAND ""
+        BUILD_BYPRODUCTS
+            "${PRISM_HOST_BONGOCAT}"
+            "${PRISM_HOST_MORSE}"
+            "${PRISM_HOST_ASTEROIDS}"
+            "${PRISM_HOST_BEATLINE}"
+            "${PRISM_HOST_STATE_LIFECYCLE}"
+    )
     set(PRISM_UNICORN_PREFIX "${CMAKE_BINARY_DIR}/unicorn")
     set(PRISM_UNICORN_INSTALL "${PRISM_UNICORN_PREFIX}/install")
     file(MAKE_DIRECTORY "${PRISM_UNICORN_INSTALL}/include")
@@ -202,16 +224,28 @@ if(PICO_PLATFORM STREQUAL "host")
         src/host/peripheral.c
         src/host/persistence.c
         src/host/cartridge.c
+        src/host/cartridge_abi.c
         src/host/cartridge_vm.c
         src/host/sleep.c
         src/host/sync.c
     )
+    add_dependencies(prism prism_host_cartridge_packages)
     prism_enable_warnings(prism)
+
+    target_compile_definitions(prism PRIVATE
+        PRISM_HOST_BONGOCAT_PATH="${PRISM_HOST_BONGOCAT}"
+        PRISM_HOST_MORSE_PATH="${PRISM_HOST_MORSE}"
+        PRISM_HOST_ASTEROIDS_PATH="${PRISM_HOST_ASTEROIDS}"
+        PRISM_HOST_BEATLINE_PATH="${PRISM_HOST_BEATLINE}"
+    )
 
     target_compile_options(shared PRIVATE -include ${CMAKE_CURRENT_LIST_DIR}/src/host/compat.h)
     target_compile_options(prism PRIVATE -include ${CMAKE_CURRENT_LIST_DIR}/src/host/compat.h)
 
-    target_include_directories(prism PRIVATE ${CMAKE_CURRENT_LIST_DIR}/src)
+    target_include_directories(prism PRIVATE
+        ${CMAKE_CURRENT_LIST_DIR}/src
+        ${CMAKE_CURRENT_LIST_DIR}/tests
+    )
 
     find_package(Threads REQUIRED)
     # Link SDL statically so the host simulator is a clone-and-run executable.
@@ -237,6 +271,27 @@ if(PICO_PLATFORM STREQUAL "host")
         add_test(NAME prism_cartridge_identity
                  COMMAND prism_cartridge_identity_tests)
 
+        add_executable(prism_host_cartridge_abi_tests
+            tests/host_cartridge_abi_test.c
+            src/host/cartridge_abi.c
+        )
+        target_include_directories(prism_host_cartridge_abi_tests PRIVATE
+            ${CMAKE_CURRENT_LIST_DIR}/src
+        )
+        prism_enable_warnings(prism_host_cartridge_abi_tests)
+        add_test(NAME prism_host_cartridge_abi
+                 COMMAND prism_host_cartridge_abi_tests)
+
+        add_executable(prism_bundled_package_tests
+            tests/bundled_package_test.c
+        )
+        target_include_directories(prism_bundled_package_tests PRIVATE
+            ${CMAKE_CURRENT_LIST_DIR}/src
+        )
+        prism_enable_warnings(prism_bundled_package_tests)
+        add_test(NAME prism_bundled_package
+                 COMMAND prism_bundled_package_tests)
+
         add_executable(prism_qrcode_render_tests
             tests/qrcode_render_test.c
         )
@@ -244,6 +299,69 @@ if(PICO_PLATFORM STREQUAL "host")
         prism_enable_warnings(prism_qrcode_render_tests)
         add_test(NAME prism_qrcode_render
                  COMMAND prism_qrcode_render_tests)
+
+        add_executable(prism_cartridge_launch_image_tests
+            tests/cartridge_launch_image_test.c
+            src/shared/os/cartridge_image.c
+        )
+        target_include_directories(prism_cartridge_launch_image_tests PRIVATE
+            ${CMAKE_CURRENT_LIST_DIR}/src
+        )
+        target_link_libraries(prism_cartridge_launch_image_tests PRIVATE
+            prism_cartridge_headers
+        )
+        prism_enable_warnings(prism_cartridge_launch_image_tests)
+        add_test(NAME prism_cartridge_launch_image
+                 COMMAND prism_cartridge_launch_image_tests)
+        add_test(NAME prism_host_cartridge_state_lifecycle
+                 COMMAND prism --test-cartridge-lifecycle
+                         "${PRISM_HOST_STATE_LIFECYCLE}")
+        add_test(NAME prism_host_cartridge_audio
+                 COMMAND prism --test-cartridge-audio
+                         "${PRISM_HOST_ASTEROIDS}")
+
+        add_executable(prism_full_test_state_tests
+            tests/full_test_state_test.c
+            src/cartridges/_full_test/app.c
+        )
+        target_compile_definitions(prism_full_test_state_tests PRIVATE
+            PRISM_TESTING=1
+        )
+        target_link_libraries(prism_full_test_state_tests PRIVATE prism_sdk)
+        prism_enable_warnings(prism_full_test_state_tests)
+        add_test(NAME prism_full_test_state
+                 COMMAND prism_full_test_state_tests)
+
+        add_executable(prism_midi_mode_state_tests
+            tests/midi_mode_state_test.c
+            src/shared/os/midi_mode.c
+        )
+        target_compile_definitions(prism_midi_mode_state_tests PRIVATE
+            PRISM_TESTING=1
+        )
+        target_link_libraries(prism_midi_mode_state_tests PRIVATE prism_sdk)
+        prism_enable_warnings(prism_midi_mode_state_tests)
+        add_test(NAME prism_midi_mode_state
+                 COMMAND prism_midi_mode_state_tests)
+
+        add_executable(prism_synth_analysis_sync_tests
+            tests/synth_analysis_sync_test.c
+            src/shared/audio/synth.c
+            src/host/sync.c
+        )
+        target_include_directories(prism_synth_analysis_sync_tests PRIVATE
+            ${CMAKE_CURRENT_LIST_DIR}/src
+        )
+        target_compile_options(prism_synth_analysis_sync_tests PRIVATE
+            -include ${CMAKE_CURRENT_LIST_DIR}/src/host/compat.h
+        )
+        target_link_libraries(prism_synth_analysis_sync_tests PRIVATE
+            Threads::Threads
+            m
+        )
+        prism_enable_warnings(prism_synth_analysis_sync_tests)
+        add_test(NAME prism_synth_analysis_sync
+                 COMMAND prism_synth_analysis_sync_tests)
     endif()
     if(MINGW)
         target_link_options(prism PRIVATE -static -static-libgcc)

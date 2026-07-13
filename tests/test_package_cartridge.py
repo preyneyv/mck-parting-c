@@ -56,7 +56,7 @@ class PackageParsingTests(unittest.TestCase):
         name_offset = id_offset + len(cartridge_id) + 1
         icon_offset = 160
         struct.pack_into("<IHHIIIII", image, 0, 0x50524354,
-                         PACKAGER.CARTRIDGE_ABI, 64, tick_divider,
+                         PACKAGER.CARTRIDGE_ABI, 60, tick_divider,
                          version, id_offset, name_offset, icon_offset)
         image[id_offset:id_offset + len(cartridge_id) + 1] = cartridge_id.encode() + b"\0"
         image[name_offset:name_offset + len(name) + 1] = name.encode() + b"\0"
@@ -90,6 +90,12 @@ class PackageParsingTests(unittest.TestCase):
         package = self.make_package()
         struct.pack_into("<H", package, 10, 8)
         with self.assertRaisesRegex(PACKAGER.ElfError, "tick divider"):
+            PACKAGER.parse_package_metadata(package)
+
+    def test_rejects_legacy_state_size_descriptor(self):
+        package = self.make_package()
+        struct.pack_into("<H", package, 256 + 6, 64)
+        with self.assertRaisesRegex(PACKAGER.ElfError, "descriptor"):
             PACKAGER.parse_package_metadata(package)
 
     def test_name_change_keeps_identity_and_same_version(self):

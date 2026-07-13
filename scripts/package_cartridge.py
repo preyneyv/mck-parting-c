@@ -242,11 +242,11 @@ def parse_package_metadata(data: bytes) -> dict[str, object]:
         "<III", data, 40)
     if image_offset + image_size > len(data) or \
             descriptor_offset < image_offset or \
-            descriptor_offset + 64 > image_offset + image_size:
+            descriptor_offset + 60 > image_offset + image_size:
         raise ElfError("invalid package metadata offsets")
     magic, abi, descriptor_size, descriptor_tick_divider, version = struct.unpack_from(
         "<IHHII", data, descriptor_offset)
-    if magic != 0x50524354 or abi != CARTRIDGE_ABI or descriptor_size != 64:
+    if magic != 0x50524354 or abi != CARTRIDGE_ABI or descriptor_size != 60:
         raise ElfError("invalid packaged cartridge descriptor")
     if tick_divider == 0 or descriptor_tick_divider != tick_divider:
         raise ElfError("invalid cartridge tick divider")
@@ -282,8 +282,8 @@ def package(elf_path: pathlib.Path, output: pathlib.Path) -> None:
     # first word of .got. GNU ld's synthetic _GLOBAL_OFFSET_TABLE_ symbol may
     # point at a trailing .got.plt-style marker and is not the value r9 needs.
     got_base = got
-    if image_size <= 0 or descriptor_end - descriptor != 64:
-        raise ElfError("cartridge must contain exactly one 64-byte descriptor")
+    if image_size <= 0 or descriptor_end - descriptor != 60:
+        raise ElfError("cartridge must contain exactly one 60-byte descriptor")
     if not (0 <= got <= got_base <= got_end <= image_size == rw_start <=
             rw_data_end <= rw_end):
         raise ElfError("invalid cartridge GOT layout")
@@ -294,7 +294,7 @@ def package(elf_path: pathlib.Path, output: pathlib.Path) -> None:
     validate_import_relocations(elf.import_relocations())
     magic, abi, descriptor_size, tick_divider, version = struct.unpack_from(
         "<IHHII", image, descriptor)
-    if magic != 0x50524354 or abi != CARTRIDGE_ABI or descriptor_size != 64:
+    if magic != 0x50524354 or abi != CARTRIDGE_ABI or descriptor_size != 60:
         raise ElfError("invalid prism_cartridge_t descriptor")
     if tick_divider == 0:
         tick_divider = 1
@@ -303,7 +303,7 @@ def package(elf_path: pathlib.Path, output: pathlib.Path) -> None:
         raise ElfError("cartridge tick divider exceeds uint16 package field")
     id_offset, name_offset, icon_offset = struct.unpack_from(
         "<III", image, descriptor + 16)
-    frame_offset = struct.unpack_from("<I", image, descriptor + 40)[0]
+    frame_offset = struct.unpack_from("<I", image, descriptor + 36)[0]
     if id_offset == 0 or name_offset == 0:
         raise ElfError("cartridge descriptor requires id and name")
     if icon_offset == 0 or icon_offset + CARTRIDGE_ICON_BYTES > image_size:
@@ -316,8 +316,8 @@ def package(elf_path: pathlib.Path, output: pathlib.Path) -> None:
     if not name or len(name.encode()) > 31:
         raise ElfError("cartridge name must contain 1..31 UTF-8 bytes")
     app_key = derive_app_key(cartridge_id)
-    persistent_size = struct.unpack_from("<I", image, descriptor + 56)[0]
-    persistent_schema = struct.unpack_from("<H", image, descriptor + 60)[0]
+    persistent_size = struct.unpack_from("<I", image, descriptor + 52)[0]
+    persistent_schema = struct.unpack_from("<H", image, descriptor + 56)[0]
 
     # Absolute pointers can live in the copied descriptor, the private GOT,
     # or initialized writable data (for example an array of structs containing
@@ -408,8 +408,11 @@ def package(elf_path: pathlib.Path, output: pathlib.Path) -> None:
     parse_package_metadata(result)
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_bytes(result)
-    print(f"Packaged {name} {version} ({cartridge_id}) -> {output} ({package_size} bytes, "
-          f"{relocation_count} relocations, {import_count} imports)")
+    print(f"Packaged {name} {version} ({cartridge_id}) -> {output} "
+          f"({package_size} bytes, RW/BSS {rw_end - rw_start} bytes "
+          f"[{len(rw_init)} initialized, {rw_end - rw_data_end} zeroed], "
+          f"GOT {got_end - got} bytes, {relocation_count} relocations, "
+          f"{import_count} imports)")
 
 
 def main() -> None:

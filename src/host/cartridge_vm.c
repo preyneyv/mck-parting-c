@@ -1,4 +1,5 @@
 #include "cartridge_vm.h"
+#include "cartridge_abi.h"
 
 #include <errno.h>
 #include <inttypes.h>
@@ -14,6 +15,7 @@
 #include <qrcodegen.h>
 #include <shared/audio/synth_internal.h>
 #include <shared/leaderboard/leaderboard.h>
+#include <shared/os/cartridge_image.h>
 #include <u8g2.h>
 #include <unicorn/arm.h>
 #include <unicorn/unicorn.h>
@@ -25,7 +27,7 @@ enum
   GUEST_RAM_BYTES = 16u * 1024u * 1024u,
   GUEST_API_ADDRESS = GUEST_RAM_BASE,
   GUEST_CONTEXT_ADDRESS = GUEST_RAM_BASE + 0x100u,
-  GUEST_STATE_ADDRESS = GUEST_RAM_BASE + 0x1000u,
+  GUEST_PERSISTENT_ADDRESS = GUEST_RAM_BASE + 0x1000u,
   GUEST_STACK_ADDRESS = GUEST_RAM_BASE + GUEST_RAM_BYTES - 0x10000u,
   GUEST_STACK_BYTES = 0x10000u,
   GUEST_STOP_ADDRESS = 0x0fff0000u,
@@ -65,13 +67,13 @@ struct host_cartridge_vm
   uc_engine *uc;
   const host_cartridge_package_t *package;
   prism_t *context;
-  uint32_t state_address;
   uint32_t persistent_address;
   uint32_t heap_next;
   uint32_t heap_limit;
   guest_allocation_t allocations[GUEST_ALLOCATION_MAX];
   guest_animation_t animations[GUEST_ANIMATION_MAX];
   bool failed;
+  bool failure_pending;
   bool unsupported_reported[PRISM_PACKAGE_MAX_IMPORTS];
 };
 
@@ -85,7 +87,6 @@ typedef struct
   uint32_t id;
   uint32_t name;
   uint32_t icon;
-  uint32_t state_size;
   uint32_t enter;
   uint32_t tick;
   uint32_t frame;
@@ -97,7 +98,7 @@ typedef struct
   uint16_t reserved;
 } guest_cartridge_descriptor_t;
 
-_Static_assert(sizeof(guest_cartridge_descriptor_t) == 64,
+_Static_assert(sizeof(guest_cartridge_descriptor_t) == 60,
                "ARM cartridge descriptor layout changed");
 
 static uint32_t align_up(uint32_t value, uint32_t alignment)
@@ -303,7 +304,6 @@ bool host_cartridge_package_load(host_cartridge_package_t *package,
       .id = (const char *)(image + guest.id),
       .name = (const char *)(image + guest.name),
       .icon = image + guest.icon,
-      .state_size = guest.state_size,
       .enter = (prism_lifecycle_fn)(uintptr_t)(GUEST_IMAGE_BASE + guest.enter),
       .tick = (prism_lifecycle_fn)(uintptr_t)(GUEST_IMAGE_BASE + guest.tick),
       .frame = (prism_lifecycle_fn)(uintptr_t)(GUEST_IMAGE_BASE + guest.frame),
@@ -314,8 +314,8 @@ bool host_cartridge_package_load(host_cartridge_package_t *package,
       .persistent_schema_version = guest.persistent_schema_version,
       .reserved = guest.reserved,
   };
-  printf("loaded cartridge: %s (%zu bytes)\n", package->descriptor.name,
-         package->size);
+  printf("loaded cartridge: %s (%lu bytes)\n", package->descriptor.name,
+         (unsigned long)package->size);
   return true;
 }
 
@@ -1429,7 +1429,9 @@ static void import_dispatch(host_cartridge_vm_t *vm, uint16_t symbol)
   case PRISM_IMPORT_AEABI_D2ULZ: reg_write_u64(vm, UC_ARM_REG_R0, UC_ARM_REG_R1, float_to_u64(words_double(r0, r1))); break;
   case PRISM_IMPORT_AEABI_D2F: reg_write(vm, UC_ARM_REG_R0, float_word((float)words_double(r0, r1))); break;
   case PRISM_IMPORT_ABS: reg_write(vm, UC_ARM_REG_R0, (uint32_t)abs((int32_t)r0)); break;
-  case PRISM_IMPORT_RAND: reg_write(vm, UC_ARM_REG_R0, (uint32_t)rand()); break;
+  case PRISM_IMPORT_RAND:
+    reg_write(vm, UC_ARM_REG_R0, host_cartridge_rand31());
+    break;
   case PRISM_IMPORT_SRAND: srand(r0); break;
   case PRISM_IMPORT_QRCODE_GET_SIZE:
   {
@@ -1447,22 +1449,33 @@ static void import_dispatch(host_cartridge_vm_t *vm, uint16_t symbol)
   }
   case PRISM_IMPORT_AUDIO_SYNTH_ENQUEUE:
   {
+    uint8_t guest_message[HOST_GUEST_SYNTH_MESSAGE_BYTES];
     audio_synth_message_t message;
-    bool ok = guest_read(vm, r1, &message, sizeof(message)) &&
+    bool ok = guest_read(vm, r1, guest_message, sizeof(guest_message)) &&
+              host_cartridge_decode_synth_message(guest_message, &message) &&
               audio_synth_enqueue(vm->context->api->synth(), &message);
     reg_write(vm, UC_ARM_REG_R0, ok);
     break;
   }
   case PRISM_IMPORT_AUDIO_SYNTH_PATCH_CONFIG_SET:
   {
+    uint8_t guest_patch[HOST_GUEST_SYNTH_PATCH_BYTES];
     audio_synth_patch_config_t config;
-    uint8_t *bytes = (uint8_t *)&config;
-    memcpy(bytes, &r2, 4);
-    memcpy(bytes + 4, &r3, 4);
-    guest_read(vm, reg_read(vm, UC_ARM_REG_SP), bytes + 8,
-               sizeof(config) - 8);
-    audio_synth_patch_config_set(vm->context->api->synth(), (uint8_t)r1,
-                                 config);
+    guest_patch[0] = (uint8_t)r2;
+    guest_patch[1] = (uint8_t)(r2 >> 8);
+    guest_patch[2] = (uint8_t)(r2 >> 16);
+    guest_patch[3] = (uint8_t)(r2 >> 24);
+    guest_patch[4] = (uint8_t)r3;
+    guest_patch[5] = (uint8_t)(r3 >> 8);
+    guest_patch[6] = (uint8_t)(r3 >> 16);
+    guest_patch[7] = (uint8_t)(r3 >> 24);
+    if (!guest_read(vm, reg_read(vm, UC_ARM_REG_SP), guest_patch + 8,
+                    sizeof(guest_patch) - 8) ||
+        !host_cartridge_decode_synth_patch(guest_patch, &config))
+      vm->failed = true;
+    else
+      audio_synth_patch_config_set(vm->context->api->synth(), (uint8_t)r1,
+                                   config);
     break;
   }
   case PRISM_IMPORT_AUDIO_SYNTH_PANIC_SYNC:
@@ -1524,12 +1537,21 @@ static uint32_t trap_address(uint16_t slot)
   return GUEST_TRAP_BASE + (uint32_t)slot * 4u + 1u;
 }
 
+static uint32_t resolve_launch_import(uint16_t symbol, void *user)
+{
+  (void)user;
+  return import_is_object(symbol)
+             ? GUEST_OBJECT_BASE + (uint32_t)symbol * 4u
+             : trap_address(symbol);
+}
+
 host_cartridge_vm_t *
 host_cartridge_vm_create(const host_cartridge_package_t *package)
 {
   if (package == NULL || package->bytes == NULL)
     return NULL;
   host_cartridge_vm_t *vm = calloc(1, sizeof(*vm));
+  uint8_t *launch_image = NULL;
   if (vm == NULL)
     return NULL;
   vm->package = package;
@@ -1552,18 +1574,45 @@ host_cartridge_vm_create(const host_cartridge_package_t *package)
 
   if (!guest_write(vm, GUEST_IMAGE_BASE,
                    package->bytes + package->header.image_offset,
-                   package->header.image_size) ||
-      !guest_write(vm, GUEST_IMAGE_BASE + package->header.image_size,
-                   package->bytes + package->header.rw_offset,
-                   package->header.rw_init_size))
+                   package->header.image_size))
     goto fail;
+
+  size_t launch_image_size =
+      package->header.got_size + package->header.rw_size;
+  if (launch_image_size != 0)
+  {
+    launch_image = malloc(launch_image_size);
+    if (launch_image == NULL)
+      goto fail;
+  }
+  uint8_t *got = launch_image;
+  uint8_t *rw = launch_image == NULL
+                    ? NULL
+                    : launch_image + package->header.got_size;
+  if (!prism_package_prepare_launch_image(
+          package->bytes, &package->header, GUEST_IMAGE_BASE, got,
+          GUEST_IMAGE_BASE + package->header.image_size, rw,
+          resolve_launch_import, vm) ||
+      !guest_write(vm,
+                   GUEST_IMAGE_BASE + package->header.got_offset -
+                       package->header.image_offset,
+                   got, package->header.got_size) ||
+      !guest_write(vm, GUEST_IMAGE_BASE + package->header.image_size, rw,
+                   package->header.rw_size))
+    goto fail;
+  free(launch_image);
+  launch_image = NULL;
 
   const prism_package_relocation_t *relocations =
       (const void *)(package->bytes + package->header.relocations_offset);
   uint32_t image_end = package->header.image_offset + package->header.image_size;
+  uint32_t got_end = package->header.got_offset + package->header.got_size;
   for (uint32_t i = 0; i < package->header.relocation_count; ++i)
   {
     uint32_t patch = relocations[i].patch_offset;
+    if ((patch >= package->header.got_offset && patch < got_end) ||
+        patch >= package->header.rw_offset)
+      continue;
     uint32_t guest_patch;
     if (patch >= package->header.image_offset && patch < image_end)
       guest_patch = GUEST_IMAGE_BASE + patch - package->header.image_offset;
@@ -1572,18 +1621,6 @@ host_cartridge_vm_create(const host_cartridge_package_t *package)
                     patch - package->header.rw_offset;
     uint32_t value = guest_read_u32(vm, guest_patch);
     guest_write_u32(vm, guest_patch, value + GUEST_IMAGE_BASE);
-  }
-
-  const prism_package_import_t *imports =
-      (const void *)(package->bytes + package->header.imports_offset);
-  for (uint32_t i = 0; i < package->header.import_count; ++i)
-  {
-    uint32_t patch = GUEST_IMAGE_BASE + imports[i].patch_offset -
-                     package->header.image_offset;
-    uint32_t value = import_is_object(imports[i].symbol)
-                         ? GUEST_OBJECT_BASE + imports[i].symbol * 4u
-                         : trap_address(imports[i].symbol);
-    guest_write_u32(vm, patch, value);
   }
 
   uint32_t api[24] = {
@@ -1615,9 +1652,7 @@ host_cartridge_vm_create(const host_cartridge_package_t *package)
                   1, 0) != UC_ERR_OK)
     goto fail;
 
-  vm->state_address = GUEST_STATE_ADDRESS;
-  vm->persistent_address =
-      align_up(vm->state_address + (uint32_t)package->descriptor.state_size, 8);
+  vm->persistent_address = GUEST_PERSISTENT_ADDRESS;
   vm->heap_next = align_up(vm->persistent_address +
                                (uint32_t)package->descriptor.persistent_size,
                            8);
@@ -1627,6 +1662,7 @@ host_cartridge_vm_create(const host_cartridge_package_t *package)
   return vm;
 
 fail:
+  free(launch_image);
   if (vm->uc != NULL)
     uc_close(vm->uc);
   free(vm);
@@ -1647,26 +1683,36 @@ bool host_cartridge_vm_call(host_cartridge_vm_t *vm, uint32_t function,
 {
   if (vm == NULL || context == NULL || function == GUEST_IMAGE_BASE)
     return function == GUEST_IMAGE_BASE;
-  vm->context = context;
-  vm->failed = false;
-  if (!guest_write(vm, vm->state_address, context->state,
-                   context->state_size) ||
-      !guest_write(vm, vm->persistent_address, context->persistent,
-                   context->persistent_size))
+  /* A Unicorn memory/ABI fault leaves the guest in an undefined state. Do
+   * not restart lifecycle entry points on that same VM every engine frame. */
+  if (vm->failed)
     return false;
+  vm->context = context;
+  if (!guest_write(vm, vm->persistent_address, context->persistent,
+                   context->persistent_size))
+  {
+    vm->failure_pending = true;
+    return false;
+  }
   update_animations(vm);
+  if (vm->failed)
+  {
+    vm->failure_pending = true;
+    return false;
+  }
 
-  uint32_t guest_context[6] = {
+  uint32_t guest_context[4] = {
       GUEST_API_ADDRESS,
       vm->package->guest_descriptor,
-      context->state_size == 0 ? 0 : vm->state_address,
-      (uint32_t)context->state_size,
       context->persistent_size == 0 ? 0 : vm->persistent_address,
       (uint32_t)context->persistent_size,
   };
   if (!guest_write(vm, GUEST_CONTEXT_ADDRESS, guest_context,
                    sizeof(guest_context)))
+  {
+    vm->failure_pending = true;
     return false;
+  }
 
   uint32_t stack = GUEST_STACK_ADDRESS + GUEST_STACK_BYTES - 8u;
   uint32_t got = vm->package->header.got_size == 0
@@ -1685,12 +1731,23 @@ bool host_cartridge_vm_call(host_cartridge_vm_t *vm, uint32_t function,
     uint32_t pc = reg_read(vm, UC_ARM_REG_PC);
     fprintf(stderr, "cartridge stopped at 0x%08x: %s\n", pc,
             uc_strerror(error));
+    vm->failed = true;
+    vm->failure_pending = true;
     return false;
   }
-  if (!guest_read(vm, vm->state_address, context->state,
-                  context->state_size) ||
-      !guest_read(vm, vm->persistent_address, context->persistent,
+  if (!guest_read(vm, vm->persistent_address, context->persistent,
                   context->persistent_size))
+  {
+    vm->failure_pending = true;
     return false;
+  }
+  return true;
+}
+
+bool host_cartridge_vm_take_failure(host_cartridge_vm_t *vm)
+{
+  if (vm == NULL || !vm->failure_pending)
+    return false;
+  vm->failure_pending = false;
   return true;
 }

@@ -53,6 +53,6 @@ SECTIONS
     *(.note*)
   }
 
-  ASSERT((__prism_descriptor_end - __prism_descriptor_start) == 64,
+  ASSERT((__prism_descriptor_end - __prism_descriptor_start) == 60,
          "a cartridge must export exactly one prism_cartridge_t")
 }

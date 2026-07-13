@@ -65,8 +65,6 @@ typedef struct prism_context
 {
   const prism_api_v1_t *api;
   const struct prism_cartridge *cartridge;
-  void *state;
-  size_t state_size;
   void *persistent;
   size_t persistent_size;
 } prism_t;
@@ -85,7 +83,6 @@ typedef struct prism_cartridge
   const char *id;
   const char *name;
   const uint8_t *icon;
-  size_t state_size;
 
   prism_lifecycle_fn enter;
   prism_lifecycle_fn tick;
@@ -104,20 +101,18 @@ _Static_assert(sizeof(prism_button_t) == 1,
 #if UINTPTR_MAX == UINT32_MAX
 _Static_assert(sizeof(prism_api_v1_t) == 96,
                "prism_api_v1_t layout changed");
-_Static_assert(sizeof(prism_t) == 24, "prism_t layout changed");
-_Static_assert(sizeof(prism_cartridge_t) == 64,
+_Static_assert(sizeof(prism_t) == 16, "prism_t layout changed");
+_Static_assert(sizeof(prism_cartridge_t) == 60,
                "prism_cartridge_t layout changed");
 _Static_assert(offsetof(prism_cartridge_t, version) == 12,
                "prism_cartridge_t layout changed");
 _Static_assert(offsetof(prism_cartridge_t, id) == 16,
                "prism_cartridge_t layout changed");
-_Static_assert(offsetof(prism_cartridge_t, state_size) == 28,
+_Static_assert(offsetof(prism_cartridge_t, enter) == 28,
                "prism_cartridge_t layout changed");
-_Static_assert(offsetof(prism_cartridge_t, enter) == 32,
+_Static_assert(offsetof(prism_cartridge_t, persistent_size) == 52,
                "prism_cartridge_t layout changed");
-_Static_assert(offsetof(prism_cartridge_t, persistent_size) == 56,
-               "prism_cartridge_t layout changed");
-_Static_assert(offsetof(prism_cartridge_t, persistent_schema_version) == 60,
+_Static_assert(offsetof(prism_cartridge_t, persistent_schema_version) == 56,
                "prism_cartridge_t layout changed");
 #endif
 

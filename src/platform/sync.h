@@ -16,3 +16,4 @@ bool platform_queue_try_push(platform_queue_t *queue, const void *item);
 bool platform_queue_try_pop(platform_queue_t *queue, void *out);
 
 void platform_memory_barrier(void);
+void platform_yield(void);

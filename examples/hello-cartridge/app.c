@@ -9,17 +9,17 @@ typedef struct
   uint32_t presses;
 } hello_state_t;
 
+static hello_state_t state;
+
 static void tick(prism_t *prism)
 {
-  hello_state_t *state = prism->state;
   if (prism_button_keydown(prism, PRISM_BUTTON_LEFT) ||
       prism_button_keydown(prism, PRISM_BUTTON_RIGHT))
-    ++state->presses;
+    ++state.presses;
 }
 
 static void frame(prism_t *prism)
 {
-  hello_state_t *state = prism->state;
   u8g2_t *u8g2 = prism_display(prism);
 
   u8g2_SetDrawColor(u8g2, 1);
@@ -28,7 +28,7 @@ static void frame(prism_t *prism)
 
   char count[24];
   snprintf(count, sizeof(count), "PRESSES: %lu",
-           (unsigned long)state->presses);
+           (unsigned long)state.presses);
   uint16_t width = u8g2_GetStrWidth(u8g2, count);
   u8g2_DrawStr(u8g2, (128 - width) / 2, 42, count);
 }
@@ -39,7 +39,6 @@ PRISM_CARTRIDGE(cartridge_hello,
     .version = 1,
     .tick_divider = 8,
     .icon = hello_icon,
-    .state_size = sizeof(hello_state_t),
     .tick = tick,
     .frame = frame,
 );

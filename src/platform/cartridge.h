@@ -15,8 +15,8 @@ typedef struct
 size_t platform_cartridge_installed_count(void);
 const prism_cartridge_t *platform_cartridge_installed_get(size_t index);
 
-/* Built-in cartridges return an empty execution object. Installed PIC
- * cartridges receive a private RAM GOT populated from their package. */
+/* Native modes return an empty execution object. Packaged PIC cartridges
+ * receive a private launch allocation containing their GOT and RW/BSS image. */
 bool platform_cartridge_prepare(const prism_cartridge_t *cartridge,
                                 platform_cartridge_execution_t *execution);
 void platform_cartridge_release(platform_cartridge_execution_t *execution);
