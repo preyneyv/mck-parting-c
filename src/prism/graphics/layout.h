@@ -282,12 +282,14 @@ static inline elm_t elm_qrcode(elm_t *parent, vec2_t pos,
                            bitmap_bytes, &rendered_dim))
     return child;
 
-  uint8_t bitmap_mode = child.u8g2->bitmap_transparency;
+  /* Cartridge display pointers are opaque handles on the host VM. Keep this
+   * helper on the public u8g2 function boundary instead of reading fields
+   * from u8g2_t directly. Prism rendering normally uses solid bitmap mode,
+   * and QR images require it so their light modules erase the background. */
   u8g2_SetDrawColor(child.u8g2, 1);
   u8g2_SetBitmapMode(child.u8g2, 0);
   u8g2_DrawXBM(child.u8g2, child.pos.x, child.pos.y, rendered_dim,
                rendered_dim, bitmap);
-  u8g2_SetBitmapMode(child.u8g2, bitmap_mode);
   return child;
 }
 

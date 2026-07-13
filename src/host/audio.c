@@ -2,6 +2,7 @@
 
 #include <SDL.h>
 #include <stdbool.h>
+#include <stdio.h>
 
 #include <shared/audio/synth_internal.h>
 #include <shared/config.h>
@@ -9,6 +10,7 @@
 #include "config.h"
 
 static SDL_AudioDeviceID audio_device;
+static bool audio_initialized;
 
 static void audio_callback(void *userdata, Uint8 *stream, int len)
 {
@@ -19,11 +21,22 @@ static void audio_callback(void *userdata, Uint8 *stream, int len)
 
 void audio_playback_init(void)
 {
-  SDL_InitSubSystem(SDL_INIT_AUDIO);
+  if (SDL_InitSubSystem(SDL_INIT_AUDIO) != 0)
+  {
+    fprintf(stderr, "SDL audio initialization failed: %s\n", SDL_GetError());
+    return;
+  }
+  audio_initialized = true;
 }
 
 void audio_playback_run_forever(audio_synth_t *synth)
 {
+  if (!audio_initialized)
+  {
+    while (true)
+      SDL_Delay(1000);
+  }
+
   SDL_AudioSpec desired = {
       .freq = AUDIO_SAMPLE_RATE,
       .format = AUDIO_S16SYS,
@@ -35,7 +48,14 @@ void audio_playback_run_forever(audio_synth_t *synth)
 
   audio_device = SDL_OpenAudioDevice(NULL, 0, &desired, NULL, 0);
   if (audio_device != 0)
+  {
+    printf("SDL audio: %s at %d Hz\n", SDL_GetCurrentAudioDriver(),
+           desired.freq);
+    fflush(stdout);
     SDL_PauseAudioDevice(audio_device, 0);
+  }
+  else
+    fprintf(stderr, "SDL audio device open failed: %s\n", SDL_GetError());
 
   while (true)
     SDL_Delay(1000);
@@ -47,7 +67,11 @@ void audio_playback_suspend(void)
     SDL_PauseAudioDevice(audio_device, 1);
 }
 
-void audio_playback_set_enabled(bool enabled) { (void)enabled; }
+void audio_playback_set_enabled(bool enabled)
+{
+  if (audio_device != 0)
+    SDL_PauseAudioDevice(audio_device, enabled ? 0 : 1);
+}
 
 void audio_playback_resume(void)
 {
