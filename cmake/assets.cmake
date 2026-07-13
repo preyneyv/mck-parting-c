@@ -64,25 +64,58 @@ if(PRISM_ASSET_AUTHORING AND Reaper_FOUND)
 
         get_filename_component(OUT_DIR "${OUT_BASE}" DIRECTORY)
 
-        add_custom_command(
-            OUTPUT "${OUT_HEADER}"
-            COMMAND ${CMAKE_COMMAND} -E make_directory "${OUT_DIR}"
-            COMMAND ${Python3_EXECUTABLE}
-            "${CMAKE_CURRENT_SOURCE_DIR}/scripts/rea_midi_export.py"
-            --rpp "${RPP}"
-            --midi-out "${OUT_MID}"
-            --song-header-out "${OUT_HEADER}"
-            --symbol "${SOUND_SYMBOL}"
-            --reaper-cli "${REAPER_EXECUTABLE}"
-            DEPENDS "${RPP}"
-            "${CMAKE_CURRENT_SOURCE_DIR}/scripts/rea_midi_export.py"
-            "${CMAKE_CURRENT_SOURCE_DIR}/scripts/rea_midi_export.lua"
-            VERBATIM
-            JOB_POOL reaper_export_pool
-            COMMENT "Generate sound header from ${RPP_REL_APPS}"
-        )
-
-        list(APPEND GENERATED_SOUND_HEADERS "${OUT_HEADER}")
+        if(APP_NAME STREQUAL "beatline" AND
+           (SOUND_REL_NOEXT STREQUAL "golden" OR
+            SOUND_REL_NOEXT STREQUAL "never_gonna"))
+            if(SOUND_REL_NOEXT STREQUAL "golden")
+                set(TRACK_TITLE "Golden")
+                set(TRACK_ARTIST "HUNTR/X")
+            else()
+                set(TRACK_TITLE "Never Gonna")
+                set(TRACK_ARTIST "Rick Astley")
+            endif()
+            set(OUT_TRACK
+                "${CMAKE_CURRENT_SOURCE_DIR}/assets/beatline/${SOUND_REL_NOEXT}.beatline")
+            get_filename_component(TRACK_OUT_DIR "${OUT_TRACK}" DIRECTORY)
+            add_custom_command(
+                OUTPUT "${OUT_TRACK}"
+                COMMAND ${CMAKE_COMMAND} -E make_directory "${TRACK_OUT_DIR}"
+                COMMAND ${Python3_EXECUTABLE}
+                "${CMAKE_CURRENT_SOURCE_DIR}/scripts/rea_midi_export.py"
+                --rpp "${RPP}"
+                --midi-out "${OUT_MID}"
+                --beatline-out "${OUT_TRACK}"
+                --title "${TRACK_TITLE}"
+                --artist "${TRACK_ARTIST}"
+                --reaper-cli "${REAPER_EXECUTABLE}"
+                DEPENDS "${RPP}"
+                "${CMAKE_CURRENT_SOURCE_DIR}/scripts/rea_midi_export.py"
+                "${CMAKE_CURRENT_SOURCE_DIR}/scripts/rea_midi_export.lua"
+                VERBATIM
+                JOB_POOL reaper_export_pool
+                COMMENT "Generate Beatline track from ${RPP_REL_APPS}"
+            )
+            list(APPEND GENERATED_SOUND_HEADERS "${OUT_TRACK}")
+        else()
+            add_custom_command(
+                OUTPUT "${OUT_HEADER}"
+                COMMAND ${CMAKE_COMMAND} -E make_directory "${OUT_DIR}"
+                COMMAND ${Python3_EXECUTABLE}
+                "${CMAKE_CURRENT_SOURCE_DIR}/scripts/rea_midi_export.py"
+                --rpp "${RPP}"
+                --midi-out "${OUT_MID}"
+                --song-header-out "${OUT_HEADER}"
+                --symbol "${SOUND_SYMBOL}"
+                --reaper-cli "${REAPER_EXECUTABLE}"
+                DEPENDS "${RPP}"
+                "${CMAKE_CURRENT_SOURCE_DIR}/scripts/rea_midi_export.py"
+                "${CMAKE_CURRENT_SOURCE_DIR}/scripts/rea_midi_export.lua"
+                VERBATIM
+                JOB_POOL reaper_export_pool
+                COMMENT "Generate sound header from ${RPP_REL_APPS}"
+            )
+            list(APPEND GENERATED_SOUND_HEADERS "${OUT_HEADER}")
+        endif()
     endforeach()
 
     # Generated headers are committed. Regeneration is an explicit authoring
@@ -134,6 +167,31 @@ if(PRISM_ASSET_AUTHORING AND Aseprite_FOUND)
 
         list(APPEND GENERATED_SPRITE_HEADERS "${OUT_HEADER}")
     endforeach()
+
+    set(PRISMPACK_ASE
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/shared/os/sprites/prismpack.aseprite")
+    set(PRISMPACK_HEADER
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/shared/os/sprites/prismpack.h")
+    set(PRISMPACK_TYPESCRIPT
+        "${CMAKE_CURRENT_SOURCE_DIR}/web/lib/prismpack-icon.ts")
+    if(EXISTS "${PRISMPACK_ASE}")
+        add_custom_command(
+            OUTPUT "${PRISMPACK_HEADER}" "${PRISMPACK_TYPESCRIPT}"
+            COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_CURRENT_SOURCE_DIR}/scripts/aseprite_xbm_export.py"
+            --aseprite "${PRISMPACK_ASE}"
+            --header-out "${PRISMPACK_HEADER}"
+            --typescript-out "${PRISMPACK_TYPESCRIPT}"
+            --typescript-name prismpackIcon
+            --aseprite-cli "${ASEPRITE_EXECUTABLE}"
+            DEPENDS "${PRISMPACK_ASE}"
+            "${CMAKE_CURRENT_SOURCE_DIR}/scripts/aseprite_xbm_export.py"
+            VERBATIM
+            COMMENT "Generate Prism asset-pack icon"
+        )
+        list(APPEND GENERATED_SPRITE_HEADERS
+            "${PRISMPACK_HEADER}" "${PRISMPACK_TYPESCRIPT}")
+    endif()
 
     add_custom_target(generate_sprites DEPENDS ${GENERATED_SPRITE_HEADERS})
 elseif(PRISM_ASSET_AUTHORING AND NOT PICO_PLATFORM STREQUAL "host")

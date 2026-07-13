@@ -95,6 +95,7 @@ set(SHARED_SOURCES
     src/shared/os/cartridge_image.c
     src/shared/os/cartridge_registry.c
     src/shared/os/cartridge_identity.c
+    src/shared/os/asset_pack.c
     src/shared/os/management_serialization.c
     src/shared/os/settings.c
     src/shared/os/midi_mode.c
@@ -118,6 +119,28 @@ endif()
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake")
 include(${CMAKE_CURRENT_LIST_DIR}/cmake/assets.cmake)
+include(${CMAKE_CURRENT_LIST_DIR}/cmake/PrismAssetPack.cmake)
+
+prism_add_asset_pack(beatline_golden_pack
+    ID dev.preyneyv.prism.beatline.golden
+    NAME "Golden"
+    VERSION 1
+    TARGET_ID dev.preyneyv.prism.beatline
+    TARGET_MIN_VERSION 1
+    OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/golden.prismpack
+    FILES
+        tracks/golden.beatline=${CMAKE_CURRENT_LIST_DIR}/assets/beatline/golden.beatline
+)
+prism_add_asset_pack(beatline_never_gonna_pack
+    ID dev.preyneyv.prism.beatline.never-gonna
+    NAME "Never Gonna"
+    VERSION 1
+    TARGET_ID dev.preyneyv.prism.beatline
+    TARGET_MIN_VERSION 1
+    OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/never_gonna.prismpack
+    FILES
+        tracks/never_gonna.beatline=${CMAKE_CURRENT_LIST_DIR}/assets/beatline/never_gonna.beatline
+)
 
 if(PICO_PLATFORM STREQUAL "host")
     # --- host build ---
@@ -226,12 +249,14 @@ if(PICO_PLATFORM STREQUAL "host")
         src/host/peripheral.c
         src/host/persistence.c
         src/host/cartridge.c
+        src/host/asset_pack.c
         src/host/cartridge_abi.c
         src/host/cartridge_vm.c
         src/host/sleep.c
         src/host/sync.c
     )
-    add_dependencies(prism prism_host_cartridge_packages)
+    add_dependencies(prism prism_host_cartridge_packages
+        beatline_golden_pack beatline_never_gonna_pack)
     prism_enable_warnings(prism)
 
     target_compile_definitions(prism PRIVATE
@@ -239,6 +264,8 @@ if(PICO_PLATFORM STREQUAL "host")
         PRISM_HOST_MORSE_PATH="${PRISM_HOST_MORSE}"
         PRISM_HOST_ASTEROIDS_PATH="${PRISM_HOST_ASTEROIDS}"
         PRISM_HOST_BEATLINE_PATH="${PRISM_HOST_BEATLINE}"
+        PRISM_HOST_GOLDEN_PACK_PATH="${beatline_golden_pack_PRISM_PACK_FILE}"
+        PRISM_HOST_NEVER_GONNA_PACK_PATH="${beatline_never_gonna_pack_PRISM_PACK_FILE}"
     )
 
     target_compile_options(shared PRIVATE -include ${CMAKE_CURRENT_LIST_DIR}/src/host/compat.h)
@@ -264,6 +291,7 @@ if(PICO_PLATFORM STREQUAL "host")
         add_executable(prism_cartridge_identity_tests
             tests/cartridge_identity_test.c
             src/shared/os/cartridge_identity.c
+            src/shared/os/asset_pack.c
             src/shared/os/management_serialization.c
         )
         target_include_directories(prism_cartridge_identity_tests PRIVATE
@@ -297,6 +325,26 @@ if(PICO_PLATFORM STREQUAL "host")
             COMMAND ${Python3_EXECUTABLE}
                     ${CMAKE_CURRENT_LIST_DIR}/tests/test_factory_uf2.py
         )
+        add_test(NAME prism_asset_packager
+            COMMAND ${Python3_EXECUTABLE}
+                    ${CMAKE_CURRENT_LIST_DIR}/tests/test_package_assets.py
+        )
+        add_test(NAME prism_beatline_export
+            COMMAND ${Python3_EXECUTABLE}
+                    ${CMAKE_CURRENT_LIST_DIR}/tests/test_rea_midi_export.py
+        )
+        add_executable(prism_beatline_chart_tests
+            tests/beatline_chart_test.c
+            src/cartridges/beatline/chart.c
+        )
+        target_include_directories(prism_beatline_chart_tests PRIVATE
+            ${CMAKE_CURRENT_LIST_DIR}/src/cartridges/beatline
+        )
+        target_link_libraries(prism_beatline_chart_tests PRIVATE
+            prism_cartridge_headers
+        )
+        prism_enable_warnings(prism_beatline_chart_tests)
+        add_test(NAME prism_beatline_chart COMMAND prism_beatline_chart_tests)
 
         add_executable(prism_qrcode_render_tests
             tests/qrcode_render_test.c
@@ -325,6 +373,9 @@ if(PICO_PLATFORM STREQUAL "host")
         add_test(NAME prism_host_cartridge_audio
                  COMMAND prism --test-cartridge-audio
                          "${PRISM_HOST_ASTEROIDS}")
+        add_test(NAME prism_host_cartridge_assets
+                 COMMAND prism --test-cartridge-assets
+                         "${PRISM_HOST_BEATLINE}")
 
         add_executable(prism_full_test_state_tests
             tests/full_test_state_test.c
@@ -513,6 +564,8 @@ else()
                 ${morse_cartridge_PRISM_FILE}
                 ${asteroids_cartridge_PRISM_FILE}
                 ${beatline_cartridge_PRISM_FILE}
+                ${beatline_golden_pack_PRISM_PACK_FILE}
+                ${beatline_never_gonna_pack_PRISM_PACK_FILE}
         DEPENDS
             prism
             ${CMAKE_CURRENT_BINARY_DIR}/prism.uf2
@@ -520,6 +573,8 @@ else()
             ${morse_cartridge_PRISM_FILE}
             ${asteroids_cartridge_PRISM_FILE}
             ${beatline_cartridge_PRISM_FILE}
+            ${beatline_golden_pack_PRISM_PACK_FILE}
+            ${beatline_never_gonna_pack_PRISM_PACK_FILE}
             ${CMAKE_CURRENT_LIST_DIR}/scripts/build_factory_uf2.py
         VERBATIM
         COMMENT "Generating factory Prism UF2"

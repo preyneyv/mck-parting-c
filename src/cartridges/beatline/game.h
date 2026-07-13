@@ -72,7 +72,7 @@ typedef enum
 #define BEATLINE_NOTE_UNJUDGED 0xFF
 
 // Max notes we can track (sized for compiled charts)
-#define BEATLINE_MAX_NOTES 1024
+#define BEATLINE_MAX_NOTES BEATLINE_FILE_MAX_NOTES
 
 // Feedback display duration (ticks)
 #define BEATLINE_FEEDBACK_DURATION 288
@@ -92,26 +92,37 @@ typedef struct
 
 typedef struct
 {
+    const beatline_chart_t *chart;
+    bool playing;
+    bool paused;
+    uint32_t song_time_ms;
+    uint32_t last_engine_ms;
+    uint32_t next_event_idx;
+} beatline_song_player_t;
+
+typedef struct
+{
     beatline_screen_t screen;
 
     // selection
-    int8_t selected_track;
+    uint32_t selected_track;
+    uint32_t track_count;
     beatline_difficulty_t selected_difficulty;
     int32_t select_scroll_y; // animated scroll offset
 
     // chart reference
-    const beatline_chart_t *chart;
+    beatline_chart_t chart;
 
     // song playback
-    audio_song_player_t song_player;
+    beatline_song_player_t song_player;
     uint32_t game_start_tick;
     int32_t av_offset_ticks; // audio-visual offset, default 0
 
     // note tracking
-    beatline_note_t generated_notes[BEATLINE_MAX_NOTES];
-    uint16_t generated_note_count;
-    uint32_t generated_last_note_tick;
-    uint32_t generated_duration_ticks;
+    const beatline_note_t *notes;
+    uint16_t note_count;
+    uint32_t last_note_tick;
+    uint32_t duration_ticks;
     uint16_t next_judge_idx; // next unjudged note (for miss scanning)
     uint8_t note_grades[BEATLINE_MAX_NOTES];
     uint8_t note_score_multipliers[BEATLINE_MAX_NOTES];
@@ -152,18 +163,24 @@ typedef struct
 // --- API ---
 
 void beatline_game_init(beatline_state_t *st);
-void beatline_game_select_track(beatline_state_t *st, int8_t track_idx,
+bool beatline_game_select_chart(beatline_state_t *st,
+                                const beatline_chart_t *chart,
                                 beatline_difficulty_t difficulty);
 void beatline_game_start_countdown(beatline_state_t *st);
 void beatline_game_start_play(beatline_state_t *st);
 void beatline_game_tick(beatline_state_t *st);
 void beatline_game_finish(beatline_state_t *st);
+void beatline_song_player_pause(beatline_song_player_t *player);
+void beatline_song_player_resume(beatline_song_player_t *player,
+                                 uint32_t now_ms);
+void beatline_song_player_stop(beatline_song_player_t *player, bool panic);
 
 // Query helpers
 int32_t beatline_game_time_signed(const beatline_state_t *st);
 uint32_t beatline_game_time(const beatline_state_t *st);
 beatline_song_timing_t beatline_song_timing(const beatline_state_t *st);
-beatline_song_timing_t beatline_song_timing_from_asset(const audio_song_asset_t *song);
+beatline_song_timing_t beatline_song_timing_from_chart(
+    const beatline_chart_t *chart);
 beatline_rank_t beatline_game_rank(const beatline_state_t *st);
 const char *beatline_grade_str(beatline_grade_t grade);
 const char *beatline_rank_str(beatline_rank_t rank);

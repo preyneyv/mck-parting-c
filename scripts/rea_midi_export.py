@@ -2,6 +2,7 @@ import argparse
 import atexit
 import bisect
 import os
+import struct
 import subprocess
 import sys
 import time
@@ -10,6 +11,12 @@ from typing import Dict, List, Optional, Tuple
 
 REASCRIPT_PATH = Path(__file__).resolve().with_name("rea_midi_export.lua")
 ENGINE_TICK_RATE = 960
+BEATLINE_FILE_MAGIC = 0x4E4C5442
+BEATLINE_FILE_FORMAT_VERSION = 1
+BEATLINE_FILE_HEADER_BYTES = 256
+BEATLINE_SCORING_RULESET = 1
+BEATLINE_FILE_FLAG_RANKED = 1
+BEATLINE_MAX_NOTES = 1024
 
 subprocs: List[subprocess.Popen] = []
 atexit.register(lambda: [p.kill() for p in subprocs if p.poll() is None])
@@ -21,6 +28,13 @@ def write_text_if_changed(path: Path, content: str) -> None:
     if path.exists() and path.read_bytes() == encoded:
         return
     path.write_bytes(encoded)
+
+
+def write_bytes_if_changed(path: Path, content: bytes) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if path.exists() and path.read_bytes() == content:
+        return
+    path.write_bytes(content)
 
 
 def sanitize_symbol(raw: str) -> str:
@@ -657,6 +671,182 @@ def build_song_header_from_midi(
     write_text_if_changed(header_out, header_content)
 
 
+def _align4(value: int) -> int:
+    return (value + 3) & ~3
+
+
+def _beatline_notes(events: List[Dict[str, object]], patch_idx: int):
+    notes: List[Tuple[int, int, int, int]] = []
+    hold_start: List[Optional[int]] = [None, None]
+    for event in events:
+        if int(event.get("patch_idx", -1)) != patch_idx:
+            continue
+        event_type = str(event["etype"])
+        note = int(event.get("note_number", -1))
+        tick = int(event["time_tick"])
+        lane = 0 if note in (48, 49) else 1 if note in (60, 61) else -1
+        if lane < 0:
+            continue
+        if event_type == "note_on":
+            if note in (48, 60):
+                notes.append((tick, lane, 0, 0))
+            elif note in (49, 61):
+                hold_start[lane] = tick
+        elif event_type == "note_off" and note in (49, 61):
+            start = hold_start[lane]
+            if start is None:
+                continue
+            duration = max(0, tick - start)
+            duration = min(duration, 0xFFFF)
+            notes.append((start, lane, 1 if duration else 0, duration))
+            hold_start[lane] = None
+
+    for lane, start in enumerate(hold_start):
+        if start is not None:
+            notes.append((start, lane, 0, 0))
+    notes.sort(key=lambda note: (note[0], note[1]))
+    if len(notes) > BEATLINE_MAX_NOTES:
+        raise ValueError(
+            f"difficulty {patch_idx} has {len(notes)} notes; maximum is "
+            f"{BEATLINE_MAX_NOTES}"
+        )
+    return notes
+
+
+def emit_beatline_file(
+    title: str,
+    artist: str,
+    model: Dict[str, object],
+    track_id: int = 0,
+    normal_chart_id: int = 0,
+    hard_chart_id: int = 0,
+) -> bytes:
+    if not title or not artist:
+        raise ValueError(".beatline title and artist must not be empty")
+    title_bytes = title.encode("utf-8")
+    artist_bytes = artist.encode("utf-8")
+    if len(title_bytes) > 0xFFFF or len(artist_bytes) > 0xFFFF:
+        raise ValueError(".beatline title and artist must fit uint16 lengths")
+    ids = (track_id, normal_chart_id, hard_chart_id)
+    if any(value < 0 or value > 0xFFFFFFFFFFFFFFFF for value in ids):
+        raise ValueError("ranked IDs must be uint64 values")
+    ranked = all(value != 0 for value in ids)
+    if ranked != any(value != 0 for value in ids):
+        raise ValueError("ranked metadata requires all three IDs")
+
+    events = list(model["events"])
+    normal_notes = _beatline_notes(events, 0)
+    hard_notes = _beatline_notes(events, 1)
+
+    audio_patch_ids = {
+        int(event["patch_idx"])
+        for event in events
+        if str(event["etype"]) in ("note_on", "note_off")
+        and int(event["patch_idx"]) >= 2
+    }
+    patches = [
+        patch for patch in model["patches"]
+        if int(patch["local_idx"]) in audio_patch_ids
+    ]
+    if any(patch_id >= 16 for patch_id in audio_patch_ids):
+        raise ValueError("Beatline audio patches must use channels 2-15")
+    audio_events = [
+        event for event in events
+        if str(event["etype"]) in ("note_on", "note_off")
+        and int(event["patch_idx"]) >= 2
+    ]
+
+    output = bytearray(BEATLINE_FILE_HEADER_BYTES)
+
+    def append_aligned(payload: bytes) -> int:
+        while len(output) != _align4(len(output)):
+            output.append(0)
+        offset = len(output)
+        output.extend(payload)
+        return offset
+
+    title_offset = append_aligned(title_bytes + b"\0")
+    artist_offset = append_aligned(artist_bytes + b"\0")
+
+    patch_data = bytearray()
+    for patch in patches:
+        patch_data.extend(struct.pack("<B3x", int(patch["local_idx"])))
+        for op in patch["ops"]:
+            patch_data.extend(
+                struct.pack(
+                    "<ihBBIIiI",
+                    int(op["freq_mult"]),
+                    int(op["level_q15"]),
+                    int(op["mode"]),
+                    0,
+                    int(op["a"]),
+                    int(op["d"]),
+                    int(op["s_q31"]),
+                    int(op["r"]),
+                )
+            )
+    patches_offset = append_aligned(bytes(patch_data))
+
+    event_data = bytearray()
+    for event in audio_events:
+        event_data.extend(
+            struct.pack(
+                "<IBBBB",
+                int(event["time_ms"]),
+                0 if event["etype"] == "note_on" else 1,
+                int(event["patch_idx"]),
+                int(event["note_number"]),
+                int(event.get("velocity", 0)),
+            )
+        )
+    events_offset = append_aligned(bytes(event_data))
+
+    def note_bytes(notes) -> bytes:
+        return b"".join(struct.pack("<IBBH", *note) for note in notes)
+
+    normal_notes_offset = append_aligned(note_bytes(normal_notes))
+    hard_notes_offset = append_aligned(note_bytes(hard_notes))
+
+    struct.pack_into("<IHH", output, 0, BEATLINE_FILE_MAGIC,
+                     BEATLINE_FILE_FORMAT_VERSION,
+                     BEATLINE_FILE_HEADER_BYTES)
+    struct.pack_into("<IIII", output, 8, len(output),
+                     BEATLINE_SCORING_RULESET,
+                     BEATLINE_FILE_FLAG_RANKED if ranked else 0, 0)
+    struct.pack_into("<QQQ", output, 24, *ids)
+    struct.pack_into("<III", output, 48, int(model["bpm_q8"]),
+                     int(model["duration_ms"]),
+                     int(model["duration_ticks"]))
+    struct.pack_into("<BBH", output, 60, int(model["numerator"]),
+                     int(model["denominator"]), 0)
+    struct.pack_into("<IHHI", output, 64, title_offset, len(title_bytes),
+                     len(artist_bytes), artist_offset)
+    struct.pack_into("<IIIIIIII", output, 76,
+                     patches_offset, len(patches),
+                     events_offset, len(audio_events),
+                     normal_notes_offset, len(normal_notes),
+                     hard_notes_offset, len(hard_notes))
+    return bytes(output)
+
+
+def build_beatline_from_midi(
+    midi_path: Path,
+    output: Path,
+    title: str,
+    artist: str,
+    track_id: int = 0,
+    normal_chart_id: int = 0,
+    hard_chart_id: int = 0,
+) -> None:
+    division, song_end_tick, events = parse_midi_events(midi_path)
+    model = build_song_model(division, song_end_tick, events)
+    write_bytes_if_changed(
+        output,
+        emit_beatline_file(title, artist, model, track_id,
+                           normal_chart_id, hard_chart_id),
+    )
+
+
 def run_export(rpp_path: Path, midi_out_path: Path, reaper_path: str) -> bool:
     midi_out_path.parent.mkdir(parents=True, exist_ok=True)
     prev_mtime = midi_out_path.stat().st_mtime if midi_out_path.exists() else None
@@ -700,6 +890,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--rpp", required=True, help="Input .rpp project file")
     parser.add_argument("--midi-out", help="Output MIDI file path (.mid)")
     parser.add_argument("--song-header-out", help="Output C header path (.h)")
+    parser.add_argument("--beatline-out", help="Output .beatline track file")
+    parser.add_argument("--title", help="Beatline track title")
+    parser.add_argument("--artist", help="Beatline track artist")
+    parser.add_argument("--track-id", type=int, default=0)
+    parser.add_argument("--normal-chart-id", type=int, default=0)
+    parser.add_argument("--hard-chart-id", type=int, default=0)
     parser.add_argument(
         "--song-source-out",
         help="Deprecated: source output is no longer generated (header-only)",
@@ -764,6 +960,21 @@ def main() -> int:
             midi_out,
             Path(args.song_header_out).resolve(),
             symbol,
+        )
+
+    if args.beatline_out:
+        if not args.title or not args.artist:
+            print("Error: --beatline-out requires --title and --artist.",
+                  file=sys.stderr)
+            return 2
+        build_beatline_from_midi(
+            midi_out,
+            Path(args.beatline_out).resolve(),
+            args.title,
+            args.artist,
+            args.track_id,
+            args.normal_chart_id,
+            args.hard_chart_id,
         )
 
     return 0

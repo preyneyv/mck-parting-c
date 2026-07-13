@@ -3,6 +3,9 @@
 #include <stdint.h>
 
 #include <prism/audio.h>
+#include <prism/sdk.h>
+
+#include "format.h"
 
 typedef enum
 {
@@ -22,11 +25,6 @@ typedef enum
     BEATLINE_DIFFICULTY_HARD = 1,
 } beatline_difficulty_t;
 
-static inline uint8_t beatline_difficulty_patch(beatline_difficulty_t difficulty)
-{
-    return (difficulty == BEATLINE_DIFFICULTY_HARD) ? 1u : 0u;
-}
-
 // A single note in the chart. Sorted by hit_tick ascending.
 typedef struct
 {
@@ -36,13 +34,35 @@ typedef struct
     uint16_t hold_duration; // hold length in ticks (0 for taps)
 } beatline_note_t;
 
+_Static_assert(sizeof(beatline_note_t) == 8,
+               ".beatline note is part of the file format");
+
 // A song entry: shared display metadata + one source song asset.
 typedef struct
 {
+    uint32_t pack_index;
+    uint32_t file_index;
     const char *title;
     const char *display_info;
-    const audio_song_asset_t *song;
+    const beatline_file_header_t *header;
+    const beatline_file_patch_t *patches;
+    const beatline_file_event_t *events;
+    const beatline_note_t *normal_notes;
+    const beatline_note_t *hard_notes;
 } beatline_chart_t;
 
-extern const beatline_chart_t beatline_tracks[];
-extern const uint8_t BEATLINE_TRACK_COUNT;
+uint32_t beatline_chart_count(prism_t *prism);
+bool beatline_chart_get(prism_t *prism, uint32_t index,
+                        beatline_chart_t *chart);
+bool beatline_chart_next(prism_t *prism, const beatline_chart_t *current,
+                         beatline_chart_t *chart);
+bool beatline_chart_previous(prism_t *prism,
+                             const beatline_chart_t *current,
+                             beatline_chart_t *chart);
+bool beatline_chart_open(prism_t *prism, const beatline_chart_t *reference,
+                         beatline_chart_t *chart);
+const beatline_note_t *beatline_chart_notes(
+    const beatline_chart_t *chart, beatline_difficulty_t difficulty,
+    uint16_t *count);
+uint64_t beatline_chart_ranked_id(
+    const beatline_chart_t *chart, beatline_difficulty_t difficulty);

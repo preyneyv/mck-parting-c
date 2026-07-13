@@ -33,7 +33,6 @@ static const int16_t SELECT_SCROLL_MARGIN =
 
 static struct
 {
-    int32_t active_offset;
     int32_t scroll_offset;
     int32_t fill_w;
     prism_button_t fill_btn;
@@ -42,35 +41,87 @@ static struct
     bool ignore_release;
 } sel;
 
+enum
+{
+    SELECT_PREVIOUS = 0,
+    SELECT_CURRENT = 1,
+    SELECT_NEXT = 2,
+};
+
+static beatline_chart_t select_charts[3];
+static bool select_charts_valid;
+
 static prism_ui_hold_feedback_t results_hold_feedback;
 
-static inline int32_t select_card_x(uint8_t idx)
+static void select_retarget(int8_t direction, bool instant)
 {
-    return (SELECT_CARD_W + SELECT_CARD_GAP) * idx;
-}
-
-static void select_retarget(bool instant)
-{
-    int32_t active = select_card_x((uint8_t)state.selected_track);
-    int32_t scroll = SELECT_SCROLL_MARGIN - active;
-
     if (instant)
     {
-        sel.active_offset = active;
-        sel.scroll_offset = scroll;
+        sel.scroll_offset = 0;
         return;
     }
-
-    prism_anim_to(beatline_prism, &sel.active_offset, active, 150,
-                  PRISM_ANIM_EASE_INOUT_QUAD, NULL, NULL);
-    prism_anim_to(beatline_prism, &sel.scroll_offset, scroll, 150,
+    sel.scroll_offset = direction > 0
+                            ? SELECT_CARD_W + SELECT_CARD_GAP
+                            : -(SELECT_CARD_W + SELECT_CARD_GAP);
+    prism_anim_to(beatline_prism, &sel.scroll_offset, 0, 150,
                   PRISM_ANIM_EASE_INOUT_QUAD, NULL, NULL);
 }
 
 static void select_enter(void)
 {
     memset(&sel, 0, sizeof(sel));
-    select_retarget(true);
+    memset(select_charts, 0, sizeof(select_charts));
+    select_charts_valid = false;
+    if (state.track_count != 0 &&
+        beatline_chart_get(beatline_prism, state.selected_track,
+                           &select_charts[SELECT_CURRENT]))
+    {
+        select_charts_valid = true;
+        if (state.track_count == 1)
+        {
+            select_charts[SELECT_PREVIOUS] =
+                select_charts[SELECT_CURRENT];
+            select_charts[SELECT_NEXT] = select_charts[SELECT_CURRENT];
+        }
+        else
+        {
+            if (!beatline_chart_previous(
+                    beatline_prism, &select_charts[SELECT_CURRENT],
+                    &select_charts[SELECT_PREVIOUS]))
+                select_charts_valid = false;
+            if (!beatline_chart_next(
+                    beatline_prism, &select_charts[SELECT_CURRENT],
+                    &select_charts[SELECT_NEXT]))
+                select_charts_valid = false;
+        }
+    }
+    select_retarget(0, true);
+}
+
+static void select_move_cache(int8_t direction)
+{
+    if (!select_charts_valid || state.track_count <= 1)
+        return;
+    if (direction > 0)
+    {
+        select_charts[SELECT_PREVIOUS] = select_charts[SELECT_CURRENT];
+        select_charts[SELECT_CURRENT] = select_charts[SELECT_NEXT];
+        if (!beatline_chart_next(beatline_prism,
+                                 &select_charts[SELECT_CURRENT],
+                                 &select_charts[SELECT_NEXT]))
+            select_charts_valid = false;
+    }
+    else
+    {
+        select_charts[SELECT_NEXT] = select_charts[SELECT_CURRENT];
+        select_charts[SELECT_CURRENT] = select_charts[SELECT_PREVIOUS];
+        if (!beatline_chart_previous(beatline_prism,
+                                     &select_charts[SELECT_CURRENT],
+                                     &select_charts[SELECT_PREVIOUS]))
+            select_charts_valid = false;
+    }
+    if (!select_charts_valid)
+        select_enter();
 }
 
 static void select_draw_centered_trimmed(u8g2_t *u8g2, int16_t center_x,
@@ -108,6 +159,8 @@ static void select_draw_centered_trimmed(u8g2_t *u8g2, int16_t center_x,
 
 static void select_tick(void)
 {
+    if (state.track_count == 0)
+        return;
     // handle hold-to-select
     prism_button_t btn = prism_button_first_pressed(beatline_prism);
     float held = 0.f;
@@ -128,8 +181,9 @@ static void select_tick(void)
         {
             beatline_difficulty_t difficulty =
                 (btn == PRISM_BUTTON_RIGHT) ? BEATLINE_DIFFICULTY_HARD : BEATLINE_DIFFICULTY_NORMAL;
-            beatline_game_select_track(&state, state.selected_track, difficulty);
-            beatline_game_start_countdown(&state);
+            if (select_charts_valid && beatline_game_select_chart(
+                    &state, &select_charts[SELECT_CURRENT], difficulty))
+                beatline_game_start_countdown(&state);
             prism_buttons_reset(beatline_prism);
             return;
         }
@@ -144,12 +198,13 @@ static void select_tick(void)
     {
         prism_anim_to(beatline_prism, &sel.fill_w, 0, 100,
                       PRISM_ANIM_EASE_OUT_CUBIC, NULL, NULL);
-        if (!sel.ignore_release)
+        if (!sel.ignore_release && state.track_count > 1)
         {
-            state.selected_track--;
-            if (state.selected_track < 0)
-                state.selected_track = BEATLINE_TRACK_COUNT - 1;
-            select_retarget(false);
+            state.selected_track = state.selected_track == 0
+                                       ? state.track_count - 1u
+                                       : state.selected_track - 1u;
+            select_move_cache(-1);
+            select_retarget(-1, false);
             prism_ui_navigate(beatline_prism);
             prism_led_set(beatline_prism, PRISM_LED_LEFT, rgba(30, 30, 30, 255));
         }
@@ -158,12 +213,13 @@ static void select_tick(void)
     {
         prism_anim_to(beatline_prism, &sel.fill_w, 0, 100,
                       PRISM_ANIM_EASE_OUT_CUBIC, NULL, NULL);
-        if (!sel.ignore_release)
+        if (!sel.ignore_release && state.track_count > 1)
         {
             state.selected_track++;
-            if (state.selected_track >= BEATLINE_TRACK_COUNT)
+            if (state.selected_track >= state.track_count)
                 state.selected_track = 0;
-            select_retarget(false);
+            select_move_cache(1);
+            select_retarget(1, false);
             prism_ui_navigate(beatline_prism);
             prism_led_set(beatline_prism, PRISM_LED_RIGHT, rgba(30, 30, 30, 255));
         }
@@ -177,19 +233,44 @@ static void select_frame(void)
 
     u8g2_SetDrawColor(u8g2, 1);
 
-    // Song cards move as a carousel, matching the launcher interaction.
-    for (uint8_t i = 0; i < BEATLINE_TRACK_COUNT; i++)
+    if (state.track_count == 0)
     {
-        const beatline_chart_t *track = &beatline_tracks[i];
-        int16_t card_x = (int16_t)(sel.scroll_offset + select_card_x(i));
+        u8g2_SetFont(u8g2, u8g2_font_6x10_tf);
+        select_draw_centered_trimmed(u8g2, DISP_WIDTH / 2, 19,
+                                     "no tracks installed", DISP_WIDTH - 8);
+        u8g2_SetFont(u8g2, u8g2_font_5x7_tr);
+        select_draw_centered_trimmed(u8g2, DISP_WIDTH / 2, 38,
+                                     "download from", DISP_WIDTH - 8);
+        select_draw_centered_trimmed(u8g2, DISP_WIDTH / 2, 48,
+                                     "prism.preyneyv.dev", DISP_WIDTH - 8);
+        return;
+    }
+
+    // Keep only the visible cards. Adjacent navigation advances their XIP
+    // cursors instead of rescanning the library on every frame.
+    int8_t first_relative = state.track_count == 1 ? 0 : -1;
+    int8_t last_relative = state.track_count == 1 ? 0 : 1;
+    for (int8_t relative = first_relative; relative <= last_relative;
+         ++relative)
+    {
+        if (!select_charts_valid)
+            continue;
+        const beatline_chart_t *track =
+            &select_charts[relative + SELECT_CURRENT];
+        int16_t card_x = (int16_t)(SELECT_SCROLL_MARGIN +
+            relative * (SELECT_CARD_W + SELECT_CARD_GAP) +
+            sel.scroll_offset);
         int16_t center_x = card_x + SELECT_CARD_W / 2;
         elm_t card = elm_child(&root, vec2(card_x, SELECT_CARD_Y));
 
         u8g2_SetDrawColor(u8g2, 1);
         elm_rounded_frame(&card, VEC2_Z, SELECT_CARD_W, SELECT_CARD_H, 3);
         u8g2_SetFont(u8g2, u8g2_font_6x10_tf);
-        elm_str(&card, vec2(6, 27), "<");
-        elm_str(&card, vec2(SELECT_CARD_W - 12, 27), ">");
+        if (state.track_count > 1)
+        {
+            elm_str(&card, vec2(6, 27), "<");
+            elm_str(&card, vec2(SELECT_CARD_W - 12, 27), ">");
+        }
 
         u8g2_SetFont(u8g2, u8g2_font_6x10_tf);
         select_draw_centered_trimmed(u8g2, center_x, 17, track->title,
@@ -204,7 +285,7 @@ static void select_frame(void)
         }
 
         beatline_song_timing_t timing =
-            beatline_song_timing_from_asset(track->song);
+            beatline_song_timing_from_chart(track);
         uint32_t bpm = (timing.bpm_q8 + 128u) / 256u;
         char bpm_buf[20];
         snprintf(bpm_buf, sizeof(bpm_buf), "%lu BPM", (unsigned long)bpm);
@@ -386,14 +467,14 @@ static void play_draw_notes(elm_t *root)
     int32_t game_time = beatline_game_time_signed(&state);
     float px_t = scroll_px_per_tick();
 
-    for (uint16_t i = 0; i < state.generated_note_count; i++)
+    for (uint16_t i = 0; i < state.note_count; i++)
     {
         if (state.note_grades[i] != BEATLINE_NOTE_UNJUDGED)
         {
             // hold notes still render tail while being held
-            if (state.generated_notes[i].type == BEATLINE_NOTE_HOLD)
+            if (state.notes[i].type == BEATLINE_NOTE_HOLD)
             {
-                uint8_t lane = state.generated_notes[i].lane;
+                uint8_t lane = state.notes[i].lane;
                 if (state.hold_state[lane].holding &&
                     state.hold_state[lane].note_idx == i)
                 {
@@ -410,7 +491,7 @@ static void play_draw_notes(elm_t *root)
             }
         }
 
-        const beatline_note_t *n = &state.generated_notes[i];
+        const beatline_note_t *n = &state.notes[i];
         int32_t time_remaining = (int32_t)n->hit_tick - game_time;
         int32_t travel_px = (int32_t)(time_remaining * px_t);
 
@@ -639,7 +720,7 @@ static void results_frame(void)
     // Song and difficulty identify which chart produced the result.
     u8g2_SetFont(u8g2, u8g2_font_5x7_tr);
     select_draw_centered_trimmed(u8g2, rail_x / 2, 7,
-                                 state.chart->title, rail_x - 4);
+                                 state.chart.title, rail_x - 4);
     const char *difficulty =
         state.selected_difficulty == BEATLINE_DIFFICULTY_HARD
             ? "HARD"
@@ -697,10 +778,12 @@ static void results_frame(void)
     }
     else
     {
-        u8g2_SetFont(u8g2, u8g2_font_5x7_tr);
-        const char *error = "QR ERR";
-        uint16_t error_w = u8g2_GetStrWidth(u8g2, error);
-        elm_str(&root, vec2(106 - error_w / 2, 24), error);
+        const int16_t icon_x =
+            rail_x + (DISP_WIDTH - rail_x - PRISM_CARTRIDGE_ICON_WIDTH) / 2;
+        u8g2_DrawXBM(u8g2, icon_x, 2, PRISM_CARTRIDGE_ICON_WIDTH,
+                     PRISM_CARTRIDGE_ICON_HEIGHT, icon__0_bits);
+        u8g2_DrawRFrame(u8g2, icon_x, 2, PRISM_CARTRIDGE_ICON_WIDTH,
+                        PRISM_CARTRIDGE_ICON_HEIGHT, 1);
     }
 
     float left_hold =
@@ -764,20 +847,21 @@ static void pause(prism_t *prism)
 {
     (void)prism;
     if (state.screen == BEATLINE_SCREEN_PLAY)
-        audio_song_player_pause(&state.song_player);
+        beatline_song_player_pause(&state.song_player);
 }
 
 static void resume(prism_t *prism)
 {
     beatline_prism = prism;
     if (state.screen == BEATLINE_SCREEN_PLAY)
-        audio_song_player_resume(&state.song_player, prism_millis(beatline_prism));
+        beatline_song_player_resume(&state.song_player,
+                                    prism_millis(beatline_prism));
 }
 
 static void leave(prism_t *prism)
 {
     (void)prism;
-    audio_song_player_stop(&state.song_player, true);
+    beatline_song_player_stop(&state.song_player, true);
 }
 
 PRISM_CARTRIDGE(cartridge_beatline,
