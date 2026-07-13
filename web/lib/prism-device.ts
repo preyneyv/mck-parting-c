@@ -1,3 +1,5 @@
+import { prismpackIcon } from "@/lib/prismpack-icon";
+
 const MAGIC = 0x4d535250;
 const VERSION = 1;
 const VID = 0x2e8a;
@@ -12,17 +14,20 @@ const CARTRIDGE_LIST_INCLUDE_HIDDEN = 1;
 
 export const Message = {
   hello: 0x01, deviceInfo: 0x02, storageInfo: 0x03, cartridges: 0x04, cartridgeIcon: 0x05, reboot: 0x06,
-  installBegin: 0x10, installChunk: 0x11, installCommit: 0x12, delete: 0x13, compact: 0x14, operationProgress: 0x15, launch: 0x16,
+  assetPacks: 0x07,
+  installBegin: 0x10, installChunk: 0x11, installCommit: 0x12, cartridgeDelete: 0x13, compact: 0x14, operationProgress: 0x15, launch: 0x16, assetPackDelete: 0x17,
   settingsGet: 0x20, settingsPreview: 0x21,
   mirrorSubscribe: 0x30, mirrorUnsubscribe: 0x31, mirrorFrame: 0x32,
   remoteInput: 0x33, heartbeat: 0x34, log: 0x35,
 } as const;
 
-export const Capability = { reboot: 1 << 7 } as const;
+export const Capability = { reboot: 1 << 7, assetPacks: 1 << 8 } as const;
 
 export type DeviceInfo = { serial: string; protocolVersion: number; firmware: string; flashBytes: number; blockBytes: number; capabilities: number };
 export type CartridgeMetadata = { id: string; name: string; version: number; appKey: Uint8Array; icon: Uint8Array };
 export type Cartridge = CartridgeMetadata & { packageBytes: number; persistentBytes: number; blocks: number; policy: number };
+export type AssetPack = { id: string; name: string; version: number; packKey: Uint8Array; targetAppKey: Uint8Array; targetId: string; packageBytes: number; blocks: number; status: number };
+export type InstallMetadata = { kind: "cartridge" | "assetPack"; id: string; name: string; version: number; objectKey: Uint8Array; icon: Uint8Array };
 export type StorageInfo = { totalBlocks: number; liveBlocks: number; erasedBlocks: number; deadBlocks: number; largestFreeRun: number; largestReclaimableRun: number; scratchBlocks: number; requiredBlocks: number; blockStates: Uint8Array };
 export type LedEffect = 0 | 1 | 2 | 3;
 export type LedSettings = { effect: LedEffect; speedMs: number; phaseOffset: number; colors: string[] };
@@ -70,6 +75,41 @@ async function packageMetadata(bytes: Uint8Array): Promise<CartridgeMetadata> {
     icon.set(bytes.subarray(imageOffset + iconRelative, imageOffset + iconRelative + ICON_BYTES));
   }
   return { id, name, version: header.getUint32(descriptorOffset + 12, true), appKey, icon };
+}
+
+async function derivedKey(domain: string, id: string) {
+  return new Uint8Array(await crypto.subtle.digest(
+    "SHA-256", new TextEncoder().encode(`${domain}\0${id}`),
+  )).slice(0, 16);
+}
+
+function metadataText(bytes: Uint8Array, offset: number, length: number) {
+  if (length === 0 || offset > bytes.length || length + 1 > bytes.length - offset || bytes[offset + length] !== 0)
+    throw new Error("This asset pack has invalid metadata offsets.");
+  const value = bytes.subarray(offset, offset + length);
+  if (value.includes(0)) throw new Error("This asset pack has invalid metadata strings.");
+  return new TextDecoder("utf-8", { fatal: true }).decode(value);
+}
+
+async function assetPackMetadata(bytes: Uint8Array): Promise<InstallMetadata & { targetId: string; targetAppKey: Uint8Array }> {
+  const header = view(bytes);
+  if (bytes.length < 256 || header.getUint32(0, true) !== 0x4b415050 ||
+      header.getUint16(4, true) !== 1 || header.getUint16(6, true) !== 256 ||
+      header.getUint32(8, true) !== bytes.length || header.getUint32(12, true) === 0)
+    throw new Error("This is not a compatible Prism asset pack.");
+  const id = metadataText(bytes, header.getUint32(76, true), header.getUint32(80, true));
+  const name = metadataText(bytes, header.getUint32(84, true), header.getUint32(88, true));
+  const targetId = metadataText(bytes, header.getUint32(92, true), header.getUint32(96, true));
+  if (!cartridgeIdValid(id) || !cartridgeIdValid(targetId) || new TextEncoder().encode(name).length > 31)
+    throw new Error("This asset pack has invalid authored metadata.");
+  const packKey = bytes.slice(16, 32);
+  const targetAppKey = bytes.slice(32, 48);
+  const expectedPackKey = await derivedKey("prism.pack.v1", id);
+  const expectedTargetKey = await derivedKey("prism.app.v1", targetId);
+  if (!packKey.every((byte, index) => byte === expectedPackKey[index]) ||
+      !targetAppKey.every((byte, index) => byte === expectedTargetKey[index]))
+    throw new Error("This asset pack's generated keys do not match its IDs.");
+  return { kind: "assetPack", id, name, version: header.getUint32(12, true), objectKey: packKey, icon: prismpackIcon, targetId, targetAppKey };
 }
 
 export class PrismDevice {
@@ -292,6 +332,42 @@ export class PrismDevice {
     return result;
   }
 
+  async assetPacks(): Promise<AssetPack[]> {
+    const result: AssetPack[] = [];
+    let startIndex = 0;
+    let totalCount = 0;
+    do {
+      const request = new Uint8Array(4);
+      view(request).setUint16(0, startIndex, true);
+      const data = await this.request(Message.assetPacks, request);
+      if (data.length < 8) throw new Error("Prism returned an invalid asset pack list.");
+      const list = view(data), count = list.getUint16(4, true);
+      totalCount = list.getUint16(0, true);
+      const responseStart = list.getUint16(2, true);
+      const stringBytes = list.getUint16(6, true), stringsOffset = 8 + count * 56;
+      if (responseStart !== startIndex || stringsOffset + stringBytes > data.length)
+        throw new Error("Prism returned an invalid asset pack list.");
+      for (let index = 0; index < count; index++) {
+        const offset = 8 + index * 56, entry = view(data.subarray(offset, offset + 56));
+        const idOffset = entry.getUint16(44, true), idLength = entry.getUint16(46, true);
+        const nameOffset = entry.getUint16(48, true), nameLength = entry.getUint16(50, true);
+        const targetOffset = entry.getUint16(52, true), targetLength = entry.getUint16(54, true);
+        if (idOffset + idLength > stringBytes || nameOffset + nameLength > stringBytes || targetOffset + targetLength > stringBytes)
+          throw new Error("Prism returned invalid asset pack metadata.");
+        result.push({
+          packKey: data.slice(offset, offset + 16), targetAppKey: data.slice(offset + 16, offset + 32),
+          packageBytes: entry.getUint32(32, true), version: entry.getUint32(36, true), blocks: entry.getUint16(40, true), status: entry.getUint16(42, true),
+          id: new TextDecoder().decode(data.subarray(stringsOffset + idOffset, stringsOffset + idOffset + idLength)),
+          name: new TextDecoder().decode(data.subarray(stringsOffset + nameOffset, stringsOffset + nameOffset + nameLength)),
+          targetId: new TextDecoder().decode(data.subarray(stringsOffset + targetOffset, stringsOffset + targetOffset + targetLength)),
+        });
+      }
+      if (count === 0 && startIndex < totalCount) throw new Error("An asset pack entry is too large for the management protocol.");
+      startIndex += count;
+    } while (startIndex < totalCount);
+    return result;
+  }
+
   private async cartridgeIcon(appKey: Uint8Array) { return this.request(Message.cartridgeIcon, appKey); }
 
   async storage(): Promise<StorageInfo> {
@@ -313,7 +389,8 @@ export class PrismDevice {
   async remoteInput(buttons: number) { await this.request(Message.remoteInput, Uint8Array.of(buttons, 0, 0, 0)); }
   async launchCartridge(appKey: Uint8Array) { await this.request(Message.launch, appKey); }
   async restart(bootsel = false) { await this.request(Message.reboot, Uint8Array.of(bootsel ? 1 : 0, 0, 0, 0)); }
-  async deleteCartridge(appKey: Uint8Array) { await this.request(Message.delete, appKey); }
+  async deleteCartridge(appKey: Uint8Array) { await this.request(Message.cartridgeDelete, appKey); }
+  async deleteAssetPack(packKey: Uint8Array) { await this.request(Message.assetPackDelete, packKey); }
   async compact(onProgress: (ratio: number) => void) {
     const previous = this.onOperationProgress;
     this.onOperationProgress = progress => {
@@ -325,22 +402,28 @@ export class PrismDevice {
     finally { this.onOperationProgress = previous; }
   }
 
-  async install(file: File, onProgress: (ratio: number) => void, onMetadata: (metadata: CartridgeMetadata) => void) {
+  async install(file: File, onProgress: (ratio: number) => void, onMetadata: (metadata: InstallMetadata) => void) {
     const bytes = new Uint8Array(await file.arrayBuffer());
-    if (bytes.length < 256) throw new Error("This .prism package is too short.");
+    if (bytes.length < 256) throw new Error("This Prism package is too short.");
     const packageHeader = view(bytes);
-    if (packageHeader.getUint32(0, true) !== 0x4b505250 ||
-        packageHeader.getUint16(4, true) !== 1 ||
-        packageHeader.getUint16(6, true) !== 256 ||
-        packageHeader.getUint16(8, true) !== 1 ||
-        packageHeader.getUint16(10, true) === 0 ||
-        packageHeader.getUint32(12, true) !== bytes.length)
-      throw new Error("This is not a compatible Prism cartridge package.");
-    const metadata = await packageMetadata(bytes);
+    const magic = packageHeader.getUint32(0, true);
+    let metadata: InstallMetadata;
+    let objectKind: number;
+    if (magic === 0x4b505250) {
+      if (packageHeader.getUint16(4, true) !== 1 || packageHeader.getUint16(6, true) !== 256 || packageHeader.getUint16(8, true) !== 1 || packageHeader.getUint16(10, true) === 0 || packageHeader.getUint32(12, true) !== bytes.length)
+        throw new Error("This is not a compatible Prism cartridge package.");
+      const cartridge = await packageMetadata(bytes);
+      metadata = { kind: "cartridge", id: cartridge.id, name: cartridge.name, version: cartridge.version, objectKey: cartridge.appKey, icon: cartridge.icon };
+      objectKind = 1;
+    } else if (magic === 0x4b415050) {
+      metadata = await assetPackMetadata(bytes);
+      objectKind = 2;
+    } else {
+      throw new Error("This is not a compatible Prism package.");
+    }
     onMetadata(metadata);
-    const appKey = bytes.subarray(16, 32);
     const begin = new Uint8Array(60 + ICON_BYTES), value = view(begin);
-    begin.set(appKey); value.setUint32(16, bytes.length, true); value.setUint32(20, crc32(bytes), true); value.setUint16(24, Math.ceil(bytes.length / (128 * 1024)), true);
+    begin.set(metadata.objectKey); value.setUint32(16, bytes.length, true); value.setUint32(20, crc32(bytes), true); value.setUint16(24, Math.ceil(bytes.length / (64 * 1024)), true); begin[26] = objectKind;
     begin.set(new TextEncoder().encode(metadata.name).subarray(0, 31), 28);
     begin.set(metadata.icon, 60);
     await this.request(Message.installBegin, begin, 30000);
