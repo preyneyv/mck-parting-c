@@ -282,15 +282,10 @@ if(PICO_PLATFORM STREQUAL "host")
         add_test(NAME prism_host_cartridge_abi
                  COMMAND prism_host_cartridge_abi_tests)
 
-        add_executable(prism_bundled_package_tests
-            tests/bundled_package_test.c
+        add_test(NAME prism_factory_uf2
+            COMMAND ${Python3_EXECUTABLE}
+                    ${CMAKE_CURRENT_LIST_DIR}/tests/test_factory_uf2.py
         )
-        target_include_directories(prism_bundled_package_tests PRIVATE
-            ${CMAKE_CURRENT_LIST_DIR}/src
-        )
-        prism_enable_warnings(prism_bundled_package_tests)
-        add_test(NAME prism_bundled_package
-                 COMMAND prism_bundled_package_tests)
 
         add_executable(prism_qrcode_render_tests
             tests/qrcode_render_test.c
@@ -496,25 +491,27 @@ else()
         OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/beatline.prism
     )
 
-    set(DEFAULT_CARTRIDGE_ASM ${CMAKE_CURRENT_BINARY_DIR}/default_cartridges.S)
+    set(PRISM_FACTORY_UF2 ${CMAKE_CURRENT_BINARY_DIR}/prism_factory.uf2)
     add_custom_command(
-        OUTPUT ${DEFAULT_CARTRIDGE_ASM}
+        OUTPUT ${PRISM_FACTORY_UF2}
         COMMAND ${Python3_EXECUTABLE}
-                ${CMAKE_CURRENT_LIST_DIR}/scripts/embed_default_cartridges.py
-                --output ${DEFAULT_CARTRIDGE_ASM}
-                bongocat=${bongocat_cartridge_PRISM_FILE}
-                morse=${morse_cartridge_PRISM_FILE}
-                asteroids=${asteroids_cartridge_PRISM_FILE}
-                beatline=${beatline_cartridge_PRISM_FILE}
+                ${CMAKE_CURRENT_LIST_DIR}/scripts/build_factory_uf2.py
+                --firmware ${CMAKE_CURRENT_BINARY_DIR}/prism.uf2
+                --output ${PRISM_FACTORY_UF2}
+                ${bongocat_cartridge_PRISM_FILE}
+                ${morse_cartridge_PRISM_FILE}
+                ${asteroids_cartridge_PRISM_FILE}
+                ${beatline_cartridge_PRISM_FILE}
         DEPENDS
+            prism
+            ${CMAKE_CURRENT_BINARY_DIR}/prism.uf2
             ${bongocat_cartridge_PRISM_FILE}
             ${morse_cartridge_PRISM_FILE}
             ${asteroids_cartridge_PRISM_FILE}
             ${beatline_cartridge_PRISM_FILE}
-            ${CMAKE_CURRENT_LIST_DIR}/scripts/embed_default_cartridges.py
+            ${CMAKE_CURRENT_LIST_DIR}/scripts/build_factory_uf2.py
         VERBATIM
-        COMMENT "Embedding default Prism cartridges"
+        COMMENT "Generating factory Prism UF2"
     )
-    set_source_files_properties(${DEFAULT_CARTRIDGE_ASM} PROPERTIES GENERATED TRUE)
-    target_sources(prism PRIVATE ${DEFAULT_CARTRIDGE_ASM})
+    add_custom_target(prism_factory_uf2 ALL DEPENDS ${PRISM_FACTORY_UF2})
 endif()

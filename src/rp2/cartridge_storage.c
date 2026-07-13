@@ -1,6 +1,5 @@
 #include "cartridge_storage.h"
 
-#include "shared/os/bundled_package.h"
 #include "cartridge_runtime_exports.h"
 #include "flash_io.h"
 #include "flash_layout.h"
@@ -119,18 +118,7 @@ static uint16_t allocation_cursor;
  * even this small index array should not compete with the management call
  * stack while flash operations are in progress. */
 static uint16_t compaction_indices[CATALOG_MAX_ENTRIES];
-static uint8_t default_install_chunk[sizeof(prism_management_install_chunk_t) +
-                                     1024u];
 static uint8_t install_program_buffer[1024u];
-
-extern const uint8_t prism_default_bongocat_start[];
-extern const uint8_t prism_default_bongocat_end[];
-extern const uint8_t prism_default_morse_start[];
-extern const uint8_t prism_default_morse_end[];
-extern const uint8_t prism_default_asteroids_start[];
-extern const uint8_t prism_default_asteroids_end[];
-extern const uint8_t prism_default_beatline_start[];
-extern const uint8_t prism_default_beatline_end[];
 
 typedef struct
 {
@@ -140,22 +128,8 @@ typedef struct
 
 static runtime_descriptor_t runtime_descriptors[CATALOG_MAX_ENTRIES];
 
-static const prism_cartridge_t *load_descriptor(uint16_t slot);
 static void reconcile_catalog(void);
 static bool catalog_save(void);
-
-typedef struct
-{
-  const uint8_t *start;
-  const uint8_t *end;
-} default_cartridge_t;
-
-static const default_cartridge_t default_cartridges[] = {
-    {prism_default_bongocat_start, prism_default_bongocat_end},
-    {prism_default_morse_start, prism_default_morse_end},
-    {prism_default_asteroids_start, prism_default_asteroids_end},
-    {prism_default_beatline_start, prism_default_beatline_end},
-};
 
 static void trace_set(uint32_t stage, uint32_t detail)
 {
@@ -357,88 +331,6 @@ static bool catalog_valid(const catalog_t *value)
          value->entries_crc32 ==
              crc32(value->entries,
                    value->entry_count * sizeof(catalog_entry_t));
-}
-
-static int catalog_find_app_key(
-    const uint8_t app_key[PRISM_APP_KEY_BYTES])
-{
-  for (uint16_t i = 0; i < catalog.entry_count; ++i)
-    if (catalog.entries[i].state == ENTRY_LIVE &&
-        memcmp(catalog.entries[i].app_key, app_key, PRISM_APP_KEY_BYTES) == 0)
-      return (int)i;
-  return -1;
-}
-
-static bool seed_default_cartridge(const default_cartridge_t *value)
-{
-  size_t size = (size_t)(value->end - value->start);
-  if (size < sizeof(prism_package_header_t) || size > UINT32_MAX)
-    return false;
-  const prism_package_header_t *header = (const void *)value->start;
-  const prism_cartridge_t *bundled_descriptor = NULL;
-  if (!package_valid(value->start, (uint32_t)size) ||
-      header->package_size != size ||
-      !package_metadata(value->start, header, &bundled_descriptor, NULL,
-                        NULL))
-    return false;
-
-  uint32_t package_crc32 = crc32(value->start, size);
-  int installed_slot = catalog_find_app_key(header->app_key);
-  if (installed_slot >= 0)
-  {
-    const prism_cartridge_t *installed_descriptor =
-        load_descriptor((uint16_t)installed_slot);
-    if (installed_descriptor == NULL)
-      return false;
-    const catalog_entry_t *installed = &catalog.entries[installed_slot];
-    if (!prism_bundled_package_should_replace(
-            installed_descriptor->version, installed->package_bytes,
-            installed->package_crc32, bundled_descriptor->version,
-            (uint32_t)size, package_crc32))
-      return true;
-  }
-
-  prism_management_install_begin_t begin = {0};
-  memcpy(begin.app_key, header->app_key, sizeof(begin.app_key));
-  begin.package_bytes = (uint32_t)size;
-  begin.package_crc32 = package_crc32;
-  begin.required_blocks = (uint16_t)((size + PRISM_CARTRIDGE_BLOCK_BYTES - 1u) /
-                                     PRISM_CARTRIDGE_BLOCK_BYTES);
-  if (cartridge_storage_install_begin(&begin) != PRISM_MGMT_OK)
-    return false;
-
-  for (uint32_t offset = 0; offset < size; offset += 1024u)
-  {
-    prism_management_install_chunk_t *chunk =
-        (void *)default_install_chunk;
-    uint32_t remaining = (uint32_t)size - offset;
-    uint16_t length = (uint16_t)(remaining > 1024u ? 1024u : remaining);
-    chunk->offset = offset;
-    chunk->data_len = length;
-    chunk->reserved = 0;
-    memcpy(chunk->data, value->start + offset, length);
-    if (cartridge_storage_install_chunk(
-            chunk, sizeof(prism_management_install_chunk_t) + length) !=
-        PRISM_MGMT_OK)
-    {
-      cartridge_storage_install_abort();
-      return false;
-    }
-  }
-  if (cartridge_storage_install_commit() != PRISM_MGMT_OK)
-  {
-    cartridge_storage_install_abort();
-    return false;
-  }
-  return true;
-}
-
-static void seed_default_cartridges(void)
-{
-  for (size_t i = 0;
-       i < sizeof(default_cartridges) / sizeof(default_cartridges[0]); ++i)
-    if (!seed_default_cartridge(&default_cartridges[i]))
-      return;
 }
 
 static bool catalog_save(void)
@@ -719,7 +611,6 @@ void cartridge_storage_init(void)
       (uint16_t)(catalog.generation % PRISM_CARTRIDGE_BLOCK_COUNT);
   recover_move(NULL, NULL, NULL, 0);
   reconcile_catalog();
-  seed_default_cartridges();
 }
 
 static void block_map(uint8_t map[PRISM_CARTRIDGE_BLOCK_COUNT])

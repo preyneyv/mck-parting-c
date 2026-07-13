@@ -34,9 +34,22 @@ cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
 cmake --build build
 ```
 
-The RP2040 build emits firmware outputs plus the bundled cartridges as ordinary
-`.prism` packages. It requires the Raspberry Pi Pico SDK/toolchain; the Pico VS
-Code extension installs the expected versions automatically.
+The RP2040 build emits two UF2 images plus the first-party cartridges as
+ordinary `.prism` packages:
+
+- `prism.uf2` contains firmware only and preserves cartridge storage.
+- `prism_factory.uf2` resets and provisions a device with the first-party
+  packages already installed in ordinary cartridge storage; it does not need
+  a separate flash-nuke pass.
+
+Factory-provisioned cartridges have no special runtime status: they can be
+updated, compacted, or uninstalled exactly like third-party packages. The
+factory image replaces the cartridge catalog, clears cartridge persistence
+and settings, and invalidates interrupted-compaction recovery state. Old
+unreferenced cartridge bytes are erased lazily when their blocks are reused.
+The firmware-only image does not touch any of those regions. The
+build requires the Raspberry Pi Pico SDK/toolchain; the Pico VS Code extension
+installs the expected versions automatically.
 
 For the host simulator:
 

@@ -150,6 +150,14 @@ cartridge to the launcher.
 Cartridge ABI v1 and package format v1 define the initial compatibility
 baseline. Rebuild older development cartridges with the current SDK.
 
-The default firmware embeds the normal bundled cartridges as ordinary
-`.prism` packages in the initial storage image. They use the same loader and
-remain uninstallable like any other cartridge.
+The RP2040 build keeps firmware and factory provisioning separate.
+`prism.uf2` contains no cartridge packages and can be reflashed without
+recreating an app the user uninstalled or changing cartridge storage.
+`prism_factory.uf2` can be applied directly to an existing device without a
+separate flash-nuke pass. It writes the first-party `.prism` packages directly
+into normal cartridge blocks, replaces both catalog slots, invalidates any
+interrupted-compaction journal, and resets cartridge persistence and device
+settings. Old package bytes outside the new catalog are harmless and are
+erased when their blocks are reused. Once provisioned, the packages carry no
+factory or bundled marker; they use the same loader, update rules, deletion
+path, and compaction behavior as every third-party cartridge.
