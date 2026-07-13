@@ -114,6 +114,47 @@ persistence, and leaderboard QR generation. The runtime passes these services
 through a versioned function table; cartridges never access engine or hardware
 state directly.
 
+## Asset packs
+
+An asset pack is an uncompressed `.prismpack` archive installed in the same
+64-KiB block arena as cartridges. A pack authors its own canonical reverse-FQDN
+ID, display name, 32-bit version, target cartridge ID, and optional inclusive
+target-version range. Its generated 16-byte `pack_key` is an internal catalog
+key, just like a cartridge's `app_key`. Reinstalling the same pack version is
+allowed, lower versions are rejected, and higher versions replace the pack.
+Packs whose target is missing or outside the declared version range remain
+installed but disabled so management can report and delete them.
+
+Files have canonical printable-ASCII paths such as `tracks/song.beatline`.
+There is no directory object, compression, extraction, or per-file allocation.
+The pack directory and file contents remain in flash on RP2040. A cartridge can
+enumerate compatible packs and files without building a RAM index:
+
+```c
+for (uint32_t pack_index = 0;
+     pack_index < prism_asset_pack_count(prism); ++pack_index) {
+    prism_asset_pack_info_t pack;
+    if (!prism_asset_pack_get(prism, pack_index, &pack))
+        continue;
+    for (uint32_t file_index = 0; file_index < pack.file_count; ++file_index) {
+        prism_asset_file_t file;
+        if (prism_asset_file_get(prism, pack.handle, file_index, &file)) {
+            // file.path, file.data, and file.size are valid for this launch.
+        }
+    }
+}
+```
+
+Treat returned pointers as immutable and launch-scoped. Installing, deleting,
+or compacting storage closes the active cartridge before flash moves, so a
+cartridge never observes relocated XIP data. The host maps the same bundled
+pack data read-only into the Unicorn guest address space.
+
+SDK projects can call `prism_add_asset_pack`; its `FILES` arguments use
+`path=source` syntax. The underlying `scripts/package_assets.py` tool is also
+usable directly. Factory UF2 generation accepts `.prism` and `.prismpack`
+objects together and writes both through the ordinary catalog path.
+
 ### Optimized C runtime
 
 Cartridges use ordinary C operators and standard functions; they do not include
@@ -155,9 +196,10 @@ The RP2040 build keeps firmware and factory provisioning separate.
 recreating an app the user uninstalled or changing cartridge storage.
 `prism_factory.uf2` can be applied directly to an existing device without a
 separate flash-nuke pass. It writes the first-party `.prism` packages directly
-into normal cartridge blocks, replaces both catalog slots, invalidates any
+and `.prismpack` archives into the same normal storage blocks, replaces both
+catalog slots, invalidates any
 interrupted-compaction journal, and resets cartridge persistence and device
 settings. Old package bytes outside the new catalog are harmless and are
-erased when their blocks are reused. Once provisioned, the packages carry no
-factory or bundled marker; they use the same loader, update rules, deletion
-path, and compaction behavior as every third-party cartridge.
+erased when their blocks are reused. Once provisioned, the objects carry no
+factory marker; they use the same update, deletion, and compaction paths as
+third-party objects of the same kind.

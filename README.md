@@ -34,17 +34,17 @@ cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
 cmake --build build
 ```
 
-The RP2040 build emits two UF2 images plus the first-party cartridges as
-ordinary `.prism` packages:
+The RP2040 build emits two UF2 images plus the first-party cartridges and
+asset packs as ordinary `.prism` and `.prismpack` packages:
 
 - `prism.uf2` contains firmware only and preserves cartridge storage.
 - `prism_factory.uf2` resets and provisions a device with the first-party
   packages already installed in ordinary cartridge storage; it does not need
   a separate flash-nuke pass.
 
-Factory-provisioned cartridges have no special runtime status: they can be
+Factory-provisioned objects have no special runtime status: they can be
 updated, compacted, or uninstalled exactly like third-party packages. The
-factory image replaces the cartridge catalog, clears cartridge persistence
+factory image replaces the shared storage catalog, clears cartridge persistence
 and settings, and invalidates interrupted-compaction recovery state. Old
 unreferenced cartridge bytes are erased lazily when their blocks are reused.
 The firmware-only image does not touch any of those regions. The
@@ -87,6 +87,13 @@ format, and persistence model.
 Generated sprite and song headers are committed, so ordinary builds never
 launch authoring software. Configure with `-DPRISM_ASSET_AUTHORING=ON` only when
 intentionally regenerating assets from Aseprite or REAPER sources.
+
+Installable `.prismpack` archives share the device's 192 64-KiB storage blocks
+with cartridges. Packs target a full cartridge ID and expose named,
+uncompressed files directly from flash. See
+[`docs/cartridges.md`](docs/cartridges.md#asset-packs) for the cartridge API and
+[`docs/beatline-tracks.md`](docs/beatline-tracks.md) for Beatline's track
+format.
 
 ## Repository map
 
