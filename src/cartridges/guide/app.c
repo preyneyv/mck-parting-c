@@ -111,13 +111,12 @@ static void draw_progress(u8g2_t *u8g2)
 {
   enum
   {
-    ACTIVE_SIZE = 6,
+    ACTIVE_SIZE = 5,
     INDICATOR_SPACING = 10
   };
-  int16_t left =
-      (DISP_WIDTH - ((GUIDE_CARD_COUNT - 1) * INDICATOR_SPACING +
-                     ACTIVE_SIZE)) /
-      2;
+  int16_t first_center =
+      (DISP_WIDTH - (GUIDE_CARD_COUNT - 1) * INDICATOR_SPACING) / 2;
+  int16_t left = first_center - ACTIVE_SIZE / 2;
   for (uint8_t i = 0; i < GUIDE_CARD_COUNT; ++i)
   {
     int16_t x = left + i * INDICATOR_SPACING;
@@ -128,10 +127,7 @@ static void draw_progress(u8g2_t *u8g2)
     {
       u8g2_DrawFrame(u8g2, x, 1, ACTIVE_SIZE, ACTIVE_SIZE);
       if (complete)
-      {
-        u8g2_DrawLine(u8g2, x + 1, 3, x + 2, 5);
-        u8g2_DrawLine(u8g2, x + 2, 5, x + ACTIVE_SIZE, 1);
-      }
+        u8g2_DrawBox(u8g2, x + 1, 2, 3, 3);
     }
     else if (complete)
       u8g2_DrawBox(u8g2, center - 1, 2, 3, 3);
