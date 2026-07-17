@@ -243,7 +243,10 @@ static inline void elm_rounded_hold_fill(elm_t *parent, vec2_t pos,
   u8g2_SetDrawColor(u8g2, 1);
 }
 
-enum { ELM_INPUT_BADGE_OUTLINE_SCALE = 256 };
+enum
+{
+  ELM_INPUT_BADGE_OUTLINE_SCALE = 256
+};
 
 /* Large physical-input badge matching Prism's first-interaction screen.
  * `outline` is animated from 0 to ELM_INPUT_BADGE_OUTLINE_SCALE by the
@@ -269,7 +272,7 @@ static inline elm_t elm_input_badge(elm_t *parent, vec2_t pos, uint16_t size,
   u8g2_DrawRFrame(u8g2, child.pos.x, child.pos.y, size, size, 2);
   u8g2_SetFont(u8g2, u8g2_font_7x14B_mr);
   uint16_t label_width = u8g2_GetStrWidth(u8g2, label);
-  u8g2_DrawStr(u8g2, child.pos.x + (size - label_width) / 2,
+  u8g2_DrawStr(u8g2, child.pos.x + 1 + (size - label_width) / 2,
                child.pos.y + (size + 10) / 2, label);
   elm_rounded_hold_fill(&child, VEC2_Z, size, size, 1, ratio, from_right);
   return child;

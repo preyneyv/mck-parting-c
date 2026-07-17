@@ -113,7 +113,7 @@ static void draw_badge(u8g2_t *u8g2, elm_t *root, int16_t x,
                   WELCOME_BADGE_RADIUS);
   u8g2_SetFont(u8g2, u8g2_font_7x14B_mr);
   uint16_t label_width = u8g2_GetStrWidth(u8g2, label);
-  u8g2_DrawStr(u8g2, x + (WELCOME_BADGE_SIZE - label_width) / 2, y + 20,
+  u8g2_DrawStr(u8g2, x + 1 + (WELCOME_BADGE_SIZE - label_width) / 2, y + 20,
                label);
   elm_rounded_hold_fill(root, vec2(x, y), WELCOME_BADGE_SIZE,
                         WELCOME_BADGE_SIZE, WELCOME_BADGE_RADIUS - 1, ratio,
