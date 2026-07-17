@@ -8,6 +8,7 @@ void platform_input_init(void) {}
 static platform_input_mask_t input_mask;
 static platform_input_mask_t deferred_release_mask;
 static platform_input_mask_t remote_mask;
+static platform_input_mask_t latched_test_mask;
 
 static platform_input_mask_t mask_for_scancode(SDL_Scancode scancode) {
   switch (scancode) {
@@ -19,6 +20,7 @@ static platform_input_mask_t mask_for_scancode(SDL_Scancode scancode) {
     return PLATFORM_INPUT_RIGHT;
   case SDL_SCANCODE_ESCAPE:
   case SDL_SCANCODE_SPACE:
+  case SDL_SCANCODE_RETURN:
     return PLATFORM_INPUT_MENU;
   default:
     return 0;
@@ -41,6 +43,32 @@ platform_input_mask_t platform_input_read_mask(void) {
       exit(0);
     if (event.type != SDL_KEYDOWN && event.type != SDL_KEYUP)
       continue;
+    /* Host-only hold controls for exercising Prism's long-press UI without a
+     * physical keyboard: Down toggles L, Up toggles R, Home toggles Menu, and
+     * 0 releases all three. */
+    if (event.type == SDL_KEYDOWN && event.key.repeat == 0) {
+      if (event.key.keysym.scancode == SDL_SCANCODE_DOWN) {
+        latched_test_mask ^= PLATFORM_INPUT_LEFT;
+        continue;
+      }
+      if (event.key.keysym.scancode == SDL_SCANCODE_UP) {
+        latched_test_mask ^= PLATFORM_INPUT_RIGHT;
+        continue;
+      }
+      if (event.key.keysym.scancode == SDL_SCANCODE_HOME) {
+        latched_test_mask ^= PLATFORM_INPUT_MENU;
+        continue;
+      }
+      if (event.key.keysym.scancode == SDL_SCANCODE_0) {
+        latched_test_mask = 0;
+        continue;
+      }
+    }
+    if (event.key.keysym.scancode == SDL_SCANCODE_0 ||
+        event.key.keysym.scancode == SDL_SCANCODE_DOWN ||
+        event.key.keysym.scancode == SDL_SCANCODE_UP ||
+        event.key.keysym.scancode == SDL_SCANCODE_HOME)
+      continue;
 
     platform_input_mask_t bit = mask_for_scancode(event.key.keysym.scancode);
     if (bit == 0)
@@ -57,7 +85,7 @@ platform_input_mask_t platform_input_read_mask(void) {
     }
   }
 
-  return input_mask | remote_mask;
+  return input_mask | remote_mask | latched_test_mask;
 }
 
 void platform_input_set_remote_mask(platform_input_mask_t mask) {

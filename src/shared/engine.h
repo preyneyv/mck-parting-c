@@ -49,6 +49,7 @@ typedef struct
 void engine_init(void);
 void engine_run_forever(void);
 void engine_set_app(app_t *app);
+void engine_request_home(void);
 bool engine_is_app(const app_t *app);
 void engine_buttons_reset(void);
 void engine_enter_sleep(void);

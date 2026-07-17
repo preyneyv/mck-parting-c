@@ -10,12 +10,32 @@
 #include <prism/graphics/color.h>
 
 static prism_management_settings_t current;
+static uint8_t onboarding_flags;
 static bool dirty;
 static platform_time_t dirty_at;
 static bool was_plugged_in;
 static bool save_deferred;
 
 #define SETTINGS_REVISION 2u
+
+enum
+{
+  ONBOARDING_FIRST_INTERACTION_COMPLETE = 1u << 0,
+  ONBOARDING_GUIDE_PENDING = 1u << 1,
+  ONBOARDING_FLAGS_VALID = ONBOARDING_FIRST_INTERACTION_COMPLETE |
+                           ONBOARDING_GUIDE_PENDING,
+};
+
+typedef struct
+{
+  prism_management_settings_t management;
+  uint8_t onboarding_flags;
+  uint8_t reserved[3];
+} persisted_settings_t;
+
+_Static_assert(sizeof(persisted_settings_t) ==
+                   sizeof(prism_management_settings_t) + 4u,
+               "persisted settings layout must remain stable");
 
 static color_t wire_color(const uint8_t rgb[3])
 {
@@ -112,11 +132,16 @@ static bool settings_valid(const prism_management_settings_t *settings)
 void prism_settings_init(void)
 {
   current = default_settings();
-  prism_management_settings_t stored;
+  onboarding_flags = ONBOARDING_GUIDE_PENDING;
+  persisted_settings_t stored;
   bool loaded = platform_settings_load(&stored, sizeof(stored));
-  bool valid = loaded && settings_valid(&stored);
+  bool valid = loaded && settings_valid(&stored.management) &&
+               (stored.onboarding_flags & ~ONBOARDING_FLAGS_VALID) == 0;
   if (valid)
-    current = stored;
+  {
+    current = stored.management;
+    onboarding_flags = stored.onboarding_flags;
+  }
 
   dirty = loaded && !valid;
   dirty_at = dirty ? platform_now_us() : PLATFORM_TIME_ZERO;
@@ -171,7 +196,11 @@ bool prism_settings_is_dirty(void) { return dirty; }
 
 void prism_settings_flush(void)
 {
-  if (dirty && platform_settings_save(&current, sizeof(current)))
+  persisted_settings_t stored = {
+      .management = current,
+      .onboarding_flags = onboarding_flags,
+  };
+  if (dirty && platform_settings_save(&stored, sizeof(stored)))
     prism_settings_mark_saved();
 }
 
@@ -207,6 +236,34 @@ void prism_settings_brightness_changed(uint8_t brightness)
     return;
   current.brightness = brightness;
   current.settings_revision = SETTINGS_REVISION;
+  dirty = true;
+  dirty_at = platform_now_us();
+}
+
+bool prism_settings_first_interaction_complete(void)
+{
+  return (onboarding_flags & ONBOARDING_FIRST_INTERACTION_COMPLETE) != 0;
+}
+
+bool prism_settings_guide_pending(void)
+{
+  return (onboarding_flags & ONBOARDING_GUIDE_PENDING) != 0;
+}
+
+void prism_settings_complete_first_interaction(void)
+{
+  if (prism_settings_first_interaction_complete())
+    return;
+  onboarding_flags |= ONBOARDING_FIRST_INTERACTION_COMPLETE;
+  dirty = true;
+  dirty_at = platform_now_us();
+}
+
+void prism_settings_dismiss_guide(void)
+{
+  if (!prism_settings_guide_pending())
+    return;
+  onboarding_flags &= (uint8_t)~ONBOARDING_GUIDE_PENDING;
   dirty = true;
   dirty_at = platform_now_us();
 }

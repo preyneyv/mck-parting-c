@@ -22,6 +22,7 @@
 #include "audio/synth_internal.h"
 #include "os/engine_internal.h"
 #include "os/launcher.h"
+#include "os/onboarding.h"
 #include "os/pause_menu.h"
 #include "os/settings.h"
 #include "os/wake_confirmation.h"
@@ -53,6 +54,8 @@ typedef struct
   uint8_t volume;
   uint8_t brightness;
   bool paused;
+  uint8_t home_transition;
+  platform_time_t home_transition_started;
 } engine_t;
 
 static engine_t g_engine;
@@ -73,6 +76,10 @@ enum
   ENGINE_TRACE_DISPLAY = 0x44495350u,
   ENGINE_TRACE_AUDIO_RESET = 0x41525354u,
   MAX_TICKS_PER_LOOP = 8,
+  HOME_TRANSITION_NONE,
+  HOME_TRANSITION_OUT,
+  HOME_TRANSITION_IN,
+  HOME_TRANSITION_MS = 240,
 };
 
 typedef struct
@@ -241,7 +248,6 @@ void engine_init()
   g_engine.buttons.menu.id = BUTTON_MENU;
 
   prism_settings_init();
-  engine_set_app(NULL);
   engine_set_volume((int8_t)prism_settings_get()->volume);
   engine_set_brightness((int8_t)prism_settings_get()->brightness);
   g_engine.last_input_at = platform_now_us();
@@ -502,9 +508,10 @@ void engine_wake(void)
 
 static void engine_enter_auto_sleep(void)
 {
+  bool welcome = onboarding_first_interaction_active();
   engine_pause(true);
   platform_wake_result_t wake = engine_sleep_cycle(2000);
-  if (wake.confirmation_required && wake.wake_button != 0)
+  if (!welcome && wake.confirmation_required && wake.wake_button != 0)
     wake_confirmation_start(wake.wake_button);
   else
     resume_after_auto_sleep();
@@ -572,12 +579,54 @@ static inline void engine_do_tick(uint32_t elapsed_us)
   }
 }
 
+static void home_transition_frame(void)
+{
+  if (g_engine.home_transition == HOME_TRANSITION_NONE)
+    return;
+  int64_t elapsed = platform_time_diff_us(g_engine.home_transition_started,
+                                          platform_now_us());
+  if (elapsed < (int64_t)HOME_TRANSITION_MS * 1000)
+    return;
+  if (g_engine.home_transition == HOME_TRANSITION_OUT)
+  {
+    /* Clear the phase before routing so the explicit destination switch does
+     * not look like an asynchronous override of the transition. */
+    g_engine.home_transition = HOME_TRANSITION_NONE;
+    onboarding_go_home();
+    g_engine.home_transition = HOME_TRANSITION_IN;
+    g_engine.home_transition_started = platform_now_us();
+  }
+  else
+  {
+    g_engine.home_transition = HOME_TRANSITION_NONE;
+  }
+}
+
+static uint8_t home_transition_brightness(void)
+{
+  if (g_engine.home_transition == HOME_TRANSITION_NONE)
+    return 255;
+  int64_t elapsed = platform_time_diff_us(g_engine.home_transition_started,
+                                          platform_now_us());
+  float progress = elapsed <= 0
+                       ? 0.f
+                       : elapsed >= (int64_t)HOME_TRANSITION_MS * 1000
+                             ? 1.f
+                             : elapsed / (HOME_TRANSITION_MS * 1000.f);
+  /* Smoothstep avoids a visible knee at the black midpoint. */
+  progress = progress * progress * (3.f - 2.f * progress);
+  if (g_engine.home_transition == HOME_TRANSITION_OUT)
+    progress = 1.f - progress;
+  return (uint8_t)(progress * 255.f);
+}
+
 static inline void engine_do_frame()
 {
   for (uint8_t i = 0; i < LED_COUNT; i++)
   {
     g_engine.led_colors[i] = (color_t){.hex = 0x000000};
   }
+  home_transition_frame();
   if (wake_confirmation_expired())
     wake_confirmation_timeout();
 
@@ -627,6 +676,10 @@ static inline void engine_do_frame()
   // Apply final OS-owned fades after the app and menu have rendered.
   uint8_t output_brightness = wake_confirmation_brightness_scale(
       engine_output_brightness_scale());
+  output_brightness =
+      (uint8_t)(((uint16_t)output_brightness *
+                 home_transition_brightness()) /
+                255u);
   platform_display_set_contrast(output_brightness);
   // write display
   watchdog_trace_t display_trace =
@@ -646,7 +699,8 @@ static inline void engine_do_frame()
   clear_system_button_edges();
 
   // check for auto sleep
-  if (!wake_confirmation_active() && platform_time_reached(
+  if (g_engine.home_transition == HOME_TRANSITION_NONE &&
+      !wake_confirmation_active() && platform_time_reached(
           platform_time_add_ms(g_engine.last_input_at, AUTO_SLEEP_TIMEOUT_MS)))
   {
     engine_enter_auto_sleep();
@@ -784,6 +838,14 @@ void engine_run_forever()
 
 void engine_set_app(app_t *app)
 {
+  if (app == NULL)
+  {
+    onboarding_go_home();
+    return;
+  }
+  /* An explicit app launch (for example management full-test) takes
+   * precedence over an in-flight onboarding/Home transition. */
+  g_engine.home_transition = HOME_TRANSITION_NONE;
   if (wake_confirmation_active())
     wake_confirmation_cancel();
   if (g_engine.app != NULL && g_engine.app->leave != NULL)
@@ -796,11 +858,6 @@ void engine_set_app(app_t *app)
    * and do not carry a menu edge across the transition. */
   pause_menu_hide_immediate();
   reset_buttons(true);
-
-  if (app == NULL)
-  {
-    app = &app_launcher;
-  }
 
   g_engine.tick = 0;
   g_engine.app_tick_phase = 0;
@@ -820,6 +877,15 @@ void engine_set_app(app_t *app)
   {
     g_engine.app->enter();
   }
+}
+
+void engine_request_home(void)
+{
+  if (g_engine.home_transition != HOME_TRANSITION_NONE)
+    return;
+  reset_buttons(true);
+  g_engine.home_transition = HOME_TRANSITION_OUT;
+  g_engine.home_transition_started = platform_now_us();
 }
 
 void engine_pause(bool skip_animation)

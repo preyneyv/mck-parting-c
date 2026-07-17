@@ -1,5 +1,6 @@
 #include <stdio.h>
 
+#include <prism/graphics/layout.h>
 #include <prism/ui.h>
 
 #define CHECK(condition)                                                     \
@@ -26,6 +27,13 @@ static void ui_sound(prism_ui_sound_t sound, uint8_t value)
 
 int main(void)
 {
+  u8g2_t display = {0};
+  elm_t translated = elm_root(&display, vec2(128, 0));
+  elm_t centered = elm_child_aligned(&translated, vec2(64, 48), 64, 14,
+                                     ELM_ALIGN_TOP_CENTER);
+  CHECK(centered.pos.x == 160);
+  CHECK(centered.pos.y == 48);
+
   const prism_api_v1_t api = {.ui_sound = ui_sound};
   prism_t prism = {.api = &api};
   prism_ui_hold_feedback_t feedback = {0};

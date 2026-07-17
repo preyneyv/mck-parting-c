@@ -16,7 +16,7 @@
 
 enum
 {
-  HOST_BUNDLED_CARTRIDGE_COUNT = 4,
+  HOST_BUNDLED_CARTRIDGE_COUNT = 5,
 };
 
 static host_cartridge_package_t bundled[HOST_BUNDLED_CARTRIDGE_COUNT];
@@ -29,6 +29,7 @@ static const char *const bundled_paths[HOST_BUNDLED_CARTRIDGE_COUNT] = {
     PRISM_HOST_MORSE_PATH,
     PRISM_HOST_ASTEROIDS_PATH,
     PRISM_HOST_BEATLINE_PATH,
+    PRISM_HOST_GUIDE_PATH,
 };
 
 bool host_cartridge_init_bundled(void)

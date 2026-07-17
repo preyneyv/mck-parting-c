@@ -13,8 +13,8 @@
 #define PRISM_CARTRIDGE_MAGIC 0x50524354u /* PRCT */
 #define PRISM_API_ABI_V1 1u
 #define PRISM_API_ABI_VERSION PRISM_API_ABI_V1
-#define PRISM_API_V1_FUNCTION_COUNT 26u
-#define PRISM_API_V1_STRUCT_SIZE 112u
+#define PRISM_API_V1_FUNCTION_COUNT 27u
+#define PRISM_API_V1_STRUCT_SIZE 116u
 #define PRISM_CARTRIDGE_ABI_V1 1u
 #define PRISM_CARTRIDGE_ABI_VERSION PRISM_CARTRIDGE_ABI_V1
 
@@ -74,6 +74,7 @@ typedef struct prism_api_v1
   bool (*asset_pack_get)(uint32_t index, prism_asset_pack_info_t *info);
   bool (*asset_file_get)(prism_asset_pack_handle_t pack, uint32_t index,
                          prism_asset_file_t *file);
+  void (*close)(void);
 } prism_api_v1_t;
 
 typedef struct prism_context
@@ -264,6 +265,15 @@ static inline void prism_keep_awake(prism_t *prism)
 {
   if (prism->api->keep_awake != NULL)
     prism->api->keep_awake();
+}
+
+/* Ask Prism to close the current cartridge and choose the normal Home
+ * destination. The request is deferred until the lifecycle callback returns,
+ * so packaged cartridges cannot invalidate their own execution image. */
+static inline void prism_close(prism_t *prism)
+{
+  if (prism->api->close != NULL)
+    prism->api->close();
 }
 
 static inline int prism_anim_to(prism_t *prism, volatile int32_t *subject,

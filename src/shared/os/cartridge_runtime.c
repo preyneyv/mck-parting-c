@@ -21,10 +21,13 @@ static const prism_cartridge_t *pending;
 static void *pending_persistent;
 static platform_cartridge_execution_t current_execution;
 static platform_cartridge_execution_t pending_execution;
+static bool current_is_onboarding;
+static bool pending_is_onboarding;
 static prism_t context;
 static bool persistent_dirty;
 static platform_time_t persistent_dirty_at;
 static bool persistence_deferred;
+static bool close_requested;
 
 static bool api_button_pressed(prism_button_t button)
 {
@@ -110,6 +113,8 @@ static bool api_asset_file_get(prism_asset_pack_handle_t pack,
   return platform_asset_file_get(current, pack, index, file);
 }
 
+static void api_close(void) { close_requested = true; }
+
 static const prism_api_v1_t api_v1 = {
     .abi_version = PRISM_API_ABI_VERSION,
     .struct_size = sizeof(prism_api_v1_t),
@@ -139,6 +144,7 @@ static const prism_api_v1_t api_v1 = {
     .asset_pack_count = api_asset_pack_count,
     .asset_pack_get = api_asset_pack_get,
     .asset_file_get = api_asset_file_get,
+    .close = api_close,
 };
 
 static void adapter_enter(void)
@@ -154,7 +160,10 @@ static void adapter_enter(void)
   pending_persistent = NULL;
   current_execution = pending_execution;
   memset(&pending_execution, 0, sizeof(pending_execution));
+  current_is_onboarding = pending_is_onboarding;
+  pending_is_onboarding = false;
   persistent_dirty = false;
+  close_requested = false;
   if (current->enter != NULL)
     platform_cartridge_call(&current_execution, current->enter, &context);
 }
@@ -163,12 +172,22 @@ static void adapter_tick(void)
 {
   if (current != NULL && current->tick != NULL)
     platform_cartridge_call(&current_execution, current->tick, &context);
+  if (close_requested)
+  {
+    close_requested = false;
+    engine_request_home();
+  }
 }
 
 static void adapter_frame(void)
 {
   if (current != NULL && current->frame != NULL)
     platform_cartridge_call(&current_execution, current->frame, &context);
+  if (close_requested)
+  {
+    close_requested = false;
+    engine_request_home();
+  }
 }
 
 static void adapter_pause(void)
@@ -192,6 +211,8 @@ static void adapter_leave(void)
   platform_cartridge_release(&current_execution);
   memset(&context, 0, sizeof(context));
   current = NULL;
+  current_is_onboarding = false;
+  close_requested = false;
 }
 
 static app_t adapter = {
@@ -204,7 +225,7 @@ static app_t adapter = {
     .leave = adapter_leave,
 };
 
-bool prism_cartridge_launch(const prism_cartridge_t *cartridge)
+static bool launch(const prism_cartridge_t *cartridge, bool onboarding)
 {
   if (cartridge == NULL || cartridge->magic != PRISM_CARTRIDGE_MAGIC ||
       cartridge->abi_version != PRISM_CARTRIDGE_ABI_VERSION ||
@@ -240,6 +261,7 @@ bool prism_cartridge_launch(const prism_cartridge_t *cartridge)
   pending = cartridge;
   pending_persistent = persistent;
   pending_execution = execution;
+  pending_is_onboarding = onboarding;
   memset(adapter.name, 0, sizeof(adapter.name));
   strncpy(adapter.name, cartridge->name, sizeof(adapter.name) - 1);
   adapter.icon = cartridge->icon;
@@ -250,7 +272,21 @@ bool prism_cartridge_launch(const prism_cartridge_t *cartridge)
   return true;
 }
 
+bool prism_cartridge_launch(const prism_cartridge_t *cartridge)
+{
+  return launch(cartridge, false);
+}
+
+bool prism_cartridge_launch_onboarding(const prism_cartridge_t *cartridge)
+{
+  return launch(cartridge, true);
+}
+
 const prism_cartridge_t *prism_cartridge_current(void) { return current; }
+bool prism_cartridge_current_is_onboarding(void)
+{
+  return current != NULL && current_is_onboarding;
+}
 const prism_api_v1_t *prism_os_api(void) { return &api_v1; }
 
 void prism_cartridge_persistence_flush(void)

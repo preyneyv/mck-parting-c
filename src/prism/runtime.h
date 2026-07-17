@@ -3,7 +3,9 @@
 #include <prism/cartridge.h>
 
 bool prism_cartridge_launch(const prism_cartridge_t *cartridge);
+bool prism_cartridge_launch_onboarding(const prism_cartridge_t *cartridge);
 const prism_cartridge_t *prism_cartridge_current(void);
+bool prism_cartridge_current_is_onboarding(void);
 const prism_api_v1_t *prism_os_api(void);
 void prism_cartridge_persistence_task(void);
 void prism_cartridge_persistence_flush(void);

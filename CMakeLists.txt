@@ -99,6 +99,7 @@ set(SHARED_SOURCES
     src/shared/os/management_serialization.c
     src/shared/os/settings.c
     src/shared/os/midi_mode.c
+    src/shared/os/onboarding.c
     src/shared/os/pause_menu.c
     src/shared/os/power_indicator.c
     src/shared/os/system_sound.c
@@ -161,6 +162,7 @@ if(PICO_PLATFORM STREQUAL "host")
     set(PRISM_HOST_MORSE "${PRISM_HOST_CARTRIDGE_DIR}/morse.prism")
     set(PRISM_HOST_ASTEROIDS "${PRISM_HOST_CARTRIDGE_DIR}/asteroids.prism")
     set(PRISM_HOST_BEATLINE "${PRISM_HOST_CARTRIDGE_DIR}/beatline.prism")
+    set(PRISM_HOST_GUIDE "${PRISM_HOST_CARTRIDGE_DIR}/guide.prism")
     set(PRISM_HOST_STATE_LIFECYCLE
         "${PRISM_HOST_CARTRIDGE_DIR}/state-lifecycle.prism")
     ExternalProject_Add(prism_host_cartridge_packages
@@ -182,6 +184,7 @@ if(PICO_PLATFORM STREQUAL "host")
             "${PRISM_HOST_MORSE}"
             "${PRISM_HOST_ASTEROIDS}"
             "${PRISM_HOST_BEATLINE}"
+            "${PRISM_HOST_GUIDE}"
             "${PRISM_HOST_STATE_LIFECYCLE}"
     )
     set(PRISM_UNICORN_PREFIX "${CMAKE_BINARY_DIR}/unicorn")
@@ -264,6 +267,7 @@ if(PICO_PLATFORM STREQUAL "host")
         PRISM_HOST_MORSE_PATH="${PRISM_HOST_MORSE}"
         PRISM_HOST_ASTEROIDS_PATH="${PRISM_HOST_ASTEROIDS}"
         PRISM_HOST_BEATLINE_PATH="${PRISM_HOST_BEATLINE}"
+        PRISM_HOST_GUIDE_PATH="${PRISM_HOST_GUIDE}"
         PRISM_HOST_GOLDEN_PACK_PATH="${beatline_golden_pack_PRISM_PACK_FILE}"
         PRISM_HOST_NEVER_GONNA_PACK_PATH="${beatline_never_gonna_pack_PRISM_PACK_FILE}"
     )
@@ -320,6 +324,17 @@ if(PICO_PLATFORM STREQUAL "host")
         )
         prism_enable_warnings(prism_ui_feedback_tests)
         add_test(NAME prism_ui_feedback COMMAND prism_ui_feedback_tests)
+
+        add_executable(prism_onboarding_settings_tests
+            tests/onboarding_settings_test.c
+            src/shared/os/settings.c
+        )
+        target_include_directories(prism_onboarding_settings_tests PRIVATE
+            ${CMAKE_CURRENT_LIST_DIR}/src
+        )
+        prism_enable_warnings(prism_onboarding_settings_tests)
+        add_test(NAME prism_onboarding_settings
+                 COMMAND prism_onboarding_settings_tests)
 
         add_test(NAME prism_factory_uf2
             COMMAND ${Python3_EXECUTABLE}
@@ -553,6 +568,15 @@ else()
         OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/beatline.prism
     )
 
+    prism_add_installable_cartridge(guide_cartridge
+        ENTRY cartridge_guide
+        SOURCES
+            ${CMAKE_CURRENT_LIST_DIR}/src/cartridges/guide/app.c
+        INCLUDE_DIRECTORIES
+            ${CMAKE_CURRENT_LIST_DIR}/src/cartridges/guide
+        OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/guide.prism
+    )
+
     set(PRISM_FACTORY_UF2 ${CMAKE_CURRENT_BINARY_DIR}/prism_factory.uf2)
     add_custom_command(
         OUTPUT ${PRISM_FACTORY_UF2}
@@ -564,6 +588,7 @@ else()
                 ${morse_cartridge_PRISM_FILE}
                 ${asteroids_cartridge_PRISM_FILE}
                 ${beatline_cartridge_PRISM_FILE}
+                ${guide_cartridge_PRISM_FILE}
                 ${beatline_golden_pack_PRISM_PACK_FILE}
                 ${beatline_never_gonna_pack_PRISM_PACK_FILE}
         DEPENDS
@@ -573,6 +598,7 @@ else()
             ${morse_cartridge_PRISM_FILE}
             ${asteroids_cartridge_PRISM_FILE}
             ${beatline_cartridge_PRISM_FILE}
+            ${guide_cartridge_PRISM_FILE}
             ${beatline_golden_pack_PRISM_PACK_FILE}
             ${beatline_never_gonna_pack_PRISM_PACK_FILE}
             ${CMAKE_CURRENT_LIST_DIR}/scripts/build_factory_uf2.py

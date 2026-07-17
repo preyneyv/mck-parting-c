@@ -42,6 +42,7 @@ int main(int argc, char **argv)
   platform_init();
   printf("prism host\n");
   engine_init();
+  engine_set_app(NULL);
   if (argc == 2 &&
       !prism_cartridge_launch(platform_cartridge_installed_get(
           platform_cartridge_installed_count() - 1u)))

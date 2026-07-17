@@ -12,6 +12,7 @@
 #include <shared/utils/misc.h>
 
 #include "engine_internal.h"
+#include "onboarding.h"
 #include "wake_confirmation.h"
 
 enum
@@ -246,6 +247,8 @@ static void draw(void)
 
 void pause_menu_frame(void)
 {
+  if (onboarding_first_interaction_active())
+    return;
   handle_input();
   if (!wake_confirmation_active())
     draw();

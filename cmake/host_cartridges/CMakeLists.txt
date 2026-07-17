@@ -43,6 +43,13 @@ prism_add_installable_cartridge(beatline_cartridge
   OUTPUT "${PRISM_PACKAGE_OUTPUT_DIR}/beatline.prism"
 )
 
+prism_add_installable_cartridge(guide_cartridge
+  ENTRY cartridge_guide
+  SOURCES "${PRISM_SDK_ROOT}/src/cartridges/guide/app.c"
+  INCLUDE_DIRECTORIES "${PRISM_SDK_ROOT}/src/cartridges/guide"
+  OUTPUT "${PRISM_PACKAGE_OUTPUT_DIR}/guide.prism"
+)
+
 prism_add_installable_cartridge(state_lifecycle_cartridge
   ENTRY cartridge_state_lifecycle
   SOURCES "${PRISM_SDK_ROOT}/tests/state_lifecycle_cartridge.c"

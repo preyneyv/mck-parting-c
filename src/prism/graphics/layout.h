@@ -88,7 +88,7 @@ static inline elm_t elm_child_aligned(elm_t *parent, vec2_t pos, uint16_t w,
                                       uint16_t h, elm_align_t align)
 {
   vec2_t aligned_pos = elm_aligned_position(pos, w, h, align);
-  return (elm_t){.pos = aligned_pos, .u8g2 = parent->u8g2};
+  return elm_child(parent, aligned_pos);
 }
 
 static inline elm_t elm_arc(elm_t *parent, vec2_t pos, uint16_t radius,
@@ -184,6 +184,94 @@ static inline elm_t elm_rounded_frame(elm_t *parent, vec2_t pos, uint16_t w,
 {
   elm_t child = elm_child(parent, pos);
   u8g2_DrawRFrame(child.u8g2, child.pos.x, child.pos.y, w, h, r);
+  return child;
+}
+
+/* XOR-fill the rounded interior of a control without squaring off its corner
+ * pixels. This is the shared visual treatment for Prism hold-to-act controls;
+ * callers draw their frame and label first so both are inverted by the fill. */
+static inline void elm_rounded_hold_fill(elm_t *parent, vec2_t pos,
+                                         uint16_t width, uint16_t height,
+                                         uint8_t radius, float ratio,
+                                         bool from_right)
+{
+  if (ratio <= 0.f || width < 5 || height < 5)
+    return;
+  if (ratio > 1.f)
+    ratio = 1.f;
+
+  /* Match elm_btn and the launcher: animate a width that includes one border
+   * pixel, then clip it to the rounded interior below. That makes the visible
+   * interior finish slightly before the logical ratio reaches 1, preserving
+   * the familiar short rejection window at the end of a hold. */
+  uint16_t fill_span = width - 1u;
+  uint16_t filled = (uint16_t)(fill_span * ease_out_cubic(ratio));
+  if (filled == 0)
+    return;
+
+  u8g2_t *u8g2 = parent->u8g2;
+  int16_t x = parent->pos.x + pos.x;
+  int16_t y = parent->pos.y + pos.y;
+  u8g2_SetDrawColor(u8g2, 2);
+  for (uint16_t row = 0; row < height - 2u; ++row)
+  {
+    uint16_t edge_distance = row;
+    uint16_t distance_from_bottom = height - 3u - row;
+    if (distance_from_bottom < edge_distance)
+      edge_distance = distance_from_bottom;
+    uint16_t corner_rows = radius > 1u ? radius - 1u : 0u;
+    uint16_t inset = edge_distance < corner_rows
+                         ? (uint16_t)(corner_rows - edge_distance)
+                         : (uint16_t)0;
+
+    int16_t row_left = x + 1 + (int16_t)inset;
+    int16_t row_right = x + (int16_t)width - 2 - (int16_t)inset;
+    int16_t fill_left = from_right
+                            ? x + (int16_t)width - 1 - (int16_t)filled
+                            : x + 1;
+    int16_t fill_right = from_right
+                             ? x + (int16_t)width - 2
+                             : x + (int16_t)filled;
+    if (fill_left < row_left)
+      fill_left = row_left;
+    if (fill_right > row_right)
+      fill_right = row_right;
+    if (fill_right >= fill_left)
+      u8g2_DrawHLine(u8g2, fill_left, y + 1 + row,
+                     (uint16_t)(fill_right - fill_left + 1));
+  }
+  u8g2_SetDrawColor(u8g2, 1);
+}
+
+enum { ELM_INPUT_BADGE_OUTLINE_SCALE = 256 };
+
+/* Large physical-input badge matching Prism's first-interaction screen.
+ * `outline` is animated from 0 to ELM_INPUT_BADGE_OUTLINE_SCALE by the
+ * caller; the echo grows symmetrically to a two-pixel outset. */
+static inline elm_t elm_input_badge(elm_t *parent, vec2_t pos, uint16_t size,
+                                    const char *label, int32_t outline,
+                                    float ratio, bool from_right)
+{
+  elm_t child = elm_child(parent, pos);
+  u8g2_t *u8g2 = child.u8g2;
+  int16_t outset = (int16_t)((2 * outline +
+                              ELM_INPUT_BADGE_OUTLINE_SCALE / 2) /
+                             ELM_INPUT_BADGE_OUTLINE_SCALE);
+
+  u8g2_SetDrawColor(u8g2, 1);
+  if (outset != 0)
+  {
+    u8g2_DrawRFrame(u8g2, child.pos.x - outset,
+                    child.pos.y - outset, size + 2u * outset,
+                    size + 2u * outset, 2 + outset);
+  }
+
+  u8g2_DrawRFrame(u8g2, child.pos.x, child.pos.y, size, size, 2);
+  u8g2_SetFont(u8g2, u8g2_font_7x14B_mr);
+  uint16_t label_width = u8g2_GetStrWidth(u8g2, label);
+  u8g2_DrawStr(u8g2, child.pos.x + (size - label_width) / 2,
+               child.pos.y + (size + 10) / 2, label);
+  elm_rounded_hold_fill(&child, VEC2_Z, size, size, 1, ratio, from_right);
   return child;
 }
 
@@ -365,15 +453,8 @@ static inline elm_t elm_btn_input(elm_t *parent, vec2_t pos, uint16_t width,
   elm_str(&child, vec2((width - label_width) / 2, 7 + padding), label);
 
   if (ratio > 0.f)
-  {
-    float draw_ratio = ease_out_cubic(ratio);
-    uint16_t fill_width = (uint16_t)((width - 1) * draw_ratio);
-    u8g2_SetDrawColor(u8g2, 2);
-    if (fill_from_right)
-      elm_box(&child, vec2(width - 1 - fill_width, 1), fill_width, height - 2);
-    else
-      elm_box(&child, vec2(1, 1), fill_width, height - 2);
-  }
+    elm_rounded_hold_fill(&child, VEC2_Z, width, height, 2, ratio,
+                          fill_from_right);
 
   if (pressed != NULL)
     *pressed = ratio >= 1.f;

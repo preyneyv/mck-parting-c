@@ -45,6 +45,10 @@ int main(void)
   sem_acquire_blocking(&core1_flash_ready);
 
   management_init();
+  /* Cartridge storage must be loaded before onboarding decides whether the
+   * bundled guide exists. Otherwise a reboot during the guide can mistake the
+   * not-yet-populated registry for a missing package and dismiss it. */
+  engine_set_app(NULL);
   engine_set_frame_callback(on_frame_cb);
 
   engine_run_forever();

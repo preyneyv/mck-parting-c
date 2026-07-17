@@ -17,3 +17,7 @@ void prism_settings_brightness_changed(uint8_t brightness);
 void prism_settings_set_save_deferred(bool deferred);
 void prism_settings_mark_saved(void);
 bool prism_settings_is_dirty(void);
+bool prism_settings_first_interaction_complete(void);
+bool prism_settings_guide_pending(void);
+void prism_settings_complete_first_interaction(void);
+void prism_settings_dismiss_guide(void);

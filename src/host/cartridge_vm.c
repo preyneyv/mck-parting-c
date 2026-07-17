@@ -1162,6 +1162,7 @@ static void api_dispatch(host_cartridge_vm_t *vm, uint16_t api)
     reg_write(vm, UC_ARM_REG_R0, ok);
     break;
   }
+  case 26: context->api->close(); break;
   default:
     fprintf(stderr, "unsupported cartridge API trap: %u\n", api);
     vm->failed = true;
