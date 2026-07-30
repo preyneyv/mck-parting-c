@@ -6,10 +6,10 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { LeaderboardFilters } from "@/components/leaderboard-filters";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import {
-  getLeaderboards,
+  getLeaderboard,
   type AsteroidsLeaderboardRow,
   type BeatlineLeaderboardRow,
-  type Leaderboards,
+  type LeaderboardKey,
   type MorseLeaderboardRow,
 } from "@/lib/db";
 import { beatlineDifficultyName, beatlineRankName, beatlineTrackName, BEATLINE_TRACKS } from "@/lib/leaderboard";
@@ -17,9 +17,7 @@ import { beatlineDifficultyName, beatlineRankName, beatlineTrackName, BEATLINE_T
 export const metadata: Metadata = { title: "leaderboards" };
 export const dynamic = "force-dynamic";
 
-type GameKey = keyof Leaderboards;
-
-const EMPTY_LEADERBOARDS: Leaderboards = { morse: [], asteroids: [], beatline: [] };
+type GameKey = LeaderboardKey;
 const GAMES: Array<{ key: GameKey; label: string; icon: string }> = [
   { key: "morse", label: "morse", icon: "/icons/morse.png" },
   { key: "asteroids", label: "asteroids", icon: "/icons/asteroids.png" },
@@ -82,17 +80,33 @@ export default async function LeaderboardPage({ searchParams }: { searchParams: 
   const selectedTrack = BEATLINE_TRACKS.some((track) => track.id === query.track) ? query.track! : "all";
   const selectedDifficulty = query.difficulty === "0" || query.difficulty === "1" ? query.difficulty : "all";
 
-  let boards = EMPTY_LEADERBOARDS;
+  let morseRows: MorseLeaderboardRow[] = [];
+  let asteroidsRows: AsteroidsLeaderboardRow[] = [];
+  let beatlineRows: BeatlineLeaderboardRow[] = [];
   let databaseAvailable = true;
   try {
-    boards = await getLeaderboards();
+    if (selectedGame === "morse") {
+      morseRows = await getLeaderboard("morse");
+    } else if (selectedGame === "asteroids") {
+      asteroidsRows = await getLeaderboard("asteroids");
+    } else {
+      const selectedChart = BEATLINE_TRACKS.find(
+        (track) => track.id === selectedTrack,
+      )?.charts[selectedDifficulty === "1" ? "hard" : "normal"];
+      beatlineRows = await getLeaderboard(
+        "beatline",
+        selectedTrack !== "all" && selectedDifficulty !== "all"
+          ? selectedChart
+          : undefined,
+      );
+    }
   } catch (error) {
     databaseAvailable = false;
     console.error("could not load the leaderboard database", error);
   }
 
   const activeGame = GAMES.find((game) => game.key === selectedGame) ?? GAMES[0];
-  const beatlineRows = boards.beatline.filter((row) => (selectedTrack === "all" || row.track_id === selectedTrack) && (selectedDifficulty === "all" || row.difficulty === Number(selectedDifficulty)));
+  beatlineRows = beatlineRows.filter((row) => (selectedTrack === "all" || row.track_id === selectedTrack) && (selectedDifficulty === "all" || row.difficulty === Number(selectedDifficulty)));
 
   return (
     <div className="space-y-6">
@@ -109,7 +123,7 @@ export default async function LeaderboardPage({ searchParams }: { searchParams: 
         <CardHeader><CardTitle>{activeGame.label}</CardTitle></CardHeader>
         <CardContent className="space-y-4">
           {selectedGame === "beatline" ? <LeaderboardFilters tracks={BEATLINE_TRACKS} selectedTrack={selectedTrack} selectedDifficulty={selectedDifficulty} /> : null}
-          {!databaseAvailable ? <div className="py-12 text-center text-sm text-muted-foreground">start PostgreSQL and reload this page.</div> : selectedGame === "morse" ? <MorseBoard rows={boards.morse} /> : selectedGame === "asteroids" ? <AsteroidsBoard rows={boards.asteroids} /> : <BeatlineBoard rows={beatlineRows} />}
+          {!databaseAvailable ? <div className="py-12 text-center text-sm text-muted-foreground">the leaderboard database is temporarily unavailable.</div> : selectedGame === "morse" ? <MorseBoard rows={morseRows} /> : selectedGame === "asteroids" ? <AsteroidsBoard rows={asteroidsRows} /> : <BeatlineBoard rows={beatlineRows} />}
         </CardContent>
       </Card>
     </div>
