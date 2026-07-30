@@ -37,11 +37,15 @@
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);
+  --font-sans: var(--font-figtree);
+  --font-mono: var(--font-geist-mono);
+  --font-display: var(--font-shantell-sans);
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
 }
 
 * { @apply border-border; }
-body { @apply bg-background text-foreground antialiased; }
+body { @apply bg-background font-sans text-foreground antialiased; }
+h1, h2, h3 { @apply font-display; }
 button, a { -webkit-tap-highlight-color: transparent; }
