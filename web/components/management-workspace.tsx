@@ -1,7 +1,19 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Cable, ChevronDown, Loader2, Moon, Package, RefreshCw, RotateCcw, Trash2, Unplug, Upload, Usb } from "lucide-react";
+import {
+  ArrowClockwise as RefreshCw,
+  ArrowCounterClockwise as RotateCcw,
+  CaretDown as ChevronDown,
+  CircleNotch as Loader2,
+  Moon,
+  Package,
+  Plugs as Unplug,
+  PlugsConnected as Cable,
+  Trash as Trash2,
+  UploadSimple as Upload,
+  Usb,
+} from "@phosphor-icons/react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
