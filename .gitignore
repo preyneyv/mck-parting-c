@@ -9,7 +9,10 @@ web/node_modules/
 web/.next/
 web/.open-next/
 web/.wrangler/
+web/.vercel/
 web/.dev.vars
+web/.env.local
+web/prism-local.db*
 web/*.log
 web/tsconfig.tsbuildinfo
 src/cartridges/**/Backups/
