@@ -1,4 +1,8 @@
-import { getCloudflareContext } from "@opennextjs/cloudflare";
+import {
+  createClient,
+  type Client,
+  type Row,
+} from "@libsql/client/web";
 
 const RESULT_VERSION = 1;
 
@@ -73,8 +77,46 @@ export type Leaderboards = {
 
 export type LeaderboardKey = keyof Leaderboards;
 
+let database: Client | undefined;
+
 export function getDatabase() {
-  return getCloudflareContext().env.DB;
+  if (database) return database;
+
+  const url = process.env.TURSO_DATABASE_URL;
+  if (!url) {
+    throw new Error("TURSO_DATABASE_URL is not configured.");
+  }
+
+  database = createClient({
+    url,
+    authToken: process.env.TURSO_AUTH_TOKEN,
+  });
+  return database;
+}
+
+function integerValue(value: unknown, field: string) {
+  const number = typeof value === "bigint" ? Number(value) : value;
+  if (!isFiniteInteger(number)) {
+    throw new Error(`Stored leaderboard ${field} is invalid.`);
+  }
+  return number;
+}
+
+function stringValue(value: unknown, field: string) {
+  if (typeof value !== "string") {
+    throw new Error(`Stored leaderboard ${field} is invalid.`);
+  }
+  return value;
+}
+
+function storedLeaderboardRow(row: Row): StoredLeaderboardRow {
+  return {
+    id: integerValue(row.id, "id"),
+    player_name: stringValue(row.player_name, "player name"),
+    result_version: integerValue(row.result_version, "result version"),
+    result_json: stringValue(row.result_json, "result JSON"),
+    created_at: stringValue(row.created_at, "creation time"),
+  };
 }
 
 function isFiniteInteger(value: unknown): value is number {
@@ -156,36 +198,32 @@ function baseRow(row: StoredLeaderboardRow) {
 }
 
 async function getMorseLeaderboard(): Promise<MorseLeaderboardRow[]> {
-  const { results } = await getDatabase()
-    .prepare(
-      `SELECT id, player_name, result_version, result_json, created_at
-       FROM leaderboard_entries
-       WHERE app_id = ?1 AND scope_key = ''
-       ORDER BY rank_primary DESC, rank_secondary DESC, created_at ASC
-       LIMIT 250`,
-    )
-    .bind(1)
-    .all<StoredLeaderboardRow>();
+  const { rows } = await getDatabase().execute({
+    sql: `SELECT id, player_name, result_version, result_json, created_at
+          FROM leaderboard_entries
+          WHERE app_id = ? AND scope_key = ''
+          ORDER BY rank_primary DESC, rank_secondary DESC, created_at ASC
+          LIMIT 250`,
+    args: [1],
+  });
 
-  return results.map((row) => {
+  return rows.map(storedLeaderboardRow).map((row) => {
     const result = parseMorseResult(row);
     return { ...baseRow(row), letters: result.letters, errors: result.errors };
   });
 }
 
 async function getAsteroidsLeaderboard(): Promise<AsteroidsLeaderboardRow[]> {
-  const { results } = await getDatabase()
-    .prepare(
-      `SELECT id, player_name, result_version, result_json, created_at
-       FROM leaderboard_entries
-       WHERE app_id = ?1 AND scope_key = ''
-       ORDER BY rank_primary DESC, rank_secondary DESC, created_at ASC
-       LIMIT 250`,
-    )
-    .bind(2)
-    .all<StoredLeaderboardRow>();
+  const { rows } = await getDatabase().execute({
+    sql: `SELECT id, player_name, result_version, result_json, created_at
+          FROM leaderboard_entries
+          WHERE app_id = ? AND scope_key = ''
+          ORDER BY rank_primary DESC, rank_secondary DESC, created_at ASC
+          LIMIT 250`,
+    args: [2],
+  });
 
-  return results.map((row) => {
+  return rows.map(storedLeaderboardRow).map((row) => {
     const result = parseAsteroidsResult(row);
     return {
       ...baseRow(row),
@@ -198,28 +236,22 @@ async function getAsteroidsLeaderboard(): Promise<AsteroidsLeaderboardRow[]> {
 async function getBeatlineLeaderboard(
   chartId?: string,
 ): Promise<BeatlineLeaderboardRow[]> {
-  const statement = chartId
-    ? getDatabase()
-        .prepare(
-          `SELECT id, player_name, result_version, result_json, created_at
-           FROM leaderboard_entries
-           WHERE app_id = ?1 AND scope_key = ?2
-           ORDER BY rank_primary DESC, rank_secondary DESC, created_at ASC
-           LIMIT 250`,
-        )
-        .bind(5, chartId)
-    : getDatabase()
-        .prepare(
-          `SELECT id, player_name, result_version, result_json, created_at
-           FROM leaderboard_entries
-           WHERE app_id = ?1
-           ORDER BY rank_primary DESC, rank_secondary DESC, created_at ASC
-           LIMIT 250`,
-        )
-        .bind(5);
-  const { results } = await statement.all<StoredLeaderboardRow>();
+  const { rows } = await getDatabase().execute({
+    sql: chartId
+      ? `SELECT id, player_name, result_version, result_json, created_at
+         FROM leaderboard_entries
+         WHERE app_id = ? AND scope_key = ?
+         ORDER BY rank_primary DESC, rank_secondary DESC, created_at ASC
+         LIMIT 250`
+      : `SELECT id, player_name, result_version, result_json, created_at
+         FROM leaderboard_entries
+         WHERE app_id = ?
+         ORDER BY rank_primary DESC, rank_secondary DESC, created_at ASC
+         LIMIT 250`,
+    args: chartId ? [5, chartId] : [5],
+  });
 
-  return results.map((row) => {
+  return rows.map(storedLeaderboardRow).map((row) => {
     const result = parseBeatlineResult(row);
     return {
       ...baseRow(row),
@@ -260,17 +292,17 @@ export async function getLeaderboard(
 
 export async function getLatestName(deviceSerial: string) {
   try {
-    const row = await getDatabase()
-      .prepare(
-        `SELECT player_name
-         FROM leaderboard_entries
-         WHERE device_serial = ?1
-         ORDER BY created_at DESC
-         LIMIT 1`,
-      )
-      .bind(deviceSerial)
-      .first<{ player_name: string }>();
-    return row?.player_name ?? "";
+    const { rows } = await getDatabase().execute({
+      sql: `SELECT player_name
+            FROM leaderboard_entries
+            WHERE device_serial = ?
+            ORDER BY created_at DESC
+            LIMIT 1`,
+      args: [deviceSerial],
+    });
+    return rows.length > 0
+      ? stringValue(rows[0].player_name, "player name")
+      : "";
   } catch {
     return "";
   }

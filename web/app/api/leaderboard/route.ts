@@ -73,16 +73,14 @@ export async function POST(request: Request) {
 
     const entry = decodeLeaderboardPayload(body.payload);
     const result = storedResult(entry);
-    const inserted = await getDatabase()
-      .prepare(
-        `INSERT INTO leaderboard_entries
-          (app_id, device_serial, entry_id, player_name, raw_data,
-           result_version, result_json, scope_key,
-           rank_primary, rank_secondary)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
-         ON CONFLICT (app_id, device_serial, entry_id) DO NOTHING`,
-      )
-      .bind(
+    const inserted = await getDatabase().execute({
+      sql: `INSERT INTO leaderboard_entries
+              (app_id, device_serial, entry_id, player_name, raw_data,
+               result_version, result_json, scope_key,
+               rank_primary, rank_secondary)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT (app_id, device_serial, entry_id) DO NOTHING`,
+      args: [
         entry.appId,
         entry.deviceSerial,
         entry.entryId,
@@ -93,10 +91,10 @@ export async function POST(request: Request) {
         result.scopeKey,
         result.rankPrimary,
         result.rankSecondary,
-      )
-      .run();
+      ],
+    });
 
-    if (inserted.meta.changes === 0) {
+    if (inserted.rowsAffected === 0) {
       return NextResponse.json(
         { error: "This score was already submitted." },
         { status: 409 },
