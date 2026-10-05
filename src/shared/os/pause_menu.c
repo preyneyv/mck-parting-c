@@ -152,14 +152,7 @@ static void handle_input(void)
     {
       if (held > 0.f)
       {
-        uint8_t sound_step = (uint8_t)(held * 5.f) + 1u;
-        if (sound_step > 5u)
-          sound_step = 5u;
-        if (sound_step != menu.hold_sound_step)
-        {
-          menu.hold_sound_step = sound_step;
-          system_sound_hold(sound_step);
-        }
+        system_sound_hold_progress(&menu.hold_sound_step, held);
         anim_cancel(&menu.anim.held, false);
         menu.anim.held = 14 * ease_out_cubic(held);
       }

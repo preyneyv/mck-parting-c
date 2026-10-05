@@ -154,8 +154,8 @@ static void analyzer_prepare_chunk(void)
 
   for (uint16_t i = analyzer.prepare_index; i < end; i++)
   {
-    /* A Bartlett window is cheap in fixed point and suppresses the severe
-     * leakage a rectangular window would create on the tiny 32-band view. */
+    /* A Bartlett window is cheap in fixed point and avoids the spectral
+     * leakage a rectangular window would smear across the band display. */
     uint16_t distance = i < FFT_SIZE / 2 ? i : (FFT_SIZE - 1u - i);
     int16_t window = (int16_t)(distance * 64u);
     uint16_t destination = reverse_fft_bits(i);

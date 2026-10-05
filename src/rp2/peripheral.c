@@ -70,12 +70,6 @@ void platform_peripheral_set_enabled(bool enabled)
   gpio_put(PERIPH_PWR_EN, enabled ? 1 : 0);
 }
 
-void platform_peripheral_set_charging_enabled(bool enabled)
-{
-  g_peripheral.charging_enabled = enabled;
-  gpio_put(PERIPH_BAT_CHG_EN_N, enabled ? 0 : 1);
-}
-
 static uint8_t battery_percentage_curve(uint16_t voltage_mV)
 {
   if (voltage_mV >= 4000)

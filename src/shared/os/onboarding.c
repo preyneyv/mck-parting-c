@@ -90,20 +90,15 @@ static void draw_badge(u8g2_t *u8g2, elm_t *root, int16_t x,
                        bool from_right)
 {
   const int16_t y = 19;
-  int16_t outline_x = (int16_t)((2 * outline +
-                                 WELCOME_OUTLINE_SCALE / 2) /
-                                WELCOME_OUTLINE_SCALE);
-  int16_t outline_y = (int16_t)((2 * outline +
-                                 WELCOME_OUTLINE_SCALE / 2) /
-                                WELCOME_OUTLINE_SCALE);
+  /* The echo outline slides up to two pixels down and outward. */
+  int16_t offset = (int16_t)((2 * outline + WELCOME_OUTLINE_SCALE / 2) /
+                             WELCOME_OUTLINE_SCALE);
   u8g2_SetDrawColor(u8g2, 1);
-  if (outline_x != 0 || outline_y != 0)
+  if (offset != 0)
   {
-    if (!from_right)
-      outline_x = -outline_x;
-    u8g2_DrawRFrame(u8g2, x + outline_x, y + outline_y,
-                    WELCOME_BADGE_SIZE, WELCOME_BADGE_SIZE,
-                    1);
+    int16_t offset_x = from_right ? offset : -offset;
+    u8g2_DrawRFrame(u8g2, x + offset_x, y + offset, WELCOME_BADGE_SIZE,
+                    WELCOME_BADGE_SIZE, 1);
     /* Keep only the exposed portion of the echo outline. */
     u8g2_SetDrawColor(u8g2, 0);
     u8g2_DrawBox(u8g2, x, y, WELCOME_BADGE_SIZE, WELCOME_BADGE_SIZE);
@@ -160,14 +155,7 @@ static void welcome_tick(void)
     anim_cancel(&welcome.fill, false);
     welcome.returning = false;
     welcome.fill = (int32_t)(ratio * WELCOME_FILL_SCALE);
-    uint8_t step = (uint8_t)(ratio * 5.f) + 1u;
-    if (step > 5u)
-      step = 5u;
-    if (step != welcome.hold_sound_step)
-    {
-      welcome.hold_sound_step = step;
-      system_sound_hold(step);
-    }
+    system_sound_hold_progress(&welcome.hold_sound_step, ratio);
   }
   else
   {

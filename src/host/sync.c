@@ -92,5 +92,4 @@ bool platform_queue_try_pop(platform_queue_t *queue, void *out) {
   return true;
 }
 
-void platform_memory_barrier(void) {}
 void platform_yield(void) { sched_yield(); }

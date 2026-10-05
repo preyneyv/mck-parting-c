@@ -18,10 +18,6 @@ void platform_peripheral_init(void) {
 
 void platform_peripheral_set_enabled(bool enabled) { g_peripheral.enabled = enabled; }
 
-void platform_peripheral_set_charging_enabled(bool enabled) {
-  g_peripheral.charging_enabled = enabled;
-}
-
 void platform_peripheral_read_inputs(void) {}
 
 platform_power_state_t platform_peripheral_get_power_state(void) {

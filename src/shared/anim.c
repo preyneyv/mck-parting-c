@@ -1,47 +1,48 @@
-#include <stdio.h>
-
 #include "anim.h"
 
 anim_sys_t g_anim;
 
+/* Easing curves operate on Q16.16 progress in [0, 65536]. */
 static inline uint32_t anim_ease_linear(uint32_t p_q16) { return p_q16; }
 
-// InOut quad: 2p^2 (p<0.5) else 1 - 2(1-p)^2
-static inline uint32_t anim_ease_inout_quad(uint32_t p_q16) {
-  // p in [0, 65536]
-  if (p_q16 <= 32768u) {
-    // 2 * p^2
-    // (p*p)>>16 fits in 32 bits if we cast to 64 during mul
-    uint64_t pp = (uint64_t)p_q16 * (uint64_t)p_q16; // Q32.32
-    uint32_t p2 = (uint32_t)(pp >> 16);              // Q16.16
-    uint32_t r = p2 << 1;                            // *2
+/* 2p^2 for p < 0.5, otherwise 1 - 2(1 - p)^2. */
+static inline uint32_t anim_ease_inout_quad(uint32_t p_q16)
+{
+  if (p_q16 <= 32768u)
+  {
+    uint64_t pp = (uint64_t)p_q16 * (uint64_t)p_q16;
+    uint32_t p2 = (uint32_t)(pp >> 16);
+    uint32_t r = p2 << 1;
     return r > 65536u ? 65536u : r;
-  } else {
-    // 1 - 2*(1-p)^2
+  }
+  else
+  {
     uint32_t one = 65536u;
     uint32_t pm = one - p_q16;
-    uint64_t pp = (uint64_t)pm * (uint64_t)pm; // Q32.32
-    uint32_t p2 = (uint32_t)(pp >> 16);        // Q16.16
+    uint64_t pp = (uint64_t)pm * (uint64_t)pm;
+    uint32_t p2 = (uint32_t)(pp >> 16);
     uint32_t two_p2 = p2 << 1;
     return (two_p2 >= one) ? 0u : (one - two_p2);
   }
 }
 
-static inline uint32_t anim_ease_out_cubic(uint32_t p_q16) {
-  // p_q16 is in [0, 65536]
+/* 1 - (1 - p)^3 */
+static inline uint32_t anim_ease_out_cubic(uint32_t p_q16)
+{
   uint32_t one = 65536u;
-  uint32_t inv = one - p_q16; // (1 - t)
+  uint32_t inv = one - p_q16;
 
-  // inv^3 in Q16.16: (inv * inv * inv) >> 32
-  uint64_t inv2 = (uint64_t)inv * inv;        // Q32.32
-  uint64_t inv3 = (inv2 >> 16) * inv;         // (Q16.16 * Q16.16) -> Q32.32
-  uint32_t inv3_q16 = (uint32_t)(inv3 >> 16); // back to Q16.16
+  uint64_t inv2 = (uint64_t)inv * inv;
+  uint64_t inv3 = (inv2 >> 16) * inv;
+  uint32_t inv3_q16 = (uint32_t)(inv3 >> 16);
 
   return one - inv3_q16;
 }
 
-static inline uint32_t anim_apply_ease(anim_ease_t e, uint32_t p_q16) {
-  switch (e) {
+static inline uint32_t anim_apply_ease(anim_ease_t e, uint32_t p_q16)
+{
+  switch (e)
+  {
   case ANIM_EASE_INOUT_QUAD:
     return anim_ease_inout_quad(p_q16);
   case ANIM_EASE_LINEAR:
@@ -53,36 +54,35 @@ static inline uint32_t anim_apply_ease(anim_ease_t e, uint32_t p_q16) {
   }
 }
 
-static inline int find_slot_by_ptr(volatile int32_t *ptr) {
+static inline int find_slot_by_ptr(volatile int32_t *ptr)
+{
   for (int i = 0; i < ANIM_MAX; ++i)
     if (g_anim.slots[i].active && g_anim.slots[i].out == ptr)
       return i;
   return -1;
 }
 
-static inline int find_free_slot(void) {
+static inline int find_free_slot(void)
+{
   for (int i = 0; i < ANIM_MAX; ++i)
     if (!g_anim.slots[i].active)
       return i;
   return -1;
 }
 
-void anim_init(void) {
-  for (int i = 0; i < ANIM_MAX; ++i)
-    g_anim.slots[i].active = 0;
-}
-
-// Start/overwrite: animate *out from its current value to 'to' over
-// 'duration_ms'.
-static int _anim_to_impl(volatile int32_t *out, int32_t to,
-                         uint32_t duration_ms, anim_ease_t ease,
-                         anim_done_fn on_done, void *ctx, bool is_sys) {
+/* Animate *out from its current value to `to`, replacing any animation
+ * already running on it. Without a free slot the value jumps to `to`. */
+static int anim_start(volatile int32_t *out, int32_t to, uint32_t duration_ms,
+                      anim_ease_t ease, anim_done_fn on_done, void *ctx,
+                      bool is_sys)
+{
   int idx = find_slot_by_ptr(out);
   if (idx < 0)
     idx = find_free_slot();
-  if (idx < 0) {
-    *out = to; // jump to end
-    return -1; // no capacity
+  if (idx < 0)
+  {
+    *out = to;
+    return -1;
   }
 
   anim_slot_t *s = &g_anim.slots[idx];
@@ -95,7 +95,8 @@ static int _anim_to_impl(volatile int32_t *out, int32_t to,
   s->ctx = ctx;
   s->is_sys = is_sys;
 
-  if (duration_ms == 0u) {
+  if (duration_ms == 0u)
+  {
     *s->out = s->end;
     s->active = 0;
     if (s->on_done)
@@ -110,16 +111,19 @@ static int _anim_to_impl(volatile int32_t *out, int32_t to,
 }
 
 int anim_to(volatile int32_t *out, int32_t to, uint32_t duration_ms,
-            anim_ease_t ease, anim_done_fn on_done, void *ctx) {
-  return _anim_to_impl(out, to, duration_ms, ease, on_done, ctx, false);
+            anim_ease_t ease, anim_done_fn on_done, void *ctx)
+{
+  return anim_start(out, to, duration_ms, ease, on_done, ctx, false);
 }
 
 int anim_sys_to(volatile int32_t *out, int32_t to, uint32_t duration_ms,
-                anim_ease_t ease, anim_done_fn on_done, void *ctx) {
-  return _anim_to_impl(out, to, duration_ms, ease, on_done, ctx, true);
+                anim_ease_t ease, anim_done_fn on_done, void *ctx)
+{
+  return anim_start(out, to, duration_ms, ease, on_done, ctx, true);
 }
 
-void anim_cancel(volatile int32_t *out, int snap_to_end) {
+void anim_cancel(volatile int32_t *out, int snap_to_end)
+{
   int idx = find_slot_by_ptr(out);
   if (idx < 0)
     return;
@@ -131,13 +135,14 @@ void anim_cancel(volatile int32_t *out, int snap_to_end) {
   s->active = 0;
 }
 
-void anim_tick_us(uint32_t elapsed_us) {
-  for (int i = 0; i < ANIM_MAX; ++i) {
+void anim_tick_us(uint32_t elapsed_us)
+{
+  for (int i = 0; i < ANIM_MAX; ++i)
+  {
     anim_slot_t *s = &g_anim.slots[i];
     if (!s->active)
       continue;
     if (g_anim.paused && !s->is_sys)
-      // if paused, skip non-sys animations
       continue;
 
     s->elapsed_us += elapsed_us;
@@ -146,18 +151,16 @@ void anim_tick_us(uint32_t elapsed_us) {
                           ? 65536u
                           : (uint32_t)((s->elapsed_us << 16) / duration_us);
 
-    // eased progress
     uint32_t e = anim_apply_ease(s->ease, p_next);
-
-    // value = start + (delta * e)>>16  (Q16.16 scale)
-    int64_t prod = (int64_t)s->delta * (int64_t)e; // up to ~48 bits
+    int64_t prod = (int64_t)s->delta * (int64_t)e;
     int32_t inc = (int32_t)(prod >> 16);
     int32_t val = s->start + inc;
 
     *(s->out) = val;
 
-    if (p_next >= 65536u) {
-      *(s->out) = s->end; // ensure exact final value
+    if (p_next >= 65536u)
+    {
+      *(s->out) = s->end;
       s->active = 0;
       if (s->on_done)
         s->on_done(s->ctx);
@@ -165,7 +168,8 @@ void anim_tick_us(uint32_t elapsed_us) {
   }
 }
 
-void anim_sys_clear_all() {
+void anim_sys_clear_all(void)
+{
   for (int i = 0; i < ANIM_MAX; ++i)
     if (!g_anim.slots[i].is_sys)
       g_anim.slots[i].active = 0;

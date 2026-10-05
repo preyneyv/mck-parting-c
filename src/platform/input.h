@@ -6,7 +6,8 @@ void platform_input_init(void);
 
 typedef uint32_t platform_input_mask_t;
 
-enum {
+enum
+{
   PLATFORM_INPUT_LEFT = (1u << 0),
   PLATFORM_INPUT_RIGHT = (1u << 1),
   PLATFORM_INPUT_MENU = (1u << 2),

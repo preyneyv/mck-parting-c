@@ -238,7 +238,7 @@ void audio_playback_run_forever(audio_synth_t *synth)
 {
   playback_synth = synth;
 #if PRISM_ENABLE_PERFORMANCE_LOGS
-  TimingInstrumenter ti_synth;
+  timing_stats_t ti_synth;
   ti_init(&ti_synth);
 
   uint32_t buffers_since_log = 0;

@@ -5,17 +5,16 @@
 
 #include <platform/time.h>
 
-// Everything stored in microseconds
+/* Accumulates the duration of repeated start/stop intervals, in microseconds. */
 typedef struct
 {
   platform_time_t start_time;
   platform_time_t end_time;
   uint64_t aggregate_time;
   uint32_t count;
-} TimingInstrumenter;
+} timing_stats_t;
 
-// Initialize/reset all counters
-static inline void ti_init(TimingInstrumenter *ti)
+static inline void ti_init(timing_stats_t *ti)
 {
   ti->start_time = 0;
   ti->end_time = 0;
@@ -23,39 +22,24 @@ static inline void ti_init(TimingInstrumenter *ti)
   ti->count = 0;
 }
 
-// Record current timestamp
-static inline void ti_start(TimingInstrumenter *ti)
+static inline void ti_start(timing_stats_t *ti)
 {
   ti->start_time = platform_now_us();
 }
 
-// Stop and accumulate
-static inline uint64_t ti_stop(TimingInstrumenter *ti)
+static inline uint64_t ti_stop(timing_stats_t *ti)
 {
   ti->end_time = platform_now_us();
-  uint64_t elapsed = (uint64_t)platform_time_diff_us(ti->start_time, ti->end_time);
+  uint64_t elapsed =
+      (uint64_t)platform_time_diff_us(ti->start_time, ti->end_time);
   ti->aggregate_time += elapsed;
   ti->count++;
 
   return elapsed;
 }
 
-static inline void ti_stop_n(TimingInstrumenter *ti, uint32_t n)
-{
-  ti->end_time = platform_now_us();
-  ti->aggregate_time += (uint64_t)platform_time_diff_us(ti->start_time, ti->end_time);
-  ti->count += n;
-}
-
-// Last measured interval (µs)
-static inline uint64_t ti_get_elapsed_us(const TimingInstrumenter *ti)
-{
-  return (uint64_t)platform_time_diff_us(ti->start_time, ti->end_time);
-}
-
-// Average time in milliseconds.
-// If reset==true, clear the tally after computing.
-static inline double ti_get_average_ms(TimingInstrumenter *ti, bool reset)
+/* Average interval in milliseconds, optionally clearing the tally. */
+static inline double ti_get_average_ms(timing_stats_t *ti, bool reset)
 {
   if (ti->count == 0)
     return 0.0;

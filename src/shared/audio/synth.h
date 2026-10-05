@@ -68,11 +68,6 @@ typedef enum
   AUDIO_SYNTH_OP_MODE_FREQ_MOD = 1,
 } audio_synth_operator_mode_t;
 
-typedef enum
-{
-  AUDIO_SYNTH_OP_WAVEFORM_SINE,
-} audio_synth_operator_waveform_t;
-
 typedef struct audio_synth_env_config_t
 {
   uint32_t a; // attack duration in timebase
@@ -87,7 +82,6 @@ typedef struct audio_synth_operator_config_t
   q1x15 level;                      // output level
   audio_synth_operator_mode_t mode; // operator mode
   audio_synth_env_config_t env;     // envelope config
-  // todo: waveform
 } audio_synth_operator_config_t;
 
 typedef struct audio_synth_patch_config_t
@@ -117,31 +111,26 @@ static const audio_synth_patch_config_t audio_synth_patch_config_default =
 bool audio_synth_enqueue(audio_synth_t *synth,
                          const audio_synth_message_t *msg);
 
-// set a patch configuration
 void audio_synth_patch_config_set(audio_synth_t *synth, uint8_t patch_idx,
                                   audio_synth_patch_config_t config);
 
-// convert a note name (e.g. "C4", "A#3") to a MIDI note number
+/* Convert a note name such as "C4" or "A#3" to a MIDI note number (C4 = 60).
+ * Without an octave digit, octave 3 is assumed. */
 static inline uint16_t note(char *name)
 {
   static const char *order[] = {"C", "C#", "D", "D#", "E", "F",
                                 "F#", "G", "G#", "A", "A#", "B"};
-  int note = 0;
-  for (; note < 12; note++)
+  int index = 0;
+  for (; index < 12; index++)
   {
-    if (strncmp(name, order[note], strlen(order[note])) == 0)
-    {
+    if (strncmp(name, order[index], strlen(order[index])) == 0)
       break;
-    }
   }
 
   int len = strlen(name);
-  int note_len = strlen(order[note]);
+  int name_len = strlen(order[index]);
   int octave = 3;
-  if ((len - note_len) == 1)
-  {
+  if ((len - name_len) == 1)
     octave = name[len - 1] - '0';
-  }
-  int note_num = 60 + note + (octave - 4) * 12; // C4 = 60
-  return note_num;
+  return 60 + index + (octave - 4) * 12;
 }

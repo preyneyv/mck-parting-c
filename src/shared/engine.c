@@ -62,9 +62,9 @@ static engine_t g_engine;
 static uint8_t last_app_framebuffer[(DISP_WIDTH * DISP_HEIGHT) / 8];
 
 #if PRISM_ENABLE_PERFORMANCE_LOGS
-static TimingInstrumenter engine_tick_timing;
-static TimingInstrumenter app_tick_timing;
-static TimingInstrumenter frame_timing;
+static timing_stats_t engine_tick_timing;
+static timing_stats_t app_tick_timing;
+static timing_stats_t frame_timing;
 #endif
 
 enum
@@ -132,12 +132,6 @@ bool engine_button_pressed(button_id_t id)
   return button != NULL && button->pressed;
 }
 
-bool engine_button_edge(button_id_t id)
-{
-  button_t *button = button_from_id(id);
-  return button != NULL && (button->keydown || button->keyup);
-}
-
 bool engine_button_app_keydown(button_id_t id)
 {
   button_t *button = button_from_id(id);
@@ -160,11 +154,6 @@ uint32_t engine_button_app_keyup_tick(button_id_t id)
 {
   button_t *button = button_from_id(id);
   return button != NULL ? button->app_keyup_tick : 0;
-}
-
-bool engine_button_released(button_id_t id)
-{
-  return !engine_button_pressed(id);
 }
 
 button_id_t engine_button_get_pressed_first(void)
@@ -220,7 +209,7 @@ void engine_led_set(uint8_t led, color_t color)
     g_engine.led_colors[led] = color;
 }
 
-// log-inspired volume curve for more perceptually linear volume steps.
+/* Logarithmic curve so each volume step sounds roughly even. */
 static const q1x15 ENGINE_VOLUME_CURVE[9] = {
     Q1X15_ZERO, // mute
     2195,       // ~0.067
@@ -233,15 +222,12 @@ static const q1x15 ENGINE_VOLUME_CURVE[9] = {
     Q1X15_ONE,  // full scale
 };
 
-void engine_init()
+void engine_init(void)
 {
-  // initialize all subsystems
-  audio_synth_init(&g_engine.synth, AUDIO_SAMPLE_RATE, 1000);
+  audio_synth_init(&g_engine.synth, AUDIO_SAMPLE_RATE, AUDIO_SYNTH_TIMEBASE);
   system_sound_init(&g_engine.synth);
   for (uint8_t i = 0; i < LED_COUNT; i++)
-  {
     g_engine.led_colors[i] = (color_t){.hex = 0x000000};
-  }
 
   g_engine.buttons.left.id = BUTTON_LEFT;
   g_engine.buttons.right.id = BUTTON_RIGHT;
@@ -265,7 +251,7 @@ void engine_set_volume(int8_t level)
                                ENGINE_VOLUME_CURVE[g_engine.volume]);
 }
 
-inline void engine_change_volume(int8_t direction)
+void engine_change_volume(int8_t direction)
 {
   engine_set_volume(g_engine.volume + direction);
   prism_settings_volume_changed(g_engine.volume);
@@ -273,9 +259,9 @@ inline void engine_change_volume(int8_t direction)
 
 uint8_t engine_brightness_scale(void)
 {
-  /* Perceptual output curve.  Low settings get finer control while the larger
-   * top-end jumps keep 6/8, 7/8, and 8/8 visually distinct.  The minimum is
-   * deliberately the old linear 1/8 value. */
+  /* Perceptual curve: finer steps at the low end, larger jumps at the top so
+   * 6/8, 7/8, and 8/8 stay visually distinct. The minimum matches a linear
+   * 1/8 step. */
   static const uint8_t brightness_curve[9] = {
       60, 68, 80, 96, 116, 142, 174, 212, 255,
   };
@@ -323,7 +309,7 @@ color_t engine_led_color(uint8_t led)
   return wake_confirmation_blend_led(led, g_engine.led_colors[led]);
 }
 
-void engine_mark_input()
+void engine_mark_input(void)
 {
   g_engine.last_input_at = platform_now_us();
 }
@@ -346,7 +332,6 @@ static void read_button(button_t *button, platform_time_t now, bool pressed)
     button->ignore = false;
     if (button->pressed)
     {
-      // released
       button->pressed = false;
       button->pressed_at = PLATFORM_TIME_ZERO;
       button->keyup = true;
@@ -355,9 +340,7 @@ static void read_button(button_t *button, platform_time_t now, bool pressed)
     }
   }
   if (button->keydown || button->keyup)
-  {
     engine_mark_input();
-  }
 }
 
 static void clear_system_button_edges(void)
@@ -393,7 +376,7 @@ static void reset_button(button_t *button, bool ignore)
   button->app_keyup_tick = 0;
 }
 
-void engine_buttons_reset()
+void engine_buttons_reset(void)
 {
   reset_button(&g_engine.buttons.left, true);
   reset_button(&g_engine.buttons.right, true);
@@ -402,18 +385,15 @@ void engine_buttons_reset()
 static void reset_buttons(bool ignore_menu)
 {
   engine_buttons_reset();
-
   if (ignore_menu)
-  {
     reset_button(&g_engine.buttons.menu, true);
-  }
 }
 
-static void handle_menu_reset()
+/* Holding the menu button for five seconds resets the device. */
+static void handle_menu_reset(void)
 {
   static platform_time_t pressed_at = PLATFORM_TIME_ZERO;
 
-  // if the menu button is held down for a while, reset using watchdog
   platform_watchdog_update();
   if (!g_engine.buttons.menu.pressed)
   {
@@ -427,7 +407,6 @@ static void handle_menu_reset()
     return;
 
   prism_settings_flush();
-  // reset the system
   platform_system_reset();
   while (1)
     ;
@@ -439,10 +418,9 @@ static platform_wake_result_t engine_sleep_cycle(uint32_t quick_wake_ms)
   platform_watchdog_disable();
   const color_t leds_off[LED_COUNT] = {0};
 
-  /* platform_leds_show() queues the WS2812 words, but the RP2 PIO still needs
-   * time to shift them out and hold the data line low long enough to latch.
-   * Entering dormant sleep immediately can suspend that transfer mid-frame,
-   * which briefly restores stale LED data when the clocks restart. */
+  /* platform_leds_show() only queues the WS2812 data; the PIO still needs time
+   * to shift it out and latch. Entering dormant sleep immediately can cut the
+   * transfer short and briefly show stale colors when the clocks restart. */
   platform_leds_show(leds_off, LED_COUNT);
   platform_sleep_us(200);
   platform_display_set_enabled(false);
@@ -452,15 +430,15 @@ static platform_wake_result_t engine_sleep_cycle(uint32_t quick_wake_ms)
 
   audio_playback_set_enabled(true);
   platform_watchdog_enable(WATCHDOG_TIMEOUT_MS);
-  /* Restore the configured level before powering the OLED back up so wake
-   * never exposes the last zero-contrast fade value. */
+  /* Restore the configured contrast before powering the OLED back up so it
+   * never wakes at the faded-out level. */
   platform_peripheral_set_enabled(true);
   platform_peripheral_read_inputs();
   platform_display_set_contrast(engine_brightness_scale());
   platform_display_set_enabled(true);
 
-  reset_buttons(true); // ignore any edges from waking up
-  engine_mark_input(); // mark input to avoid auto-sleep right after waking up
+  reset_buttons(true); // Ignore the press that woke the device.
+  engine_mark_input(); // Don't immediately auto-sleep again.
   g_engine.next_tick_at = platform_now_us();
   g_engine.next_frame_at = platform_now_us();
   g_engine.tick_deadline_remainder = 0;
@@ -470,7 +448,7 @@ static platform_wake_result_t engine_sleep_cycle(uint32_t quick_wake_ms)
 
 static void resume_after_auto_sleep(void);
 
-void engine_enter_sleep()
+void engine_enter_sleep(void)
 {
   platform_wake_result_t wake = engine_sleep_cycle(0);
   if (wake.confirmation_required && wake.wake_button != 0)
@@ -535,14 +513,13 @@ static uint32_t app_tick_divider(void)
 
 static inline void engine_do_tick(uint32_t elapsed_us)
 {
-  anim_tick_us(elapsed_us); // system animations continue while apps are paused
+  anim_tick_us(elapsed_us);
   system_sound_tick(g_engine.now);
   if (wake_confirmation_active())
   {
     wake_confirmation_tick();
-    /* Wake confirmation runs at the 960 Hz engine rate, while ordinary edges
-     * are normally retired by the 120 Hz frame loop. Consume them here so a
-     * single physical press can never be counted more than once. */
+    /* Wake confirmation runs every engine tick, but system edges are normally
+     * cleared once per frame. Clear them here so one press counts once. */
     clear_system_button_edges();
     clear_app_button_edges();
   }
@@ -589,8 +566,8 @@ static void home_transition_frame(void)
     return;
   if (g_engine.home_transition == HOME_TRANSITION_OUT)
   {
-    /* Clear the phase before routing so the explicit destination switch does
-     * not look like an asynchronous override of the transition. */
+    /* Clear the phase before switching apps; engine_set_app() would otherwise
+     * treat the switch as overriding this transition. */
     g_engine.home_transition = HOME_TRANSITION_NONE;
     onboarding_go_home();
     g_engine.home_transition = HOME_TRANSITION_IN;
@@ -613,19 +590,17 @@ static uint8_t home_transition_brightness(void)
                        : elapsed >= (int64_t)HOME_TRANSITION_MS * 1000
                              ? 1.f
                              : elapsed / (HOME_TRANSITION_MS * 1000.f);
-  /* Smoothstep avoids a visible knee at the black midpoint. */
+  /* Smoothstep avoids a visible kink at the black midpoint. */
   progress = progress * progress * (3.f - 2.f * progress);
   if (g_engine.home_transition == HOME_TRANSITION_OUT)
     progress = 1.f - progress;
   return (uint8_t)(progress * 255.f);
 }
 
-static inline void engine_do_frame()
+static inline void engine_do_frame(void)
 {
   for (uint8_t i = 0; i < LED_COUNT; i++)
-  {
     g_engine.led_colors[i] = (color_t){.hex = 0x000000};
-  }
   home_transition_frame();
   if (wake_confirmation_expired())
     wake_confirmation_timeout();
@@ -636,7 +611,6 @@ static inline void engine_do_frame()
   }
   else if (!g_engine.paused)
   {
-    // draw screen buffer
     u8g2_t *u8g2 = platform_display_get_u8g2();
     u8g2_ClearBuffer(u8g2);
     if (g_engine.app->frame != NULL)
@@ -653,10 +627,9 @@ static inline void engine_do_frame()
   if (!wake_confirmation_active())
   {
     pause_menu_frame();
-    /* Manual sleep blocks inside pause_menu_frame() until a wake input
-     * arrives. If that starts wake confirmation, replace the already-buffered
-     * pause UI and its LED state in this same render pass instead of exposing
-     * either for one frame. */
+    /* Sleeping from the menu blocks inside pause_menu_frame() until a wake
+     * input. If that starts wake confirmation, draw it over the pause menu in
+     * this same frame so the menu never flashes on screen. */
     if (wake_confirmation_active())
       wake_confirmation_frame(last_app_framebuffer);
     else
@@ -673,7 +646,7 @@ static inline void engine_do_frame()
     trace_end(trace);
   }
 
-  // Apply final OS-owned fades after the app and menu have rendered.
+  // Apply OS fades after the app and menu have rendered.
   uint8_t output_brightness = wake_confirmation_brightness_scale(
       engine_output_brightness_scale());
   output_brightness =
@@ -681,12 +654,10 @@ static inline void engine_do_frame()
                  home_transition_brightness()) /
                 255u);
   platform_display_set_contrast(output_brightness);
-  // write display
   watchdog_trace_t display_trace =
       trace_begin(ENGINE_TRACE_DISPLAY, g_engine.app);
   u8g2_SendBuffer(platform_display_get_u8g2());
   trace_end(display_trace);
-  // write LEDs
   color_t output_leds[LED_COUNT];
   for (uint8_t i = 0; i < LED_COUNT; ++i)
     output_leds[i] = engine_led_color(i);
@@ -694,11 +665,10 @@ static inline void engine_do_frame()
   platform_leds_show(output_leds, LED_COUNT);
   wake_confirmation_release_tick();
 
-  // System UI edges last for a single rendered frame. Cartridge edges have a
-  // separate latch and remain pending until that cartridge's divided tick.
+  // System UI edges last one frame. Cartridge edges are latched separately
+  // until the cartridge's next (divided) tick.
   clear_system_button_edges();
 
-  // check for auto sleep
   if (g_engine.home_transition == HOME_TRANSITION_NONE &&
       !wake_confirmation_active() && platform_time_reached(
           platform_time_add_ms(g_engine.last_input_at, AUTO_SLEEP_TIMEOUT_MS)))
@@ -707,7 +677,7 @@ static inline void engine_do_frame()
   }
 }
 
-void engine_run_forever()
+void engine_run_forever(void)
 {
   platform_display_set_enabled(true);
   platform_peripheral_set_enabled(true);
@@ -749,9 +719,12 @@ void engine_run_forever()
       if (ticks_processed == 0)
       {
         platform_input_mask_t input_mask = platform_input_read_mask();
-        read_button(&g_engine.buttons.left, g_engine.now, (input_mask & PLATFORM_INPUT_LEFT) != 0);
-        read_button(&g_engine.buttons.right, g_engine.now, (input_mask & PLATFORM_INPUT_RIGHT) != 0);
-        read_button(&g_engine.buttons.menu, g_engine.now, (input_mask & PLATFORM_INPUT_MENU) != 0);
+        read_button(&g_engine.buttons.left, g_engine.now,
+                    (input_mask & PLATFORM_INPUT_LEFT) != 0);
+        read_button(&g_engine.buttons.right, g_engine.now,
+                    (input_mask & PLATFORM_INPUT_RIGHT) != 0);
+        read_button(&g_engine.buttons.menu, g_engine.now,
+                    (input_mask & PLATFORM_INPUT_MENU) != 0);
 
         handle_menu_reset();
       }
@@ -829,8 +802,10 @@ void engine_run_forever()
     }
 #endif
 
-    platform_time_t next_deadline = MIN(g_engine.next_tick_at, g_engine.next_frame_at);
-    int64_t sleep_time = platform_time_diff_us(platform_now_us(), next_deadline);
+    platform_time_t next_deadline =
+        MIN(g_engine.next_tick_at, g_engine.next_frame_at);
+    int64_t sleep_time =
+        platform_time_diff_us(platform_now_us(), next_deadline);
     if (sleep_time > 0)
       platform_sleep_us(sleep_time);
   }
@@ -843,19 +818,16 @@ void engine_set_app(app_t *app)
     onboarding_go_home();
     return;
   }
-  /* An explicit app launch (for example management full-test) takes
-   * precedence over an in-flight onboarding/Home transition. */
+  /* An explicit launch (e.g. the management full test) overrides any
+   * in-progress transition to Home. */
   g_engine.home_transition = HOME_TRANSITION_NONE;
   if (wake_confirmation_active())
     wake_confirmation_cancel();
   if (g_engine.app != NULL && g_engine.app->leave != NULL)
-  {
     g_engine.app->leave();
-  }
   anim_sys_clear_all();
-  /* App switches can be driven asynchronously by USB MIDI and management.
-   * Never leave a partially animated pause shade attached to the next app,
-   * and do not carry a menu edge across the transition. */
+  /* USB MIDI and management can switch apps at any time. Don't carry a
+   * half-open pause menu or a menu button edge into the next app. */
   pause_menu_hide_immediate();
   reset_buttons(true);
 
@@ -870,13 +842,10 @@ void engine_set_app(app_t *app)
   audio_synth_reset(&g_engine.synth);
   trace_end(audio_trace);
 
-  // seed based on time
   srand((unsigned int)platform_now_us());
 
   if (g_engine.app != NULL && g_engine.app->enter != NULL)
-  {
     g_engine.app->enter();
-  }
 }
 
 void engine_request_home(void)
@@ -896,13 +865,11 @@ void engine_pause(bool skip_animation)
   g_engine.paused = true;
   anim_sys_set_paused(true);
   if (g_engine.app != NULL && g_engine.app->pause != NULL)
-  {
     g_engine.app->pause();
-  }
   pause_menu_show(skip_animation);
 }
 
-void engine_resume()
+void engine_resume(void)
 {
   if (!g_engine.paused)
     return;
@@ -910,8 +877,6 @@ void engine_resume()
   g_engine.paused = false;
   anim_sys_set_paused(false);
   if (g_engine.app != NULL && g_engine.app->resume != NULL)
-  {
     g_engine.app->resume();
-  }
   pause_menu_hide();
 }

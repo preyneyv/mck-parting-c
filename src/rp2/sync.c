@@ -62,5 +62,4 @@ bool platform_queue_try_pop(platform_queue_t *queue, void *out) {
   return queue_try_remove(&queue->queue, out);
 }
 
-void platform_memory_barrier(void) { __dmb(); }
 void platform_yield(void) { tight_loop_contents(); }

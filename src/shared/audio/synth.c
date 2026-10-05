@@ -16,9 +16,10 @@
 #define AUDIO_SYNTH_STOP_RELEASE_MS 5u
 #define AUDIO_SYNTH_DRAFT_BUFFER_SIZE 512u
 
-// put the sine LUT in Y scratch for core 1 prio
+// Keep the audio core's hot buffers in its own scratch banks.
 static q1x15 PLATFORM_SCRATCH_Y("audio_synth") LUT_SINE[AUDIO_SYNTH_LUT_SIZE];
-static q1x15 PLATFORM_SCRATCH_X("audio_synth") draft_voice[AUDIO_SYNTH_DRAFT_BUFFER_SIZE];
+static q1x15 PLATFORM_SCRATCH_X("audio_synth")
+    draft_voice[AUDIO_SYNTH_DRAFT_BUFFER_SIZE];
 
 static void audio_synth_handle_message(audio_synth_t *synth,
                                        audio_synth_message_t *msg);
@@ -28,7 +29,7 @@ static inline uint32_t lut_key(uint32_t phase)
   return (phase >> (32 - AUDIO_SYNTH_LUT_RES));
 }
 
-static void _fill_sine_lut()
+static void fill_sine_lut(void)
 {
   for (int i = 0; i < AUDIO_SYNTH_LUT_SIZE; i++)
   {
@@ -37,9 +38,9 @@ static void _fill_sine_lut()
   }
 }
 
-// mapping from MIDI note number to d_phase
-static void _fill_note_dphase_lut(uint32_t lut[128], float sample_rate,
-                                  float a4_freq)
+// Phase increment per sample for each MIDI note number.
+static void fill_note_dphase_lut(uint32_t lut[128], float sample_rate,
+                                 float a4_freq)
 {
   for (int i = 0; i < 128; i++)
   {
@@ -48,21 +49,21 @@ static void _fill_note_dphase_lut(uint32_t lut[128], float sample_rate,
   }
 }
 
-static void _fill_const_luts()
+static void fill_const_luts(void)
 {
   static bool luts_filled = false;
   if (luts_filled)
     return;
 
-  _fill_sine_lut();
+  fill_sine_lut();
   luts_filled = true;
 }
 
 void audio_synth_init(audio_synth_t *synth, float sample_rate,
                       uint32_t timebase_per_sec)
 {
-  _fill_const_luts();
-  _fill_note_dphase_lut(synth->note_dphase_lut, sample_rate, 440.0f);
+  fill_const_luts();
+  fill_note_dphase_lut(synth->note_dphase_lut, sample_rate, 440.0f);
 
   synth->sample_rate = sample_rate;
   synth->d_timebase = (uint32_t)(sample_rate / timebase_per_sec);
@@ -83,8 +84,6 @@ void audio_synth_init(audio_synth_t *synth, float sample_rate,
       op->voice = voice;
 
       op->config = audio_synth_operator_config_default;
-
-      // Initialize operator state
       op->phase = 0;
       op->d_phase = 0;
       op->level = Q1X15_ZERO;
@@ -120,7 +119,6 @@ static void make_env_stage_from_cfg(audio_synth_env_state_stage_t *stage,
 
   if (sample_duration == 0)
   {
-    // if duration is zero, we just set the level to the next level
     stage->d_level = Q1X31_ZERO;
   }
   else
@@ -130,13 +128,11 @@ static void make_env_stage_from_cfg(audio_synth_env_state_stage_t *stage,
   }
 }
 
-// update operator values based on active config
 static void audio_synth_operator_set_config(audio_synth_operator_t *op,
                                             audio_synth_operator_config_t config)
 {
   op->config = config;
 
-  // update envelope timing
   uint32_t d_timebase = op->voice->synth->d_timebase;
   make_env_stage_from_cfg(&op->env.stages[0], d_timebase, config.env.a,
                           Q1X31_ZERO, Q1X31_ONE);
@@ -151,8 +147,7 @@ static void audio_synth_operator_set_config(audio_synth_operator_t *op,
 static void audio_synth_operator_note_on(audio_synth_operator_t *op,
                                          uint8_t note_number, q1x15 velocity)
 {
-  // this *might* be called without a previous note_off
-
+  // May be called without a preceding note-off (voice stealing).
   uint32_t lut_phase = op->voice->synth->note_dphase_lut[note_number];
   if (op->config.freq_mult == 0)
     op->d_phase = lut_phase / 2;
@@ -160,11 +155,9 @@ static void audio_synth_operator_note_on(audio_synth_operator_t *op,
     op->d_phase = lut_phase * op->config.freq_mult;
   op->level = q1x15_mul(op->config.level, velocity);
 
-  // reset envelope
-  op->env.stage = 0;          // reset to attack stage
-  op->env.level = Q1X31_ZERO; // reset envelope level
-  op->env.evolution = 0;      // reset evolution
-
+  op->env.stage = 0;
+  op->env.level = Q1X31_ZERO;
+  op->env.evolution = 0;
 }
 
 static void PLATFORM_TIME_CRITICAL_FUNC(audio_synth_voice_note_on)(
@@ -177,7 +170,8 @@ static void PLATFORM_TIME_CRITICAL_FUNC(audio_synth_voice_note_on)(
   voice->active_op_mask = 0;
   audio_synth_patch_config_t *patch = &voice->synth->patches[patch_idx];
 
-  q1x15 velocity_ratio = q1x15_mag(velocity, 190); // scale velocity down (actual cap is 127)
+  // Velocity 127 maps to 127/190 (about 0.67) of the operator level.
+  q1x15 velocity_ratio = q1x15_mag(velocity, 190);
 
   for (int op_idx = 0; op_idx < AUDIO_SYNTH_OPERATOR_COUNT; op_idx++)
   {
@@ -192,24 +186,15 @@ static void PLATFORM_TIME_CRITICAL_FUNC(audio_synth_voice_note_on)(
 static void audio_synth_operator_note_off(audio_synth_operator_t *op)
 {
   if (op->env.stage >= 3)
-  {
-    // already release, do nothing;
-    return;
-  }
-  // if sustain is zero (pluck) then ignore note_off since attack->decay already
-  // goes to zero.
+    return; // Already releasing.
+  // A pluck (zero sustain) decays to silence on its own; ignore the note-off.
   if (op->config.env.s == Q1X31_ZERO && op->env.stage < 2)
-  {
     return;
-  }
   audio_synth_env_state_t *env = &op->env;
 
-  // recompute release envelope from current env level
-  // (for early releases)
+  // Release from the current level, which may be mid-attack or mid-decay.
   make_env_stage_from_cfg(&env->stages[3], op->voice->synth->d_timebase,
                           op->config.env.r, env->level, Q1X31_ZERO);
-
-  // move to release
   env->stage = 3;
   env->evolution = 0;
 }
@@ -218,8 +203,8 @@ static void audio_synth_operator_stop(audio_synth_operator_t *op)
 {
   audio_synth_env_state_t *env = &op->env;
 
-  // Recompute release from the current envelope level to avoid pops.
-  // This intentionally also works when already in release.
+  // Release quickly from the current level to avoid pops, even if the
+  // operator is already releasing.
   make_env_stage_from_cfg(&env->stages[3], op->voice->synth->d_timebase,
                           AUDIO_SYNTH_STOP_RELEASE_MS, env->level,
                           Q1X31_ZERO);
@@ -271,12 +256,12 @@ static q1x15 PLATFORM_TIME_CRITICAL_FUNC(audio_synth_operator_update_env)(
 {
   audio_synth_env_state_t *env = &op->env;
   if (env->stage == 4)
-    return Q1X15_ZERO; // already post release
+    return Q1X15_ZERO; // Finished.
 
   audio_synth_env_state_stage_t *stage = &env->stages[env->stage];
   if (env->stage == 2)
   {
-    // hold sustain level (until note_off transition)
+    // Hold the sustain level until note-off.
     env->level = stage->level;
   }
   else
@@ -285,13 +270,13 @@ static q1x15 PLATFORM_TIME_CRITICAL_FUNC(audio_synth_operator_update_env)(
 
     if (env->evolution < stage->duration)
     {
-      env->level += stage->d_level; // update level
+      env->level += stage->d_level;
     }
     else
     {
-      env->level = stage->level; // jump to target level
-      env->evolution = 0;        // reset evolution
-      env->stage++;              // move to next stage
+      env->level = stage->level;
+      env->evolution = 0;
+      env->stage++;
       /* A pluck has no sustain phase. Retire it as soon as decay reaches
        * silence so the voice no longer consumes DSP or appears active. */
       if (env->stage == 2 && env->level == Q1X31_ZERO)
@@ -379,7 +364,6 @@ static void PLATFORM_TIME_CRITICAL_FUNC(audio_synth_voice_fill_buffer)(
 {
   memset(buffer, 0, buffer_size * sizeof(q1x15));
 
-  // Fully released voices contribute silence; skip per-operator loops.
   if (audio_synth_voice_is_silent(voice))
     return;
 
@@ -479,9 +463,7 @@ static bool audio_synth_analysis_begin_buffer(audio_synth_t *synth)
 void PLATFORM_TIME_CRITICAL_FUNC(audio_synth_fill_buffer)(
     audio_synth_t *synth, audio_buffer_t buffer, uint32_t buffer_size)
 {
-  // lock the config
   platform_mutex_lock(synth->mutex);
-  // handle queued messages
   audio_synth_message_t msg;
   uint32_t messages_processed = 0;
   while (messages_processed < AUDIO_SYNTH_MAX_MESSAGES_PER_BUFFER &&
@@ -494,8 +476,8 @@ void PLATFORM_TIME_CRITICAL_FUNC(audio_synth_fill_buffer)(
 
   assert(buffer_size <= AUDIO_SYNTH_DRAFT_BUFFER_SIZE);
 
-  // misuse 32bit buffer as a 16bit mono buffer with room for overflow (so we
-  // can clip later)
+  // Mix in the 32-bit output buffer as mono with headroom, then clip and pack
+  // to stereo frames at the end.
   memset(buffer, 0, buffer_size * sizeof(int32_t));
   uint16_t active_voice_mask = 0;
   for (uint8_t voice_idx = 0; voice_idx < AUDIO_SYNTH_VOICE_COUNT;
@@ -514,7 +496,6 @@ void PLATFORM_TIME_CRITICAL_FUNC(audio_synth_fill_buffer)(
     }
   }
 
-  // apply master level and write to output
   q1x15 master_level =
       __atomic_load_n(&synth->master_level, __ATOMIC_RELAXED);
   __atomic_store_n(&synth->active_voice_mask, active_voice_mask,
@@ -522,9 +503,8 @@ void PLATFORM_TIME_CRITICAL_FUNC(audio_synth_fill_buffer)(
   bool analysis_enabled = audio_synth_analysis_begin_buffer(synth);
   if (active_voice_mask == 0 || master_level == Q1X15_ZERO)
   {
-    /* Active voices have already mixed mono samples into the working buffer.
-     * Clear them again when muted; otherwise the unpacked int32 samples are
-     * exposed as one full-volume SDL channel on the host. */
+    /* When muted, discard the voices already mixed into the buffer; left
+     * unpacked they would play as one full-volume channel on the host. */
     if (master_level == Q1X15_ZERO)
       memset(buffer, 0, buffer_size * sizeof(*buffer));
     if (analysis_enabled)
@@ -540,9 +520,7 @@ void PLATFORM_TIME_CRITICAL_FUNC(audio_synth_fill_buffer)(
   for (uint32_t i = 0; i < buffer_size; i++)
   {
     int32_t sample = buffer[i];
-    // apply hard clipping
     sample = hard_limit_q17x15(sample);
-    // apply master level
     sample = q1x15_mul(master_level, sample);
     buffer[i] = audio_buffer_frame_from_mono((int16_t)sample);
     if (analysis_enabled)
@@ -563,8 +541,7 @@ void PLATFORM_TIME_CRITICAL_FUNC(audio_synth_fill_buffer)(
 
 static void audio_synth_panic_unlocked(audio_synth_t *synth)
 {
-  // A panic is deliberately destructive: callers use it to discard every
-  // pending action as well as silence every active voice.
+  // A panic discards every pending message as well as silencing all voices.
   audio_synth_message_t message;
   while (platform_queue_try_pop(synth->msg_queue, &message))
   {
@@ -587,8 +564,8 @@ void audio_synth_panic_sync(audio_synth_t *synth)
 static void audio_synth_note_on(audio_synth_t *synth,
                                 audio_synth_message_note_on_t msg)
 {
-  // find a free voice
-  // priority: free voice > oldest note of same patch > oldest note
+  // Prefer a free voice, then the oldest voice on the same patch, then the
+  // oldest voice overall. "Oldest" compares when each voice's note started.
   audio_synth_voice_t *oldest_free_voice = NULL;
   audio_synth_voice_t *oldest_same_patch_voice = NULL;
   audio_synth_voice_t *oldest_any_voice = NULL;
@@ -600,24 +577,20 @@ static void audio_synth_note_on(audio_synth_t *synth,
     audio_synth_voice_t *voice = &synth->voices[voice_idx];
     if (voice->note_number == -1)
     {
-      // free voice found
       if (voice->on_at < oldest_free)
       {
         oldest_free = voice->on_at;
         oldest_free_voice = voice;
       }
     }
-    // occupied voice
     if (voice->patch_idx == msg.patch_idx)
     {
-      // same patch
       if (voice->on_at < oldest_same_patch)
       {
         oldest_same_patch = voice->on_at;
         oldest_same_patch_voice = voice;
       }
     }
-    // check for oldest any
     if (voice->on_at < oldest_any)
     {
       oldest_any = voice->on_at;
@@ -651,20 +624,19 @@ static void audio_synth_note_on(audio_synth_t *synth,
 static void audio_synth_note_off(audio_synth_t *synth,
                                  audio_synth_message_note_off_t msg)
 {
-  // find the voice playing this note
   for (int voice_idx = 0; voice_idx < AUDIO_SYNTH_VOICE_COUNT; voice_idx++)
   {
     audio_synth_voice_t *voice = &synth->voices[voice_idx];
     if ((msg.note_number == -1 || voice->note_number == msg.note_number) &&
         voice->patch_idx == msg.patch_idx)
     {
-      // kill it
       audio_synth_voice_note_off(voice);
     }
   }
 }
 
-static void audio_synth_stop(audio_synth_t *synth, audio_synth_message_stop_t msg)
+static void audio_synth_stop(audio_synth_t *synth,
+                             audio_synth_message_stop_t msg)
 {
   for (int voice_idx = 0; voice_idx < AUDIO_SYNTH_VOICE_COUNT; voice_idx++)
   {
@@ -875,13 +847,6 @@ bool audio_synth_analysis_enabled(const audio_synth_t *synth)
 {
   return synth != NULL &&
          __atomic_load_n(&synth->analysis_requested, __ATOMIC_ACQUIRE);
-}
-
-uint16_t audio_synth_message_queue_depth(const audio_synth_t *synth)
-{
-  if (synth == NULL)
-    return 0;
-  return __atomic_load_n(&synth->message_queue_depth, __ATOMIC_RELAXED);
 }
 
 uint16_t audio_synth_message_queue_take_peak(audio_synth_t *synth)

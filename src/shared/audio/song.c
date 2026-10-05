@@ -2,7 +2,6 @@
 #include "synth_internal.h"
 
 #include <assert.h>
-#include <stdio.h>
 #include <string.h>
 
 static uint32_t song_loop_end_ms(const audio_song_asset_t *song)
@@ -198,9 +197,8 @@ void audio_song_player_play(audio_song_player_t *player,
     return;
   }
 
-  // Finish cleanup before queuing the new song. A normal queued PANIC is
-  // intentionally destructive and would also discard time-zero events queued
-  // behind it. The synchronous form gives this player a completed barrier.
+  // Silence the previous song synchronously. A queued PANIC would also
+  // discard the new song's time-zero events queued behind it.
   if (player->song != NULL)
   {
     audio_song_player_stop(player, false);
@@ -218,11 +216,8 @@ void audio_song_player_play(audio_song_player_t *player,
   song_apply_patches(player, song);
   song_seek_to_time(player, 0);
 
-  // Dispatch events at time_ms=0 immediately so the synth receives them
-  // before the first audio buffer is rendered. Without this, the 1ms gap
-  // between play() and the first non-zero-dt tick() means the audio ISR
-  // can generate a buffer before any NOTE_ON is queued, causing notes at
-  // the song start to be silently dropped.
+  // Dispatch time-zero events now. Waiting for the first tick() would let the
+  // audio core render a buffer first and drop the song's opening notes.
   while (player->next_event_idx < song->event_count &&
          song->events[player->next_event_idx].time_ms == 0)
   {
@@ -278,10 +273,8 @@ void audio_song_player_seek(audio_song_player_t *player,
   if (time_ms > player->song->duration_ms)
     time_ms = player->song->duration_ms;
 
-  // Seeking abandons the current event timeline. Release any notes started
-  // before the new cursor so their skipped NOTE_OFF events cannot leave them
-  // sounding indefinitely. This also cleans up time-zero notes when a caller
-  // starts a song and immediately seeks to preserved progress.
+  // Seeking skips NOTE_OFF events, so release everything that is sounding
+  // (including time-zero notes when a caller plays and then seeks).
   song_stop_all_patches(player);
   song_seek_to_time(player, time_ms);
   player->last_engine_ms = now_ms;
@@ -358,38 +351,4 @@ void audio_song_player_tick(audio_song_player_t *player, uint32_t now_ms)
     player->song_time_ms = song->duration_ms;
     player->playing = false;
   }
-}
-
-size_t audio_song_player_peek_events(const audio_song_player_t *player,
-                                     uint32_t lookahead_ms,
-                                     uint32_t mask,
-                                     const audio_song_event_t **out_events,
-                                     size_t max_events)
-{
-  if (player == NULL || player->song == NULL || out_events == NULL || max_events == 0)
-    return 0;
-
-  const audio_song_asset_t *song = player->song;
-  uint32_t horizon = player->song_time_ms + lookahead_ms;
-  size_t out_count = 0;
-
-  for (uint32_t i = player->next_event_idx; i < song->event_count; i++)
-  {
-    const audio_song_event_t *event = &song->events[i];
-    if (event->time_ms > horizon)
-      break;
-
-    if (event->time_ms <= player->song_time_ms)
-      continue;
-
-    uint32_t type_mask = 1u << event->type;
-    if ((mask & type_mask) == 0)
-      continue;
-
-    out_events[out_count++] = event;
-    if (out_count >= max_events)
-      break;
-  }
-
-  return out_count;
 }
