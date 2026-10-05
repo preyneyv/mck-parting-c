@@ -29,8 +29,6 @@
 
 #define CARTRIDGE_SECTORS_PER_BLOCK                                      \
   (PRISM_STORAGE_BLOCK_BYTES / FLASH_SECTOR_SIZE)
-#define CARTRIDGE_SECTOR_COUNT                                           \
-  (PRISM_STORAGE_BLOCK_COUNT * CARTRIDGE_SECTORS_PER_BLOCK)
 #define MOVE_JOURNAL_PAGES_PER_SECTOR (FLASH_SECTOR_SIZE / FLASH_PAGE_SIZE)
 #define MOVE_JOURNAL_PAGE_COUNT                                          \
   (PRISM_FLASH_MOVE_JOURNAL_SECTORS * MOVE_JOURNAL_PAGES_PER_SECTOR)
@@ -655,11 +653,10 @@ void cartridge_storage_init(void)
     {
       const uint8_t *address =
           (const uint8_t *)XIP_BASE + move_page_offset(sector, page);
-      move_record_t candidate = {0};
       const move_record_t *current_record = (const void *)address;
       if (!move_valid(current_record))
         continue;
-      candidate = *current_record;
+      move_record_t candidate = *current_record;
       if (!move_journal_location_valid ||
           (int32_t)(candidate.generation - move_record.generation) > 0)
       {
@@ -709,7 +706,8 @@ void cartridge_storage_info(prism_management_storage_info_t *info)
   block_map(info->block_states);
   info->total_blocks = PRISM_STORAGE_BLOCK_COUNT;
   info->scratch_blocks = PRISM_FLASH_SCRATCH_POOL_COUNT;
-  info->required_blocks = installation.active ? installation.begin.required_blocks : 0;
+  info->required_blocks =
+      installation.active ? installation.begin.required_blocks : 0;
   uint16_t free_run = 0, reclaimable_run = 0;
   for (uint16_t block = 0; block < PRISM_STORAGE_BLOCK_COUNT; ++block)
   {
@@ -1632,8 +1630,8 @@ prism_management_status_t cartridge_storage_compact(
     target += entry->block_count;
   }
 
-  /* Compact the catalog in place. A full temporary catalog does not fit on
-   * the 2048-byte core-0 stack used by management operations. */
+  /* Build the compacted catalog in a heap copy; a full catalog does not fit
+   * on core 0's 2 KiB stack. */
   catalog_t *updated = catalog_edit_begin();
   if (updated == NULL)
   {

@@ -35,6 +35,6 @@ platform_input_mask_t platform_input_read_mask(void)
 
 void platform_input_set_remote_mask(platform_input_mask_t mask)
 {
-  remote_mask = mask &
-                (PLATFORM_INPUT_LEFT | PLATFORM_INPUT_RIGHT | PLATFORM_INPUT_MENU);
+  remote_mask =
+      mask & (PLATFORM_INPUT_LEFT | PLATFORM_INPUT_RIGHT | PLATFORM_INPUT_MENU);
 }

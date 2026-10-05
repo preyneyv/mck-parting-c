@@ -27,9 +27,9 @@ static void draw_sleeping(void)
   static const char label[] = "sleeping";
   u8g2_t *u8g2 = platform_display_get_u8g2();
   platform_display_set_enabled(true);
-  /* Auto-sleep begins after the idle fade has reached zero contrast. Restore
-   * host visibility before presenting the simulator-only sleeping screen;
-   * the engine reapplies the configured contrast on wake. */
+  /* Auto-sleep starts with the display faded to zero contrast. Restore it so
+   * the simulator's "sleeping" screen is visible; the engine reapplies the
+   * configured contrast on wake. */
   platform_display_set_contrast(255);
   u8g2_ClearBuffer(u8g2);
   u8g2_SetDrawColor(u8g2, 1);

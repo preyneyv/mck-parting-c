@@ -85,9 +85,7 @@ static void audio_playback_write_pio_init(PIO pio, uint8_t sm)
 {
   int offset = pio_add_program(pio, &audio_playback_write_program);
   if (offset < 0)
-  {
     panic("Failed to add audio playback write program to PIO");
-  }
 
   pio_gpio_init(pio, AUDIO_I2S_LRCK);
   pio_gpio_init(pio, AUDIO_I2S_BCLK);
@@ -221,7 +219,7 @@ void audio_playback_resume(void)
   gpio_put(AUDIO_I2S_EN, true);
 }
 
-void audio_playback_init()
+void audio_playback_init(void)
 {
   gpio_init(AUDIO_I2S_EN);
   gpio_set_dir(AUDIO_I2S_EN, GPIO_OUT);
@@ -278,10 +276,8 @@ void audio_playback_run_forever(audio_synth_t *synth)
 
 #if PRISM_ENABLE_PERFORMANCE_LOGS
     if (elapsed_us > (uint64_t)(buffer_budget_ms * 1000.0f))
-    {
       printf("synth warning: buffer generation took %.2f ms (%.2f ms budget)\n",
              elapsed_us / 1000.0f, buffer_budget_ms);
-    }
 
     if (++buffers_since_log >= buffers_per_second)
     {

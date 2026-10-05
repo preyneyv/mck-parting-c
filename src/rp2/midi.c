@@ -32,7 +32,8 @@ static void handle_sysex(const uint8_t *data, size_t length)
   }
 
   if (command.cmd == AUDIO_SYNTH_SYSEX_CMD_SET_PATCH)
-    audio_synth_patch_config_set(engine_synth(), command.data.set_patch.patch_idx,
+    audio_synth_patch_config_set(engine_synth(),
+                                 command.data.set_patch.patch_idx,
                                  command.data.set_patch.patch);
 }
 
@@ -112,10 +113,8 @@ static void append_sysex_packet(const uint8_t packet[4], uint8_t code)
 
 void midi_task(void)
 {
-  /* A battery-powered RP2040 can retain TinyUSB's configured/mounted state
-   * after the host disappears. Bus suspend is the reliable second half of
-   * the disconnect signal; MIDI mode should not pin the native view open in
-   * either state. */
+  /* On battery power TinyUSB can still report the device as mounted after
+   * the host goes away, so treat bus suspend as a disconnect too. */
   if (!tud_mounted() || tud_suspended())
   {
     prism_midi_mode_usb_disconnected();

@@ -53,6 +53,7 @@ static void apply_wake_policy(const prism_management_header_t *request,
                             sizeof(prism_management_remote_input_t) &&
                         ((const prism_management_remote_input_t *)payload)
                                 ->buttons != 0;
+  /* Heartbeats, mirroring, and remote button releases never wake Prism. */
   if (session->processing_sleep_messages)
   {
     if (!passive &&

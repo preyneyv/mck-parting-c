@@ -103,8 +103,6 @@ void platform_peripheral_read_inputs(void)
   g_peripheral.charging = !gpio_get(PERIPH_BAT_CHG_N);
   g_peripheral.plugged_in = plugged_in;
 
-  /* VSYS reflects external power while plugged in, not battery voltage. Keep
-   * the last battery estimate and take a fresh immediate sample on unplug. */
   if (!g_peripheral.enabled || plugged_in)
     return;
 
@@ -143,6 +141,7 @@ void platform_peripheral_read_inputs(void)
       (uint16_t)(filtered_raw * 4983u / 4096u);
   g_peripheral.battery_level = battery_percentage_curve(battery_voltage);
 }
+
 platform_power_state_t platform_peripheral_get_power_state(void)
 {
   return (platform_power_state_t){
