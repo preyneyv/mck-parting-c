@@ -1,7 +1,6 @@
 build
 build_host
 
-!.vscode/*
 .DS_Store
 *.o
 
@@ -16,5 +15,6 @@ web/prism-local.db*
 web/*.log
 web/tsconfig.tsbuildinfo
 src/cartridges/**/Backups/
+*.rpp-bak
 
 *.pyc

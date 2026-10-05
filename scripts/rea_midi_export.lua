@@ -160,10 +160,10 @@ local function collect_channel_events(ppqn)
   end
 
   local function kind_and_order_for_bytes(bytes)
-    -- Used only for stable sorting; we keep your existing "order" convention.
+    -- Sort key for events on the same tick. Tempo and time-signature meta
+    -- events use 0 and 1, so other meta events come after them.
     local b0 = bytes:byte(1)
 
-    -- Meta first (but after your tempo/timesig meta which uses order 0/1)
     if b0 == 0xFF then return 5 end
 
     -- Note-off before note-on at same tick
@@ -199,7 +199,7 @@ local function collect_channel_events(ppqn)
           track_end_tick = item_end_tick
         end
 
-        -- Loop source handling (keep your behavior)
+        -- Looped items repeat their source every loop_period seconds.
         local loopsrc = r.GetMediaItemInfo_Value(item, "B_LOOPSRC") or 0
         local loop_period = nil
         if loopsrc == 1 then
@@ -346,7 +346,6 @@ end
 local function run_bake_and_export()
   r.PreventUIRefresh(1)
 
-  -- Select all items
   r.Main_OnCommand(40182, 0) -- Item: Select all items
 
   local sel_items = r.CountSelectedMediaItems(0)
@@ -356,10 +355,9 @@ local function run_bake_and_export()
     return
   end
 
-  -- Apply track/take FX to items (MIDI Output)
+  -- Item: Apply track/take FX to items (MIDI output)
   r.Main_OnCommand(40436, 0)
 
-  -- Export
   local out = os.getenv(OUT_ENV)
   if not out or out == "" then
     log("ERROR: No output path specified.")
@@ -371,9 +369,7 @@ local function run_bake_and_export()
   local meta = collect_tempo_timesig_meta(PPQN)
   local chan, track_end_tick = collect_channel_events(PPQN)
   log("Collected channel events: " .. tostring(#chan))
-  -- inject_prism_sysex_before_first_event(chan)
   local ok, err = write_type0_midi(out, PPQN, meta, chan, track_end_tick)
-
 
   if not ok then
     log("MIDI export FAILED: " .. tostring(err))
@@ -387,8 +383,8 @@ end
 -- Wait until project is actually loaded (tempo map ready), then run.
 local last_state = -1
 local stable_ticks = 0
-local MAX_TICKS = 300  -- ~300 defer cycles; plenty
-local NEED_STABLE = 15 -- require 15 consecutive stable cycles
+local MAX_TICKS = 300  -- defer cycles before giving up
+local NEED_STABLE = 15 -- consecutive unchanged cycles required
 
 local function wait_until_loaded_then_run()
   local state = reaper.GetProjectStateChangeCount(0)
@@ -400,13 +396,10 @@ local function wait_until_loaded_then_run()
     last_state = state
   end
 
-  -- Also sanity-check that tempo query isn't "obviously default because not loaded yet"
-  -- This isn't perfect (project could truly be 120), but combined with stability works well.
+  -- Logged so the export output shows whether the tempo map had loaded.
   local bpm0 = reaper.TimeMap2_GetDividedBpmAtTime(0, 0.0) or 120
 
   if stable_ticks >= NEED_STABLE then
-    -- At this point the project state has stopped changing -> tempo map is typically ready.
-    -- Optional: log bpm0 so you can verify it matches the project
     log(("Tempo at 0.0s: %.6f\n"):format(bpm0))
     run_bake_and_export()
     return
@@ -426,5 +419,4 @@ local function wait_until_loaded_then_run()
   reaper.defer(wait_until_loaded_then_run)
 end
 
--- Kick it off
 reaper.defer(wait_until_loaded_then_run)
