@@ -272,7 +272,6 @@ if(PICO_PLATFORM STREQUAL "host")
         PRISM_HOST_NEVER_GONNA_PACK_PATH="${beatline_never_gonna_pack_PRISM_PACK_FILE}"
     )
 
-
     target_include_directories(prism PRIVATE
         ${CMAKE_CURRENT_LIST_DIR}/src
         ${CMAKE_CURRENT_LIST_DIR}/tests
