@@ -85,19 +85,16 @@ static const char *morse_lookup[26] = {
     "--.."  // Z
 };
 
-// adaptive morse code decoding logic
-// < 1T = .
-// > 3T = -
-// > 5T = reset word
-// we divide at 2T but show progress bar for 1T - 3T
-// we learn T from every transition gap (gated)
+// Adaptive Morse timing. T is the current dot length in engine ticks: a press
+// shorter than 2T is a dot, anything longer a dash. T follows the length of
+// dots and of gaps shorter than 2T.
 enum
 {
   WORD_LOOKAHEAD = 5,
   TARGET_MORSE_COUNT = 16,
   TARGET_MORSE_LENGTH = 5,
   INITIAL_T_MS = 100,
-  DURATION_MS = 30000, // 30 seconds
+  DURATION_MS = 30000,
   MORSE_LED_EVENT_DOT_MS = 120,
   MORSE_LED_EVENT_DASH_MS = 180,
   MORSE_LED_EVENT_OK_MS = 180,
@@ -115,7 +112,7 @@ typedef enum
 
 typedef struct
 {
-  uint32_t T; // base time unit in ticks (adaptive)
+  uint32_t T; // Dot length in ticks; see above.
   uint32_t words[WORD_LOOKAHEAD];
   char target_morse[TARGET_MORSE_COUNT][TARGET_MORSE_LENGTH];
   const char *current_word;
@@ -152,7 +149,7 @@ typedef struct
 
 static state_t state;
 
-static void _set_led_event(morse_led_event_t event, uint32_t duration_ms)
+static void set_led_event(morse_led_event_t event, uint32_t duration_ms)
 {
   state.led_event = event;
   state.led_event_until_tick =
@@ -194,7 +191,7 @@ static stats_t get_stats(void)
   };
 }
 
-static void _generate_morse_for_current_word()
+static void generate_morse_for_current_word(void)
 {
   for (uint32_t letter_index = 0; letter_index < TARGET_MORSE_COUNT; letter_index++)
   {
@@ -211,9 +208,8 @@ static void _generate_morse_for_current_word()
   }
 }
 
-static void _update_current_word()
+static void update_current_word(void)
 {
-  // shift words left
   for (uint32_t i = 0; i < WORD_LOOKAHEAD - 1; i++)
   {
     state.words[i] = state.words[i + 1];
@@ -223,12 +219,12 @@ static void _update_current_word()
   state.current_letter = 0;
   state.input_len = 0;
   state.input_buffer[0] = '\0';
-  _generate_morse_for_current_word();
+  generate_morse_for_current_word();
 }
 
-static void _finish_game();
+static void finish_game(void);
 
-static void _start_game(void)
+static void start_game(void)
 {
   memset(&state, 0, sizeof(state));
   state.T = prism_ticks_from_ms(INITIAL_T_MS);
@@ -236,13 +232,11 @@ static void _start_game(void)
   state.last_edge_tick = prism_ticks(app_prism);
   state.input_len = 0;
 
-  // pick words
   for (uint32_t i = 0; i < WORD_LOOKAHEAD - 1; i++)
   {
     state.words[i] = rand() % WORDS_COUNT;
   }
-  // prep first word
-  _update_current_word();
+  update_current_word();
 }
 
 static void enter(prism_t *prism)
@@ -258,14 +252,14 @@ static void enter(prism_t *prism)
   };
   audio_synth_patch_config_set(prism_synth(app_prism), 0, patch);
 
-  _start_game();
+  start_game();
 }
 
-static void tick_game()
+static void tick_game(void)
 {
   if (prism_button_keydown(app_prism, PRISM_BUTTON_LEFT))
   {
-    _start_game();
+    start_game();
   }
 
   if (prism_button_keydown(app_prism, PRISM_BUTTON_RIGHT))
@@ -280,12 +274,11 @@ static void tick_game()
       state.started_at = prism_now_us(app_prism);
     }
 
-    // begin mark (end gap)
+    // A press ends a gap. Short gaps (between symbols) are one T long.
     state.last_edge_tick = edge_tick;
 
     if (dt < 2 * state.T)
     {
-      // gap was < 2T, treat as 1T gap
       state.T = (state.T * 9 + dt) / 10;
     }
 
@@ -303,7 +296,7 @@ static void tick_game()
   }
   else if (prism_button_keyup(app_prism, PRISM_BUTTON_RIGHT))
   {
-    // end mark (begin gap)
+    // A release ends a mark: a dot or a dash.
     uint32_t edge_tick =
         prism_button_keyup_tick(app_prism, PRISM_BUTTON_RIGHT);
     uint32_t dt = edge_tick - state.last_edge_tick;
@@ -312,7 +305,6 @@ static void tick_game()
     char symbol = 0;
     if (dt > 2 * state.T)
     {
-      // mark > 2T -> dash
       if (dt < 5)
       {
         state.T = (state.T * 9 + (dt / 3)) / 10;
@@ -321,7 +313,6 @@ static void tick_game()
     }
     else
     {
-      // mark < 2T -> dot
       state.T = (state.T * 9 + dt) / 10;
       symbol = '.';
     }
@@ -332,14 +323,12 @@ static void tick_game()
       state.input_buffer[state.input_len] = '\0';
     }
 
-    _set_led_event(symbol == '-' ? MORSE_LED_EVENT_DASH : MORSE_LED_EVENT_DOT,
+    set_led_event(symbol == '-' ? MORSE_LED_EVENT_DASH : MORSE_LED_EVENT_DOT,
                    symbol == '-' ? MORSE_LED_EVENT_DASH_MS : MORSE_LED_EVENT_DOT_MS);
 
-    // check current letter match
     const char *target = state.target_morse[state.current_letter];
     size_t target_len = strlen(target);
 
-    // check prefix
     bool match = true;
     for (size_t i = 0; i < state.input_len; i++)
     {
@@ -352,25 +341,22 @@ static void tick_game()
 
     if (!match)
     {
-      // mismatch - clear input
       state.input_len = 0;
       state.input_buffer[0] = '\0';
-      // ideally play error sound
       state.stats.errors++;
-      _set_led_event(MORSE_LED_EVENT_ERR, MORSE_LED_EVENT_ERR_MS);
+      set_led_event(MORSE_LED_EVENT_ERR, MORSE_LED_EVENT_ERR_MS);
     }
     else if (state.input_len == target_len)
     {
-      // letter matched
       state.stats.letters++;
-      _set_led_event(MORSE_LED_EVENT_OK, MORSE_LED_EVENT_OK_MS);
+      set_led_event(MORSE_LED_EVENT_OK, MORSE_LED_EVENT_OK_MS);
 
       state.current_letter++;
       state.input_len = 0;
       state.input_buffer[0] = '\0';
       if (state.current_letter >= strlen(state.current_word))
       {
-        _update_current_word();
+        update_current_word();
       }
     }
 
@@ -387,11 +373,11 @@ static void tick_game()
   }
 }
 
-static void tick_results()
+static void tick_results(void)
 {
 }
 
-static void _finish_game()
+static void finish_game(void)
 {
   prism_buttons_reset(app_prism);
 
@@ -436,14 +422,13 @@ static void tick(prism_t *prism)
         app_prism, state.started_at, prism_now_us(app_prism)) / 1000);
     if (state.started && elapsed_ms >= DURATION_MS)
     {
-      _finish_game();
+      finish_game();
     }
   }
 }
 
-static void _frame_words(u8g2_t *u8g2, elm_t *root)
+static void frame_words(u8g2_t *u8g2, elm_t *root)
 {
-  // draw first word
   u8g2_SetDrawColor(u8g2, 1);
   u8g2_SetFont(u8g2, u8g2_font_7x14B_mr);
   char lookahead_buffer[128];
@@ -452,12 +437,11 @@ static void _frame_words(u8g2_t *u8g2, elm_t *root)
   elm_t first_word = elm_str(root, vec2(0, 13), lookahead_buffer);
   uint32_t first_word_width = u8g2_GetStrWidth(u8g2, lookahead_buffer);
 
-  // highlight current letter
+  // Underline the current letter.
   elm_box(&first_word,
           vec2(state.current_letter * 7, 3),
           6, 1);
 
-  // draw lookahead
   u8g2_SetDrawColor(u8g2, 1);
   u8g2_SetFont(u8g2, u8g2_font_7x14_mr);
   lookahead_buffer[0] = '\0';
@@ -470,7 +454,7 @@ static void _frame_words(u8g2_t *u8g2, elm_t *root)
   elm_str(&first_word, vec2(first_word_width, 0), lookahead_buffer);
 }
 
-static void _frame_target_morse(u8g2_t *u8g2, elm_t *root)
+static void frame_target_morse(u8g2_t *u8g2, elm_t *root)
 {
   u8g2_SetDrawColor(u8g2, 1);
 
@@ -509,12 +493,11 @@ static void _frame_target_morse(u8g2_t *u8g2, elm_t *root)
       }
       x_offset += 4;
     }
-    // space between letters
-    x_offset += 6;
+    x_offset += 6; // Gap between letters.
   }
 }
 
-static void _frame_current_input(u8g2_t *u8g2, elm_t *root)
+static void frame_current_input(u8g2_t *u8g2, elm_t *root)
 {
   u8g2_SetDrawColor(u8g2, 1);
   u8g2_SetFont(u8g2, u8g2_font_5x7_tr);
@@ -550,7 +533,7 @@ static void _frame_current_input(u8g2_t *u8g2, elm_t *root)
   elm_str(root, vec2(128 - 15, 9), "dah");
 }
 
-static void _frame_stats(u8g2_t *u8g2, elm_t *root)
+static void frame_stats(u8g2_t *u8g2, elm_t *root)
 {
   stats_t stats = get_stats();
 
@@ -582,26 +565,26 @@ static void _frame_stats(u8g2_t *u8g2, elm_t *root)
   elm_str(&ctx, vec2(128 - 20, 0), "TIME");
 }
 
-static void frame_game()
+static void frame_game(void)
 {
   u8g2_t *u8g2 = prism_display(app_prism);
   elm_t root = elm_root(u8g2, VEC2_Z);
 
   elm_t ctx = elm_child(&root, vec2(0, 0));
-  _frame_words(u8g2, &ctx);
+  frame_words(u8g2, &ctx);
 
   ctx = elm_child(&root, vec2(0, 20));
-  _frame_target_morse(u8g2, &ctx);
+  frame_target_morse(u8g2, &ctx);
 
   elm_hline(&root, vec2(0, 27), 128);
 
   ctx = elm_child(&root, vec2(0, 29));
-  _frame_current_input(u8g2, &ctx);
+  frame_current_input(u8g2, &ctx);
 
   elm_hline(&root, vec2(0, 43), 128);
 
   ctx = elm_child(&root, vec2(0, 64 - 8));
-  _frame_stats(u8g2, &ctx);
+  frame_stats(u8g2, &ctx);
 }
 
 static void elm_score(elm_t *parent, vec2_t pos, const char *label, const char *value)
@@ -616,7 +599,7 @@ static void elm_score(elm_t *parent, vec2_t pos, const char *label, const char *
   elm_str(&child, vec2(0, 6 + 14), value);
 }
 
-static void frame_results()
+static void frame_results(void)
 {
   u8g2_t *u8g2 = prism_display(app_prism);
   elm_t root = elm_root(u8g2, VEC2_Z);
@@ -656,11 +639,11 @@ static void frame_results()
   {
     prism_ui_hold_feedback_reset(&results_hold_feedback);
     prism_buttons_reset(app_prism);
-    _start_game();
+    start_game();
   }
 }
 
-static void _frame_leds()
+static void frame_leds(void)
 {
   if (state.finished)
   {
@@ -736,7 +719,7 @@ static void frame(prism_t *prism)
     frame_game();
   }
 
-  _frame_leds();
+  frame_leds();
 }
 
 static void leave(prism_t *prism)

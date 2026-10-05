@@ -30,7 +30,7 @@ static void frame(prism_t *prism)
   snprintf(count, sizeof(count), "PRESSES: %lu",
            (unsigned long)state.presses);
   uint16_t width = u8g2_GetStrWidth(u8g2, count);
-  u8g2_DrawStr(u8g2, (128 - width) / 2, 42, count);
+  u8g2_DrawStr(u8g2, (PRISM_DISPLAY_WIDTH - width) / 2, 42, count);
 }
 
 PRISM_CARTRIDGE(cartridge_hello,

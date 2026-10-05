@@ -226,7 +226,7 @@ static void play_gameover_song(bool preserve_progress)
     play_song(&sound_gameover_song, preserve_progress);
 }
 
-static inline uint32_t now_ms()
+static inline uint32_t now_ms(void)
 {
     return prism_millis(app_prism);
 }
@@ -240,7 +240,7 @@ static inline float clampf(float v, float lo, float hi)
     return v;
 }
 
-static inline float randf()
+static inline float randf(void)
 {
     return (float)rand() / (float)RAND_MAX;
 }
@@ -283,7 +283,7 @@ static void sfx_enqueue_stop(uint8_t patch, int8_t note_number)
     audio_synth_enqueue(prism_synth(app_prism), &msg);
 }
 
-static void sfx_stop_engine()
+static void sfx_stop_engine(void)
 {
     if (!state.sfx_overtone_on)
         return;
@@ -291,18 +291,16 @@ static void sfx_stop_engine()
     state.sfx_overtone_on = false;
 }
 
-static void sfx_stop_all()
+static void sfx_stop_all(void)
 {
     sfx_stop_engine();
     sfx_enqueue_stop(SFX_PATCH_ENGINE_OVERTONE, -1);
 }
 
-static void sfx_configure_patches()
+static void sfx_configure_patches(void)
 {
+    // Speed drone: a sustained overtone whose pitch tracks ship speed.
     audio_synth_patch_config_t patch = audio_synth_patch_config_default;
-
-    // Speed drone: sustained overtone layer that tracks ship speed.
-    patch = audio_synth_patch_config_default;
     patch.ops[0] = (audio_synth_operator_config_t){
         .freq_mult = 7,
         .level = q1x15_f(1.0f),
@@ -327,16 +325,17 @@ static void sfx_configure_patches()
         .mode = AUDIO_SYNTH_OP_MODE_FREQ_MOD,
         .env = {.a = 18, .d = 0, .s = q1x31_f(1.0f), .r = 360},
     };
-    audio_synth_patch_config_set(prism_synth(app_prism), SFX_PATCH_ENGINE_OVERTONE,
-                                 patch);
+    audio_synth_patch_config_set(prism_synth(app_prism),
+                                 SFX_PATCH_ENGINE_OVERTONE, patch);
 }
 
 static void sfx_update_engine(float speed, uint32_t now)
 {
     float speed_ratio = clampf(speed / BOOST_MAX_SPEED, 0.0f, 1.0f);
-    uint8_t target_note = (uint8_t)(SFX_ENGINE_NOTE_MIN +
-                                    (SFX_ENGINE_NOTE_MAX - SFX_ENGINE_NOTE_MIN) * speed_ratio);
-    // Speed drone stays on regardless of accelerating/decelerating.
+    uint8_t target_note =
+        (uint8_t)(SFX_ENGINE_NOTE_MIN +
+                  (SFX_ENGINE_NOTE_MAX - SFX_ENGINE_NOTE_MIN) * speed_ratio);
+    // The drone plays whether or not the ship is accelerating.
     if (!state.sfx_overtone_on)
     {
         state.sfx_engine_note = target_note;
@@ -354,19 +353,10 @@ static void sfx_update_engine(float speed, uint32_t now)
     if (abs(note_delta) < 1)
         return;
 
-    // Preserve the low rumble layer and retune the overtone smoothly.
+    // Retune by restarting the drone on the new note.
     sfx_enqueue_note_off(SFX_PATCH_ENGINE_OVERTONE, state.sfx_engine_note + 12);
     state.sfx_engine_note = target_note;
     sfx_enqueue_note_on(SFX_PATCH_ENGINE_OVERTONE, target_note + 12, 30);
-}
-
-static inline float wrapf(float v, float max)
-{
-    if (v < 0)
-        v += max;
-    if (v >= max)
-        v -= max;
-    return v;
 }
 
 static inline vec2f_t world_to_screen(vec2f_t world)
@@ -637,7 +627,7 @@ static void update_trail(uint32_t now_ms, float speed)
         state.trail_count++;
 }
 
-static void finish_game()
+static void finish_game(void)
 {
     if (state.results_ready)
         return;
@@ -666,7 +656,7 @@ static void finish_game()
                              state.qr_code);
 }
 
-static void reset_state()
+static void reset_state(void)
 {
     sfx_stop_all();
 
@@ -933,7 +923,7 @@ static void update_asteroids(float dt_s, uint32_t current_ms)
     }
 }
 
-static void render_leds()
+static void render_leds(void)
 {
     uint32_t t_ms = now_ms();
     uint32_t dt_ms = t_ms - state.led_last_render_ms;
