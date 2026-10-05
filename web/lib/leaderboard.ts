@@ -60,7 +60,8 @@ function base36Bytes(value: string) {
   if (!/^[0-9a-z]+$/i.test(value)) throw new Error("Invalid score code");
   let number = 0n;
   for (const char of value.toUpperCase()) {
-    const digit = char >= "A" ? char.charCodeAt(0) - 55 : char.charCodeAt(0) - 48;
+    const digit =
+      char >= "A" ? char.charCodeAt(0) - 55 : char.charCodeAt(0) - 48;
     number = number * 36n + BigInt(digit);
   }
   const bytes: number[] = [];
@@ -76,12 +77,19 @@ function u16(data: Uint8Array, offset: number) {
 }
 
 function u32(data: Uint8Array, offset: number) {
-  return (data[offset] | (data[offset + 1] << 8) | (data[offset + 2] << 16) | (data[offset + 3] << 24)) >>> 0;
+  return (
+    (data[offset] |
+      (data[offset + 1] << 8) |
+      (data[offset + 2] << 16) |
+      (data[offset + 3] << 24)) >>>
+    0
+  );
 }
 
 function u64(data: Uint8Array, offset: number) {
   let value = 0n;
-  for (let index = 7; index >= 0; index--) value = (value << 8n) | BigInt(data[offset + index]);
+  for (let index = 7; index >= 0; index--)
+    value = (value << 8n) | BigInt(data[offset + index]);
   return value;
 }
 
@@ -94,7 +102,10 @@ function beatlineChart(chartId: string) {
 }
 
 export function beatlineTrackName(trackId: string) {
-  return BEATLINE_TRACKS.find((track) => track.id === trackId)?.name ?? `Track ${trackId}`;
+  return (
+    BEATLINE_TRACKS.find((track) => track.id === trackId)?.name ??
+    `Track ${trackId}`
+  );
 }
 
 export function beatlineDifficultyName(difficulty: number) {
@@ -106,7 +117,10 @@ export function beatlineRankName(rank: number) {
 }
 
 /** Decode the exact little-endian byte layouts authored by each cartridge. */
-export function decodeGameData(appId: number, data: Uint8Array): DecodedGameResult {
+export function decodeGameData(
+  appId: number,
+  data: Uint8Array,
+): DecodedGameResult {
   if (appId === 1 && data.length === 8) {
     const letters = u32(data, 0);
     const errors = u32(data, 4);
@@ -144,12 +158,18 @@ export function decodeGameData(appId: number, data: Uint8Array): DecodedGameResu
     const miss = u16(data, 20);
     const total = perfect + good + bad + miss;
     const goodOrBetter = perfect + good;
-    const rank = total === 0 ? 4
-      : bad === 0 && miss === 0 ? 0
-      : goodOrBetter * 100 >= total * 90 ? 1
-      : goodOrBetter * 100 >= total * 85 ? 2
-      : goodOrBetter * 100 >= total * 70 ? 3
-      : 4;
+    const rank =
+      total === 0
+        ? 4
+        : bad === 0 && miss === 0
+          ? 0
+          : goodOrBetter * 100 >= total * 90
+            ? 1
+            : goodOrBetter * 100 >= total * 85
+              ? 2
+              : goodOrBetter * 100 >= total * 70
+                ? 3
+                : 4;
     return {
       game: "beatline",
       gameName: "Beatline",
@@ -167,20 +187,35 @@ export function decodeGameData(appId: number, data: Uint8Array): DecodedGameResu
     };
   }
 
-  throw new Error(`Unsupported score format (app ${appId}, ${data.length} bytes)`);
+  throw new Error(
+    `Unsupported score format (app ${appId}, ${data.length} bytes)`,
+  );
 }
 
 export function decodeLeaderboardPayload(payload: string): DecodedEntry {
   const bytes = base36Bytes(payload);
   if (bytes.length < 16) throw new Error("Score code is too short");
   const dataLength = bytes[13];
-  if (bytes.length !== 16 + dataLength) throw new Error("Score code length does not match its header");
+  if (bytes.length !== 16 + dataLength)
+    throw new Error("Score code length does not match its header");
   const expected = (bytes[bytes.length - 2] << 8) | bytes[bytes.length - 1];
-  if (fletcher16(bytes.subarray(0, bytes.length - 2)) !== expected) throw new Error("Score code checksum failed");
+  if (fletcher16(bytes.subarray(0, bytes.length - 2)) !== expected)
+    throw new Error("Score code checksum failed");
 
   const appId = bytes[0];
-  const deviceSerial = Array.from(bytes.subarray(1, 9), (byte) => byte.toString(16).padStart(2, "0")).join("").toUpperCase();
-  const entryId = ((bytes[9] << 24) | (bytes[10] << 16) | (bytes[11] << 8) | bytes[12]) >>> 0;
+  const deviceSerial = Array.from(bytes.subarray(1, 9), (byte) =>
+    byte.toString(16).padStart(2, "0"),
+  )
+    .join("")
+    .toUpperCase();
+  const entryId =
+    ((bytes[9] << 24) | (bytes[10] << 16) | (bytes[11] << 8) | bytes[12]) >>> 0;
   const rawData = bytes.slice(14, 14 + dataLength);
-  return { appId, deviceSerial, entryId, rawData, ...decodeGameData(appId, rawData) };
+  return {
+    appId,
+    deviceSerial,
+    entryId,
+    rawData,
+    ...decodeGameData(appId, rawData),
+  };
 }

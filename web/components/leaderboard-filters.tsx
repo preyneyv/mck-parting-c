@@ -1,7 +1,13 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 
 export function LeaderboardFilters({
   tracks,
@@ -25,20 +31,30 @@ export function LeaderboardFilters({
     <div className="flex flex-wrap items-center gap-4">
       <div className="flex items-center gap-2">
         <span className="text-sm text-muted-foreground">song</span>
-        <Select value={selectedTrack} onValueChange={(value) => navigate(value, selectedDifficulty)}>
+        <Select
+          value={selectedTrack}
+          onValueChange={(value) => navigate(value, selectedDifficulty)}
+        >
           <SelectTrigger className="w-40" aria-label="song">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="all">All songs</SelectItem>
-            {tracks.map((track) => <SelectItem key={track.id} value={track.id}>{track.name}</SelectItem>)}
+            {tracks.map((track) => (
+              <SelectItem key={track.id} value={track.id}>
+                {track.name}
+              </SelectItem>
+            ))}
           </SelectContent>
         </Select>
       </div>
 
       <div className="flex items-center gap-2">
         <span className="text-sm text-muted-foreground">difficulty</span>
-        <Select value={selectedDifficulty} onValueChange={(value) => navigate(selectedTrack, value)}>
+        <Select
+          value={selectedDifficulty}
+          onValueChange={(value) => navigate(selectedTrack, value)}
+        >
           <SelectTrigger className="w-32" aria-label="difficulty">
             <SelectValue />
           </SelectTrigger>

@@ -127,20 +127,13 @@ export default function HomePage() {
             </p>
           </div>
           <div className="flex flex-wrap gap-3">
-            <Button
-              asChild
-              className="font-mono"
-            >
+            <Button asChild className="font-mono">
               <Link href="/manage">
                 <PlugsConnected className="size-4" />
                 connect your prism
               </Link>
             </Button>
-            <Button
-              asChild
-              variant="outline"
-              className="font-mono"
-            >
+            <Button asChild variant="outline" className="font-mono">
               <Link href="/leaderboard">
                 <Trophy className="size-4" />
                 see the leaderboards
@@ -173,9 +166,7 @@ export default function HomePage() {
                   <TableHead className="w-20 px-5 font-mono sm:px-6">
                     count
                   </TableHead>
-                  <TableHead className="font-mono">
-                    item
-                  </TableHead>
+                  <TableHead className="font-mono">item</TableHead>
                   <TableHead className="hidden font-mono sm:table-cell">
                     use
                   </TableHead>
@@ -213,9 +204,7 @@ export default function HomePage() {
               <Card key={step.title}>
                 <CardHeader>
                   <Icon className="mb-3 size-5" aria-hidden="true" />
-                  <CardTitle className="font-display">
-                    {step.title}
-                  </CardTitle>
+                  <CardTitle className="font-display">{step.title}</CardTitle>
                 </CardHeader>
                 <CardContent>
                   <p className="text-sm leading-6 text-muted-foreground">
@@ -264,9 +253,7 @@ export default function HomePage() {
                 <span className="font-mono text-sm text-muted-foreground">
                   {step.number}
                 </span>
-                <p className="font-mono font-medium">
-                  {step.title}
-                </p>
+                <p className="font-mono font-medium">{step.title}</p>
                 <p className="text-sm leading-6 text-muted-foreground">
                   {step.description}
                 </p>
@@ -279,20 +266,14 @@ export default function HomePage() {
           <Card>
             <CardHeader>
               <Palette className="mb-2 size-5" aria-hidden="true" />
-              <CardTitle className="font-display">
-                manage
-              </CardTitle>
+              <CardTitle className="font-display">manage</CardTitle>
               <CardDescription>
                 install and remove cartridges, tune the RGB LEDs, mirror the
                 screen, and restart the device.
               </CardDescription>
             </CardHeader>
             <CardContent>
-              <Button
-                asChild
-                variant="outline"
-                className="font-mono"
-              >
+              <Button asChild variant="outline" className="font-mono">
                 <Link href="/manage">
                   <PlugsConnected className="size-4" />
                   connect your prism
@@ -304,20 +285,14 @@ export default function HomePage() {
           <Card>
             <CardHeader>
               <Trophy className="mb-2 size-5" aria-hidden="true" />
-              <CardTitle className="font-display">
-                leaderboards
-              </CardTitle>
+              <CardTitle className="font-display">leaderboards</CardTitle>
               <CardDescription>
                 some cartridges show a QR code when a run ends. scan it, add
                 your name, and your score will appear here.
               </CardDescription>
             </CardHeader>
             <CardContent>
-              <Button
-                asChild
-                variant="outline"
-                className="font-mono"
-              >
+              <Button asChild variant="outline" className="font-mono">
                 <Link href="/leaderboard">
                   <Trophy className="size-4" />
                   see the leaderboards
@@ -367,9 +342,7 @@ export default function HomePage() {
       <section className="grid gap-4 md:grid-cols-2">
         <Card className="border-dashed shadow-none">
           <CardHeader>
-            <CardTitle className="font-display">
-              open it up
-            </CardTitle>
+            <CardTitle className="font-display">open it up</CardTitle>
             <CardDescription className="leading-6">
               prism was made to be opened. pull the keycaps, remove the screws,
               take a look inside, and put it back together when you are done.

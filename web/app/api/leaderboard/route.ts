@@ -1,9 +1,6 @@
 import { NextResponse } from "next/server";
 import { getDatabase } from "@/lib/db";
-import {
-  decodeLeaderboardPayload,
-  type DecodedEntry,
-} from "@/lib/leaderboard";
+import { decodeLeaderboardPayload, type DecodedEntry } from "@/lib/leaderboard";
 
 const RESULT_VERSION = 1;
 

@@ -33,7 +33,11 @@ const links = [
   ["manage", "/manage"],
 ] as const;
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
+export default function RootLayout({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
   return (
     <html lang="en">
       <body
@@ -52,7 +56,11 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               />
             </Link>
             <nav className="flex gap-5 font-mono text-sm text-muted-foreground">
-              {links.map(([label, href]) => <Link key={href} href={href} className="hover:text-foreground">{label}</Link>)}
+              {links.map(([label, href]) => (
+                <Link key={href} href={href} className="hover:text-foreground">
+                  {label}
+                </Link>
+              ))}
             </nav>
           </div>
         </header>

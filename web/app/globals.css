@@ -45,7 +45,18 @@
   --radius-lg: var(--radius);
 }
 
-* { @apply border-border; }
-body { @apply bg-background font-sans text-foreground antialiased; }
-h1, h2, h3 { @apply font-display; }
-button, a { -webkit-tap-highlight-color: transparent; }
+* {
+  @apply border-border;
+}
+body {
+  @apply bg-background font-sans text-foreground antialiased;
+}
+h1,
+h2,
+h3 {
+  @apply font-display;
+}
+button,
+a {
+  -webkit-tap-highlight-color: transparent;
+}
