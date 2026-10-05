@@ -1,6 +1,7 @@
 build
 build_host
 
+# Keep the shared VS Code config even if a global gitignore excludes it.
 !.vscode/*
 .DS_Store
 *.o
@@ -16,5 +17,6 @@ web/prism-local.db*
 web/*.log
 web/tsconfig.tsbuildinfo
 src/cartridges/**/Backups/
+*.rpp-bak
 
 *.pyc

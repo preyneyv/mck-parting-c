@@ -31,7 +31,7 @@ static void platform_sleep_init(void)
   }
 }
 
-inline static void rosc_write(io_rw_32 *addr, uint32_t value)
+static inline void rosc_write(io_rw_32 *addr, uint32_t value)
 {
   hw_clear_bits(&rosc_hw->status, ROSC_STATUS_BADWRITE_BITS);
   assert(!(rosc_hw->status & ROSC_STATUS_BADWRITE_BITS));
@@ -45,10 +45,9 @@ static void platform_sleep_until_interrupt(void)
   critical_section_enter_blocking(&g_sleep_critical_section);
   sleep_ms(10);
 
-  // rosc or xosc can be used. rosc is lower power.
+  // Either oscillator works while dormant; the ROSC uses less power.
   const bool use_xosc = false;
 
-  // configure clocks
   uint src_hz;
   uint clk_ref_src;
 
@@ -76,15 +75,13 @@ static void platform_sleep_until_interrupt(void)
   pll_deinit(pll_sys);
   pll_deinit(pll_usb);
 
-  // kill the unused oscillator
+  // Stop the oscillator we are not using.
   if (use_xosc)
   {
-    // disable rosc
     uint32_t tmp = rosc_hw->ctrl;
     tmp &= (~ROSC_CTRL_ENABLE_BITS);
     tmp |= (ROSC_CTRL_ENABLE_VALUE_DISABLE << ROSC_CTRL_ENABLE_LSB);
     rosc_write(&rosc_hw->ctrl, tmp);
-    // Wait for stable to go away
     while (rosc_hw->status & ROSC_STATUS_STABLE_BITS)
       ;
   }
@@ -93,13 +90,12 @@ static void platform_sleep_until_interrupt(void)
     xosc_disable();
   }
 
-  // enter sleep
   uint32_t event = IO_BANK0_DORMANT_WAKE_INTE0_GPIO0_EDGE_LOW_BITS;
 
   gpio_set_dormant_irq_enabled(BUTTON_PIN_L, event, true);
   gpio_set_dormant_irq_enabled(BUTTON_PIN_R, event, true);
   gpio_set_dormant_irq_enabled(BUTTON_PIN_M, event, true);
-  // wake on USB power present (active-low PGOOD)
+  // Also wake when USB power appears (PGOOD is active low).
   gpio_set_dormant_irq_enabled(PERIPH_VSYS_PGOOD_N, event, true);
 
   if (use_xosc)
@@ -118,19 +114,16 @@ static void platform_sleep_until_interrupt(void)
   gpio_acknowledge_irq(BUTTON_PIN_M, event);
   gpio_acknowledge_irq(PERIPH_VSYS_PGOOD_N, event);
 
-  // wake from sleep
-  // - enable rosc
+  // Awake again: restart the ROSC and restore the normal clock tree.
   rosc_write(&rosc_hw->ctrl, ROSC_CTRL_ENABLE_BITS);
   rosc_hw->ctrl = ROSC_CTRL_ENABLE_BITS;
   while (!(rosc_hw->status & ROSC_STATUS_STABLE_BITS))
     ;
 
-  // - reset clock flags
   clocks_hw->sleep_en0 |= ~(0u);
   clocks_hw->sleep_en1 |= ~(0u);
 
-  // - reset clock speeds (this will wake xosc)
-  clocks_init();
+  clocks_init(); // Also restarts the XOSC.
   set_sys_clock_hz(SYS_CLOCK_HZ, true);
 
   sleep_ms(10);
@@ -150,7 +143,8 @@ static platform_input_mask_t first_button(platform_input_mask_t mask)
 
 platform_wake_result_t platform_sleep_enter(uint32_t quick_wake_ms)
 {
-  while (platform_input_read_mask() & (PLATFORM_INPUT_LEFT | PLATFORM_INPUT_RIGHT | PLATFORM_INPUT_MENU))
+  while (platform_input_read_mask() &
+         (PLATFORM_INPUT_LEFT | PLATFORM_INPUT_RIGHT | PLATFORM_INPUT_MENU))
   {
     platform_task();
     /* A remote button may be the input keeping this loop alive. Consume
@@ -162,9 +156,9 @@ platform_wake_result_t platform_sleep_enter(uint32_t quick_wake_ms)
   platform_peripheral_read_inputs();
   platform_power_state_t power = platform_peripheral_get_power_state();
 
-  /* Keep clocks running briefly after an automatic sleep. This gives an
-   * immediate "oops" press a cheap fast path and avoids needing an RTC to
-   * measure elapsed time while the RP2040 is dormant. */
+  /* Keep clocks running briefly after an automatic sleep, so a press right
+   * away wakes without confirmation. Doing this before going dormant avoids
+   * needing an RTC to measure the window. */
   platform_time_t quick_wake_until =
       platform_now_us() + (platform_time_t)quick_wake_ms * 1000u;
   while (quick_wake_ms != 0 && !platform_time_reached(quick_wake_until))
@@ -189,6 +183,9 @@ platform_wake_result_t platform_sleep_enter(uint32_t quick_wake_ms)
     while (1)
     {
       platform_task();
+      /* MIDI and plain serial traffic wake the device. WebUSB messages are
+       * handled in place, and heartbeats, mirroring, and remote button
+       * releases don't wake it. */
       if (tud_midi_available() || tud_cdc_available() ||
           management_sleep_task())
         return (platform_wake_result_t){0};
@@ -203,13 +200,8 @@ platform_wake_result_t platform_sleep_enter(uint32_t quick_wake_ms)
 
       power = platform_peripheral_get_power_state();
       if (!power.plugged_in)
-      {
         break;
-      }
 
-      /* MIDI and plaintext serial remain explicit wake sources. WebUSB is
-       * serviced in place so its heartbeat and mirror bookkeeping cannot
-       * produce a spurious wake cycle. */
       platform_sleep_ms(5);
     }
     return (platform_wake_result_t){0};

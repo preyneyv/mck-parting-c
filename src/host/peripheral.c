@@ -1,6 +1,7 @@
 #include <platform/peripheral.h>
 
-static struct {
+static struct
+{
   bool enabled;
   bool plugged_in;
   bool charging_enabled;
@@ -8,7 +9,8 @@ static struct {
   uint8_t battery_level;
 } g_peripheral;
 
-void platform_peripheral_init(void) {
+void platform_peripheral_init(void)
+{
   g_peripheral.enabled = false;
   g_peripheral.plugged_in = true;
   g_peripheral.charging_enabled = false;
@@ -16,15 +18,15 @@ void platform_peripheral_init(void) {
   g_peripheral.battery_level = 255;
 }
 
-void platform_peripheral_set_enabled(bool enabled) { g_peripheral.enabled = enabled; }
-
-void platform_peripheral_set_charging_enabled(bool enabled) {
-  g_peripheral.charging_enabled = enabled;
+void platform_peripheral_set_enabled(bool enabled)
+{
+  g_peripheral.enabled = enabled;
 }
 
 void platform_peripheral_read_inputs(void) {}
 
-platform_power_state_t platform_peripheral_get_power_state(void) {
+platform_power_state_t platform_peripheral_get_power_state(void)
+{
   return (platform_power_state_t){
       .plugged_in = g_peripheral.plugged_in,
       .charging = g_peripheral.charging,

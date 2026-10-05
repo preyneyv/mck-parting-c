@@ -166,9 +166,3 @@ void audio_song_player_seek(audio_song_player_t *player,
                             uint32_t time_ms,
                             uint32_t now_ms);
 void audio_song_player_tick(audio_song_player_t *player, uint32_t now_ms);
-
-size_t audio_song_player_peek_events(const audio_song_player_t *player,
-                                     uint32_t lookahead_ms,
-                                     uint32_t mask,
-                                     const audio_song_event_t **out_events,
-                                     size_t max_events);

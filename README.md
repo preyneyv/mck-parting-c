@@ -1,31 +1,43 @@
 # Prism
 
-Prism is a two-button RP2040 console with a 128x64 monochrome display, two RGB
-LEDs, an FM synthesizer, and installable position-independent cartridges. The
-same operating system and cartridge sources run in an SDL host simulator.
+Prism is a two-button RP2040 handheld with a 128x64 monochrome display, two
+RGB LEDs, an FM synthesizer, and installable cartridges. The same OS and
+cartridge sources also run in an SDL desktop simulator.
 
-## Runtime architecture
+## Repository layout
 
-Core 0 owns the engine, input, application lifecycle, display, LEDs, USB,
-storage, and system UI. Its exposed integer clock and input sampler run at
-960 Hz. Cartridges divide that clock to choose their simulation rate, while
-the display renders at up to 120 frames per second.
+- `src/prism`: public cartridge SDK, package format, and management protocol
+- `src/shared`: engine, OS services, system UI, animation, and audio
+- `src/platform`: hardware contracts implemented by each target
+- `src/rp2`: RP2040 drivers, USB management, flash storage, and persistence
+- `src/host`: SDL simulator
+- `src/cartridges`: bundled cartridges
+- `examples/hello-cartridge`: standalone cartridge project to copy from
+- `web`: Next.js site with the WebUSB device manager and score leaderboards
+- `cmake`, `scripts`: packaging, asset, and build tooling
+- `tests`: host unit tests
+- `lib`: vendored u8g2 and qrcodegen
 
-Core 1 exclusively generates audio. Core 0 submits validated synth commands
-through a bounded queue; voice/operator state and the render path are private
-to the audio implementation. DMA sends packed 48 kHz stereo frames to the I2S
-PIO state machine.
+## Architecture
 
-Code shared by both targets lives in `src/shared`. Hardware contracts are in
-`src/platform`, with implementations in `src/rp2` and `src/host`. The public
-cartridge API is under `src/prism`; cartridges cannot include engine or
-platform internals.
+Core 0 runs the engine, input, cartridge lifecycle, display, LEDs, USB,
+storage, and system UI. The engine clock and input sampler run at 960 Hz.
+Cartridges divide that clock to pick their simulation rate, and the display
+renders at up to 120 frames per second.
 
-## Building
+Core 1 only generates audio. Core 0 sends validated synth commands through a
+bounded queue, and DMA feeds 48 kHz stereo frames to an I2S PIO state machine.
 
-The VS Code default build task configures an optimized RP2040 build, compiles
-it, enters BOOTSEL, and flashes the device. Compilation-only tasks are also
-available for both targets.
+Cartridges see only the API in `src/prism`. The build rejects cartridge
+sources that include engine or platform headers.
+
+## Firmware
+
+The build needs the Raspberry Pi Pico SDK and ARM toolchain. The Pico VS Code
+extension installs the expected versions. The default VS Code build task
+regenerates assets, compiles, reboots the device into BOOTSEL, and loads the
+firmware. Because it regenerates assets, it needs Aseprite and REAPER; without
+them, use the commands below.
 
 From a terminal:
 
@@ -34,24 +46,19 @@ cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
 cmake --build build
 ```
 
-The RP2040 build emits two UF2 images plus the first-party cartridges and
-asset packs as ordinary `.prism` and `.prismpack` packages:
+This produces the bundled cartridges as `.prism` packages, the bundled asset
+packs as `.prismpack` archives, and two UF2 images:
 
-- `prism.uf2` contains firmware only and preserves cartridge storage.
-- `prism_factory.uf2` resets and provisions a device with the first-party
-  packages already installed in ordinary cartridge storage; it does not need
-  a separate flash-nuke pass.
+- `prism.uf2` holds firmware only and leaves installed cartridges, saves, and
+  settings alone.
+- `prism_factory.uf2` also resets storage and installs the bundled packages.
+  They behave like any other installed package afterwards and can be updated
+  or removed.
 
-Factory-provisioned objects have no special runtime status: they can be
-updated, compacted, or uninstalled exactly like third-party packages. The
-factory image replaces the shared storage catalog, clears cartridge persistence
-and settings, and invalidates interrupted-compaction recovery state. Old
-unreferenced cartridge bytes are erased lazily when their blocks are reused.
-The firmware-only image does not touch any of those regions. The
-build requires the Raspberry Pi Pico SDK/toolchain; the Pico VS Code extension
-installs the expected versions automatically.
+See [Packages](docs/cartridges.md#packages) for exactly what the factory image
+rewrites.
 
-For the host simulator:
+## Simulator
 
 ```sh
 cmake -S . -B build_host -G Ninja \
@@ -59,50 +66,56 @@ cmake -S . -B build_host -G Ninja \
 cmake --build build_host
 ```
 
-The host target requires SDL2 with the `SDL2::SDL2-static` CMake target. On
-Windows the configured tasks use the MSYS2 MinGW64 toolchain. The first host
-build fetches the pinned Unicorn 2.1.4 sources and builds only its ARM backend;
-MSYS2's `usr/bin/sh` is required for that one-time dependency build.
+The simulator needs SDL2 with the `SDL2::SDL2-static` CMake target. On Windows
+the VS Code tasks use the MSYS2 MinGW64 toolchain. The first build fetches and
+builds the ARM backend of Unicorn 2.1.4, which needs MSYS2's `usr/bin/sh` on
+Windows. Unicorn is GPLv2, so distributing a simulator binary means following
+its license.
 
-Run the normal launcher with no arguments, or pass an installable package to
-execute that exact Cortex-M0+ payload under Unicorn and launch it directly:
+Run `build_host/prism` for the normal launcher, or pass a package to run that
+exact Cortex-M0+ build under Unicorn:
 
 ```sh
 build_host/prism build/hello.prism
 ```
 
-The resulting host executable is self-contained. Unicorn is GPLv2-licensed;
-distributing a simulator linked with it needs to comply with Unicorn's license.
+| Key | Action |
+| --- | --- |
+| Left or A | left button |
+| Right or D | right button |
+| Space, Return, or Escape | menu button |
+| Down / Up / Home | toggle a held left / right / menu press |
+| 0 | release all toggled presses |
 
-## Cartridge development
+The host build also builds the unit tests; run them with
+`ctest --test-dir build_host`.
 
-`examples/hello-cartridge` is a standalone two-command project. Its normal
-CMake build produces both a statically linked SDL simulator and `hello.prism`
-from the same `app.c`; no Prism CLI is involved. See
-[`docs/cartridges.md`](docs/cartridges.md) for the lifecycle, services, package
-format, and persistence model.
+## Cartridges
+
+Start from `examples/hello-cartridge`. [docs/cartridges.md](docs/cartridges.md)
+covers the cartridge lifecycle, services, asset packs, persistence, and the
+package format.
 
 ## Assets
 
-Generated sprite and song headers are committed, so ordinary builds never
-launch authoring software. Configure with `-DPRISM_ASSET_AUTHORING=ON` only when
-intentionally regenerating assets from Aseprite or REAPER sources.
+Generated sprite and song headers are committed, so normal builds never run
+authoring tools. Configure with `-DPRISM_ASSET_AUTHORING=ON` to regenerate them
+from the Aseprite and REAPER sources.
 
-Installable `.prismpack` archives share the device's 192 64-KiB storage blocks
-with cartridges. Packs target a full cartridge ID and expose named,
-uncompressed files directly from flash. See
-[`docs/cartridges.md`](docs/cartridges.md#asset-packs) for the cartridge API and
-[`docs/beatline-tracks.md`](docs/beatline-tracks.md) for Beatline's track
+[docs/beatline-tracks.md](docs/beatline-tracks.md) describes Beatline's track
 format.
 
-## Repository map
+## Web
 
-- `src/prism`: public cartridge SDK and package/wire formats
-- `src/shared`: engine, OS services, animation, and audio implementation
-- `src/platform`: target-independent hardware contracts
-- `src/rp2`: RP2040 drivers, USB management, flash storage, and persistence
-- `src/host`: SDL simulator platform
-- `src/cartridges`: bundled cartridge sources
-- `examples/hello-cartridge`: cloneable cartridge project
-- `web`: local Next.js management and leaderboard service
-- `cmake`, `scripts`: package, asset, and build tooling
+`web` is a Next.js app. The `/manage` page talks to a connected Prism over
+WebUSB (Chrome or Edge on desktop) to install and remove packages, change
+settings, and mirror the screen. The leaderboard stores scores in libSQL
+(Turso). Copy `web/.env.example` to `web/.env.local` and fill in
+`TURSO_DATABASE_URL` and `TURSO_AUTH_TOKEN`.
+
+```sh
+cd web
+npm install
+npm run db:migrate
+npm run dev
+```

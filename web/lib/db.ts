@@ -1,8 +1,4 @@
-import {
-  createClient,
-  type Client,
-  type Row,
-} from "@libsql/client/web";
+import { createClient, type Client, type Row } from "@libsql/client/web";
 
 const RESULT_VERSION = 1;
 
@@ -144,7 +140,9 @@ function parseMorseResult(row: StoredLeaderboardRow): MorseResult {
 
 function parseAsteroidsResult(row: StoredLeaderboardRow): AsteroidsResult {
   if (row.result_version !== RESULT_VERSION) {
-    throw new Error(`Unsupported Asteroids result version ${row.result_version}.`);
+    throw new Error(
+      `Unsupported Asteroids result version ${row.result_version}.`,
+    );
   }
   const result = parseJsonObject(row.result_json);
   if (!isFiniteInteger(result.elapsedMs) || !isFiniteInteger(result.distance)) {
@@ -155,7 +153,9 @@ function parseAsteroidsResult(row: StoredLeaderboardRow): AsteroidsResult {
 
 function parseBeatlineResult(row: StoredLeaderboardRow): BeatlineResult {
   if (row.result_version !== RESULT_VERSION) {
-    throw new Error(`Unsupported Beatline result version ${row.result_version}.`);
+    throw new Error(
+      `Unsupported Beatline result version ${row.result_version}.`,
+    );
   }
   const result = parseJsonObject(row.result_json);
   const numericKeys = [

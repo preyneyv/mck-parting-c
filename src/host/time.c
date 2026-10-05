@@ -7,7 +7,8 @@
 #include <windows.h>
 #endif
 
-platform_time_t platform_now_us(void) {
+platform_time_t platform_now_us(void)
+{
 #ifdef _WIN32
   static LARGE_INTEGER frequency;
   LARGE_INTEGER counter;
@@ -24,7 +25,8 @@ platform_time_t platform_now_us(void) {
 #endif
 }
 
-void platform_sleep_us(uint32_t us) {
+void platform_sleep_us(uint32_t us)
+{
 #ifdef _WIN32
   DWORD ms = (DWORD)((us + 999u) / 1000u);
   Sleep(ms);

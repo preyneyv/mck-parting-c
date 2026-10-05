@@ -18,9 +18,7 @@ prism_t *beatline_prism;
 
 static beatline_state_t state;
 
-// ============================================================
-// Track Selection Screen
-// ============================================================
+// --- Track Selection Screen ---
 
 #define SELECT_CARD_W 112
 #define SELECT_CARD_H 47
@@ -336,9 +334,7 @@ static void select_frame(void)
     }
 }
 
-// ============================================================
-// Gameplay Screen
-// ============================================================
+// --- Gameplay Screen ---
 
 static float scroll_px_per_tick(void)
 {
@@ -366,7 +362,6 @@ static float fmodf_pos(float a, float b)
 #define NOTE_W 6
 #define NOTE_H 5
 #define NOTE_HOLD_H 4
-#define NOTE_APPROACH_TICKS 200
 #define BEATLINE_HIT_LINE_LEFT_X (BEATLINE_HIT_ZONE_W * 2 - 2)
 #define BEATLINE_HIT_LINE_RIGHT_X (DISP_WIDTH - BEATLINE_HIT_ZONE_W * 2 + 1)
 
@@ -471,43 +466,30 @@ static void play_draw_notes(elm_t *root)
     {
         if (state.note_grades[i] != BEATLINE_NOTE_UNJUDGED)
         {
-            // hold notes still render tail while being held
-            if (state.notes[i].type == BEATLINE_NOTE_HOLD)
-            {
-                uint8_t lane = state.notes[i].lane;
-                if (state.hold_state[lane].holding &&
-                    state.hold_state[lane].note_idx == i)
-                {
-                    // draw remaining hold tail — fall through below
-                }
-                else
-                {
-                    continue;
-                }
-            }
-            else
-            {
+            // Once judged, only a hold note that is still held is drawn.
+            if (state.notes[i].type != BEATLINE_NOTE_HOLD)
                 continue;
-            }
+            uint8_t lane = state.notes[i].lane;
+            if (!state.hold_state[lane].holding ||
+                state.hold_state[lane].note_idx != i)
+                continue;
         }
 
         const beatline_note_t *n = &state.notes[i];
         int32_t time_remaining = (int32_t)n->hit_tick - game_time;
         int32_t travel_px = (int32_t)(time_remaining * px_t);
 
-        // compute note screen x
+        // A note is perfectly timed when its center crosses the hit line.
         int16_t note_x;
         int16_t note_y;
 
         if (n->lane == BEATLINE_LANE_LEFT)
         {
-            // top lane: perfect when the note's center reaches the hit line
             note_x = BEATLINE_HIT_LINE_LEFT_X - NOTE_W / 2 + travel_px;
             note_y = BEATLINE_TOP_TRACK_Y + (BEATLINE_TOP_TRACK_H / 2) - NOTE_H / 2;
         }
         else
         {
-            // bottom lane: perfect when the note's center reaches the hit line
             note_x = BEATLINE_HIT_LINE_RIGHT_X - NOTE_W / 2 - travel_px;
             note_y = BEATLINE_BOTTOM_TRACK_Y + (BEATLINE_BOTTOM_TRACK_H / 2) - NOTE_H / 2;
         }
@@ -537,39 +519,36 @@ static void play_draw_notes(elm_t *root)
         }
         else
         {
-            // tap note cull
             if (note_x < -NOTE_W || note_x > DISP_WIDTH + NOTE_W)
                 continue;
         }
 
         if (n->type == BEATLINE_NOTE_HOLD)
         {
+            // Tail, head, then end cap. Top-lane tails extend right of the
+            // head; bottom-lane tails extend left.
             if (n->lane == BEATLINE_LANE_LEFT)
             {
-                // tail extends to the right from note head
                 u8g2_SetDrawColor(u8g2, 1);
-                u8g2_DrawBox(u8g2, note_x, note_y + 1, hold_px, NOTE_HOLD_H - 1);
-                // head
+                u8g2_DrawBox(u8g2, note_x, note_y + 1, hold_px,
+                             NOTE_HOLD_H - 1);
                 u8g2_DrawBox(u8g2, note_x, note_y, NOTE_W, NOTE_H);
-                // end cap
                 u8g2_DrawFrame(u8g2, note_x + hold_px - 2, note_y, 3, NOTE_H);
             }
             else
             {
-                // tail extends to the left from note head
                 u8g2_SetDrawColor(u8g2, 1);
-                u8g2_DrawBox(u8g2, note_x - hold_px + NOTE_W, note_y + 1, hold_px, NOTE_HOLD_H - 1);
-                // head
+                u8g2_DrawBox(u8g2, note_x - hold_px + NOTE_W, note_y + 1,
+                             hold_px, NOTE_HOLD_H - 1);
                 u8g2_DrawFrame(u8g2, note_x, note_y, NOTE_W, NOTE_H);
-                // end cap
-                u8g2_DrawFrame(u8g2, note_x - hold_px + NOTE_W, note_y, 3, NOTE_H);
+                u8g2_DrawFrame(u8g2, note_x - hold_px + NOTE_W, note_y, 3,
+                               NOTE_H);
             }
         }
         else
         {
-            // tap note
             u8g2_SetDrawColor(u8g2, 1);
-            u8g2_DrawBox(u8g2, note_x, note_y, NOTE_W, NOTE_H); // filled
+            u8g2_DrawBox(u8g2, note_x, note_y, NOTE_W, NOTE_H);
         }
     }
 }
@@ -632,14 +611,13 @@ static void play_set_leds(void)
         }
     }
 
-    // hold sustain: pulse LED while holding
+    // Pulse the LED while a hold note is held.
     for (uint8_t lane = 0; lane < 2; lane++)
     {
         if (!state.hold_state[lane].holding)
             continue;
 
         uint8_t led = (lane == BEATLINE_LANE_LEFT) ? PRISM_LED_LEFT : PRISM_LED_RIGHT;
-        // slow pulse: sine-like using tick
         uint8_t bri = 80 + (uint8_t)(80.f * led_sine_pulse(
             prism_millis(beatline_prism), 0.006f));
         prism_led_set(beatline_prism, led, rgba(0, bri, bri, 255));
@@ -685,9 +663,7 @@ static void play_frame(void)
     }
 }
 
-// ============================================================
-// Results Screen
-// ============================================================
+// --- Results Screen ---
 
 static void results_format_score(char *buf, size_t buf_size, uint32_t score)
 {
@@ -807,9 +783,7 @@ static void results_frame(void)
     }
 }
 
-// ============================================================
-// App Lifecycle
-// ============================================================
+// --- App Lifecycle ---
 
 static void enter(prism_t *prism)
 {

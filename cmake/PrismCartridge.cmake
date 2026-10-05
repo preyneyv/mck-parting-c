@@ -1,8 +1,7 @@
 include(CMakeParseArguments)
 
-# Build a native RP2040 cartridge and expose a .prism file as a normal CMake
-# artifact.  Authors use `cmake --build build`; this helper is deliberately
-# behind the build system rather than presented as a separate Prism CLI.
+# Build a position-independent RP2040 cartridge and package it as a .prism
+# file, produced as an ordinary CMake build artifact.
 function(prism_add_installable_cartridge TARGET)
   set(options EXCLUDE_FROM_ALL)
   set(oneValueArgs ENTRY OUTPUT)

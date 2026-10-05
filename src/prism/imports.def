@@ -70,10 +70,9 @@ PRISM_IMPORT(0x0044, ATAN2F, atan2f, FUNCTION, atan2f)
 PRISM_IMPORT(0x0045, FMAXF, fmaxf, FUNCTION, fmaxf)
 PRISM_IMPORT(0x0046, AUDIO_SYNTH_PANIC_SYNC, audio_synth_panic_sync, FUNCTION, audio_synth_panic_sync)
 
-// Compiler-runtime helpers. Cortex-M0+ emits calls to these symbols for
-// operations it cannot express directly. Keeping them as imports lets the
-// RP2040 runtime use Pico's optimized implementations without linking
-// non-position-independent libgcc/Pico code into each cartridge.
+// Compiler-runtime helpers. Cortex-M0+ emits calls to these for operations it
+// has no instruction for. Importing them lets RP2040 use Pico's optimized
+// implementations instead of linking libgcc into every cartridge.
 PRISM_IMPORT(0x0047, AEABI_IDIV, prism_import_aeabi_idiv, FUNCTION, __wrap___aeabi_idiv)
 PRISM_IMPORT(0x0048, AEABI_IDIVMOD, prism_import_aeabi_idivmod, FUNCTION, __wrap___aeabi_idivmod)
 PRISM_IMPORT(0x0049, AEABI_UIDIV, prism_import_aeabi_uidiv, FUNCTION, __wrap___aeabi_uidiv)
@@ -143,8 +142,7 @@ PRISM_IMPORT(0x0084, AEABI_D2UIZ, prism_import_aeabi_d2uiz, FUNCTION, __wrap___a
 PRISM_IMPORT(0x0085, AEABI_D2ULZ, prism_import_aeabi_d2ulz, FUNCTION, __wrap___aeabi_d2ulz)
 PRISM_IMPORT(0x0086, AEABI_D2F, prism_import_aeabi_d2f, FUNCTION, __wrap___aeabi_d2f)
 
-// Cartridge diagnostics. prism_log is the preferred long-term API, but the
-// standard C entry points remain useful and resolve through Pico stdio.
+// Standard C console I/O. On hardware these resolve through Pico stdio.
 PRISM_IMPORT(0x0087, PRINTF, printf, FUNCTION, __wrap_printf)
 PRISM_IMPORT(0x0088, VPRINTF, vprintf, FUNCTION, __wrap_vprintf)
 PRISM_IMPORT(0x0089, PUTS, puts, FUNCTION, __wrap_puts)

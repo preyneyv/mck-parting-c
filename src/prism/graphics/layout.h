@@ -5,6 +5,7 @@
 #include <prism/graphics/easing.h>
 #include <prism/graphics/qrcode.h>
 #include <prism/graphics/vector.h>
+
 typedef struct
 {
   vec2_t pos;
@@ -200,10 +201,9 @@ static inline void elm_rounded_hold_fill(elm_t *parent, vec2_t pos,
   if (ratio > 1.f)
     ratio = 1.f;
 
-  /* Match elm_btn and the launcher: animate a width that includes one border
-   * pixel, then clip it to the rounded interior below. That makes the visible
-   * interior finish slightly before the logical ratio reaches 1, preserving
-   * the familiar short rejection window at the end of a hold. */
+  /* Like elm_btn and the launcher, animate a width that includes one border
+   * pixel and clip it to the rounded interior. The visible fill therefore
+   * completes slightly before the hold does. */
   uint16_t fill_span = width - 1u;
   uint16_t filled = (uint16_t)(fill_span * ease_out_cubic(ratio));
   if (filled == 0)
@@ -318,7 +318,8 @@ static inline elm_t elm_boxed_text(elm_t *parent, vec2_t pos,
 static inline elm_t elm_rstr(elm_t *parent, vec2_t pos, const char *str)
 {
   elm_t child = elm_child(parent, pos);
-  u8g2_DrawStr(child.u8g2, child.pos.x - u8g2_GetStrWidth(child.u8g2, str), child.pos.y, str);
+  u8g2_DrawStr(child.u8g2, child.pos.x - u8g2_GetStrWidth(child.u8g2, str),
+               child.pos.y, str);
   return child;
 }
 
@@ -328,6 +329,7 @@ static inline elm_t elm_utf8(elm_t *parent, vec2_t pos, const char *str)
   u8g2_DrawUTF8(child.u8g2, child.pos.x, child.pos.y, str);
   return child;
 }
+
 static inline elm_t elm_vline(elm_t *parent, vec2_t pos, uint16_t h)
 {
   elm_t child = elm_child(parent, pos);
@@ -350,9 +352,9 @@ static inline elm_t elm_xbm(elm_t *parent, vec2_t pos, uint16_t w, uint16_t h,
   return child;
 }
 
-static inline elm_t elm_qrcode(elm_t *parent, vec2_t pos,
-                               elm_align_t align,
-                               const uint8_t *qrcode, uint8_t border, uint8_t pixel_size)
+static inline elm_t elm_qrcode(elm_t *parent, vec2_t pos, elm_align_t align,
+                               const uint8_t *qrcode, uint8_t border,
+                               uint8_t pixel_size)
 {
   if (qrcode == NULL || pixel_size == 0)
     return elm_child_aligned(parent, pos, 0, 0, align);
@@ -373,10 +375,9 @@ static inline elm_t elm_qrcode(elm_t *parent, vec2_t pos,
                            bitmap_bytes, &rendered_dim))
     return child;
 
-  /* Cartridge display pointers are opaque handles on the host VM. Keep this
-   * helper on the public u8g2 function boundary instead of reading fields
-   * from u8g2_t directly. Prism rendering normally uses solid bitmap mode,
-   * and QR images require it so their light modules erase the background. */
+  /* Cartridge display pointers are opaque handles on the host VM, so use u8g2
+   * calls rather than reading u8g2_t fields. Solid bitmap mode lets the QR
+   * code's light modules erase whatever is behind it. */
   u8g2_SetDrawColor(child.u8g2, 1);
   u8g2_SetBitmapMode(child.u8g2, 0);
   u8g2_DrawXBM(child.u8g2, child.pos.x, child.pos.y, rendered_dim,
@@ -418,25 +419,21 @@ static inline elm_t elm_btn(elm_t *parent, vec2_t pos, const char *label,
     u8g2_SetDrawColor(u8g2, 2);
     uint16_t fill_width = (uint16_t)((width - 1) * draw_ratio);
     if (fill_from_right)
-    {
-      u8g2_DrawBox(u8g2, child.pos.x + width - 1 - fill_width, child.pos.y + 1, fill_width, height - 2);
-    }
+      u8g2_DrawBox(u8g2, child.pos.x + width - 1 - fill_width, child.pos.y + 1,
+                   fill_width, height - 2);
     else
-    {
-      u8g2_DrawBox(u8g2, child.pos.x + 1, child.pos.y + 1, fill_width, height - 2);
-    }
+      u8g2_DrawBox(u8g2, child.pos.x + 1, child.pos.y + 1, fill_width,
+                   height - 2);
   }
 
   if (pressed != NULL)
-  {
     *pressed = ratio >= 1.f;
-  }
 
   return child;
 }
 
-// Fixed-width button driven by one physical input. Useful for layouts where
-// the screen is spatially paired with the device's left and right buttons.
+/* Fixed-width button driven by one physical input, for layouts that pair
+ * on-screen controls with the device's left and right buttons. */
 static inline elm_t elm_btn_input(elm_t *parent, vec2_t pos, uint16_t width,
                                   const char *label, elm_align_t align,
                                   float ratio, bool fill_from_right,

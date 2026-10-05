@@ -209,9 +209,8 @@ void prism_settings_task(void)
   bool plugged_in = platform_peripheral_get_power_state().plugged_in;
   if (dirty && !save_deferred &&
       ((dirty_at != PLATFORM_TIME_ZERO &&
-                 platform_time_diff_us(dirty_at, platform_now_us()) >=
-                     10000000) ||
-                (was_plugged_in && !plugged_in)))
+        platform_time_diff_us(dirty_at, platform_now_us()) >= 10000000) ||
+       (was_plugged_in && !plugged_in)))
     prism_settings_flush();
   was_plugged_in = plugged_in;
 }

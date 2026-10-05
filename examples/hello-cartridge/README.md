@@ -1,29 +1,28 @@
 # Hello cartridge
 
-This directory is a complete cartridge project. One normal configure and build
-produces the installable ARM cartridge package:
+A minimal standalone cartridge project. Copy this directory to start a new
+cartridge, and change the `.id` in `app.c` to a reverse domain name you
+control.
 
 ```sh
 cmake -S . -B build -G Ninja -DPRISM_SDK_ROOT=/path/to/prism
 cmake --build build
 ```
 
-The output is `build/hello.prism`. No Prism CLI is involved.
+This produces `build/hello.prism`. `PRISM_SDK_ROOT` defaults to the repository
+root two levels up, so it can be left out when building in place.
 
-Run it through the main Prism host simulator so desktop and hardware use the
-same packaged ARM code and per-launch static-data lifecycle:
+The build needs CMake, Python 3, a C compiler for the outer project, and
+`arm-none-eabi-gcc` for the package itself. CMake looks for the ARM compiler on
+`PATH` and in the Pico VS Code extension's default install location.
+
+Run the package in the Prism simulator. The main README covers building the
+simulator and its keyboard controls.
 
 ```sh
 ../../build_host/prism build/hello.prism
 ```
 
-Use Left or A for Prism's left button, Right or D for its right button, and
-Space or Escape for the menu button.
-
-The example requests a tick divider of 8, so its callback runs at 120 Hz while
-input continues to be sampled on Prism's public 960 Hz engine clock.
-
-The SDK checkout is the only project-level dependency. Packaging needs CMake,
-a normal C compiler for its outer build, and `arm-none-eabi-gcc`; CMake finds
-the ARM toolchain on `PATH` and in the Raspberry Pi Pico VS Code extension's
-default location.
+The cartridge sets `tick_divider` to 8, so `tick` runs at 120 Hz. Input is
+still sampled at 960 Hz. See [docs/cartridges.md](../../docs/cartridges.md)
+for the full cartridge API.

@@ -21,7 +21,10 @@ test("decodes the Asteroids cartridge byte layout", () => {
 });
 
 test("decodes every packed Beatline field", () => {
-  const result = decodeGameData(5, bytes("0300000000000000de2001002a0081000c0001000200"));
+  const result = decodeGameData(
+    5,
+    bytes("0300000000000000de2001002a0081000c0001000200"),
+  );
   assert.equal(result.game, "beatline");
   assert.deepEqual(
     {
@@ -36,12 +39,26 @@ test("decodes every packed Beatline field", () => {
       bad: result.bad,
       miss: result.miss,
     },
-    { trackId: "2", chartId: "3", difficulty: 0, rank: 1, score: 73_950, maxCombo: 42, perfect: 129, good: 12, bad: 1, miss: 2 },
+    {
+      trackId: "2",
+      chartId: "3",
+      difficulty: 0,
+      rank: 1,
+      score: 73_950,
+      maxCombo: 42,
+      perfect: 129,
+      good: 12,
+      bad: 1,
+      miss: 2,
+    },
   );
 });
 
 test("resolves Beatline difficulty from the issued chart ID", () => {
-  const result = decodeGameData(5, bytes("02000000000000000000000000000000000000000000"));
+  const result = decodeGameData(
+    5,
+    bytes("02000000000000000000000000000000000000000000"),
+  );
   assert.equal(result.game, "beatline");
   assert.equal(result.trackId, "1");
   assert.equal(result.difficulty, 1);
@@ -49,11 +66,15 @@ test("resolves Beatline difficulty from the issued chart ID", () => {
 
 test("rejects an unknown Beatline chart ID", () => {
   assert.throws(
-    () => decodeGameData(5, bytes("63000000000000000000000000000000000000000000")),
+    () =>
+      decodeGameData(5, bytes("63000000000000000000000000000000000000000000")),
     /Unrecognized Beatline chart ID/,
   );
 });
 
 test("rejects a score whose byte count does not match its cartridge", () => {
-  assert.throws(() => decodeGameData(5, bytes("0001")), /Unsupported score format/);
+  assert.throws(
+    () => decodeGameData(5, bytes("0001")),
+    /Unsupported score format/,
+  );
 });

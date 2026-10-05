@@ -6,6 +6,7 @@
 #include <shared/os/system_sound.h>
 #include <platform/display.h>
 #include <platform/peripheral.h>
+#include <prism/graphics/easing.h>
 #include <prism/graphics/vector.h>
 #include <prism/registry.h>
 #include <prism/runtime.h>
@@ -45,13 +46,9 @@ static void change_active(int8_t delta)
     return;
   state.active += delta;
   if (state.active < 0)
-  {
     state.active = count - 1;
-  }
   else if (state.active >= count)
-  {
     state.active = 0;
-  }
 
   int32_t offset = app_x(state.active);
   anim_to(&state.active_offset, offset, 150, ANIM_EASE_INOUT_QUAD, NULL, NULL);
@@ -61,12 +58,6 @@ static void change_active(int8_t delta)
   anim_to(&state.scroll_offset, scroll_offset, 150, ANIM_EASE_INOUT_QUAD, NULL,
           NULL);
   system_sound_navigation();
-}
-
-static inline float ease_out_cubic(float t)
-{
-  float inv = 1.0f - t;
-  return 1.0f - inv * inv * inv;
 }
 
 static void draw_header(u8g2_t *u8g2)
@@ -91,14 +82,14 @@ static void draw_empty(u8g2_t *u8g2)
                43, website);
 }
 
-static void enter()
+static void enter(void)
 {
   state.ignore_release = false;
   state.held_width = 0;
   state.hold_sound_step = 0;
 }
 
-static void frame()
+static void frame(void)
 {
   uint8_t count = app_count();
   u8g2_t *u8g2 = platform_display_get_u8g2();
@@ -124,14 +115,7 @@ static void frame()
     state.ignore_release = held > 0.f;
     if (held > 0)
     {
-      uint8_t sound_step = (uint8_t)(held * 5.f) + 1u;
-      if (sound_step > 5u)
-        sound_step = 5u;
-      if (sound_step != state.hold_sound_step)
-      {
-        state.hold_sound_step = sound_step;
-        system_sound_hold(sound_step);
-      }
+      system_sound_hold_progress(&state.hold_sound_step, held);
       anim_cancel(&state.held_width, false);
       state.held_width = APP_SIZE * ease_out_cubic(held);
       state.held_button = button_id;
@@ -169,21 +153,15 @@ static void frame()
     vec2_t pos = vec2(state.scroll_offset + app_x(i), 11);
     u8g2_SetDrawColor(u8g2, 1);
     if (cartridge->icon)
-    {
       u8g2_DrawXBM(u8g2, pos.x, pos.y, APP_SIZE, APP_SIZE, cartridge->icon);
-    }
     if (i == state.active)
     {
       u8g2_SetDrawColor(u8g2, 2);
       uint8_t box_x = 0;
       if (state.held_button == BUTTON_RIGHT)
-      {
         box_x = pos.x + APP_SIZE - state.held_width;
-      }
       else if (state.held_button == BUTTON_LEFT)
-      {
         box_x = pos.x;
-      }
       u8g2_DrawBox(u8g2, box_x, pos.y, state.held_width, APP_SIZE);
     }
     u8g2_SetDrawColor(u8g2, 1);
@@ -206,7 +184,7 @@ static void frame()
   draw_header(u8g2);
 }
 
-static void pause()
+static void pause(void)
 {
   anim_cancel(&state.held_width, false);
   state.held_width = 0;

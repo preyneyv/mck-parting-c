@@ -27,7 +27,7 @@ typedef enum
 #define BEATLINE_WINDOW_BAD 135
 #define BEATLINE_HOLD_RELEASE_GRACE 77
 
-// Negative values delay game-time relative to wall clock to compensate output/input latency.
+// Added to game time to compensate for audio output and input latency.
 #define BEATLINE_DEFAULT_AV_OFFSET_TICKS 19
 
 // --- Scoring ---
@@ -55,8 +55,6 @@ typedef enum
 // --- Layout ---
 
 #define BEATLINE_HIT_ZONE_W 10
-#define BEATLINE_PLAY_FIELD_X BEATLINE_HIT_ZONE_W
-#define BEATLINE_PLAY_FIELD_W (DISP_WIDTH - 2 * BEATLINE_HIT_ZONE_W)
 #define BEATLINE_LANE_DIVIDER_Y 32
 
 // --- Screens ---
@@ -71,7 +69,7 @@ typedef enum
 // Per-note judgment result (0xff = unjudged)
 #define BEATLINE_NOTE_UNJUDGED 0xFF
 
-// Max notes we can track (sized for compiled charts)
+// Notes per chart; matches the .beatline format limit.
 #define BEATLINE_MAX_NOTES BEATLINE_FILE_MAX_NOTES
 
 // Feedback display duration (ticks)
@@ -116,7 +114,7 @@ typedef struct
     // song playback
     beatline_song_player_t song_player;
     uint32_t game_start_tick;
-    int32_t av_offset_ticks; // audio-visual offset, default 0
+    int32_t av_offset_ticks; // Set to BEATLINE_DEFAULT_AV_OFFSET_TICKS.
 
     // note tracking
     const beatline_note_t *notes;
@@ -153,7 +151,7 @@ typedef struct
     } feedback[2];
 
     // countdown
-    uint8_t countdown_beat; // 3, 2, 1, 0 (0 = done)
+    uint8_t countdown_beat; // 4..1 during the count-in, 0 once playing
     uint32_t countdown_next_tick;
 
     // background grid scroll offset (animated)

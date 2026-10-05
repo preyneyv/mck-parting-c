@@ -998,6 +998,8 @@ static void update_animations(host_cartridge_vm_t *vm)
   }
 }
 
+/* `api` is the index of the called function pointer within prism_api_v1_t,
+ * counting from `display` (0) to `close` (26). */
 static void api_dispatch(host_cartridge_vm_t *vm, uint16_t api)
 {
   prism_t *context = vm->context;

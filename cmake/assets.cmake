@@ -1,7 +1,6 @@
-# Asset generation for cartridges
-# - Alias src/cartridges/<name>/... to build/cartridges/<name>/... for includes
-# - Convert .rpp files to .mid and .h files
-# - Convert .aseprite files to .h files
+# Optional asset regeneration (PRISM_ASSET_AUTHORING=ON):
+# - REAPER .rpp projects -> song headers or .beatline tracks
+# - Aseprite files -> XBM sprite headers
 
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 option(PRISM_ASSET_AUTHORING "Enable REAPER/Aseprite asset export targets" OFF)
@@ -13,18 +12,6 @@ if(PRISM_ASSET_AUTHORING AND NOT PICO_PLATFORM STREQUAL "host")
     find_package(Reaper)
     find_package(Aseprite)
 endif()
-
-# src/cartridges/<name>/... can include build/cartridges/<name>/...
-foreach(SRC IN LISTS CARTRIDGE_SOURCES)
-    string(REGEX MATCH "^src/cartridges/([^/]+)/" _ "${SRC}")
-    if(CMAKE_MATCH_1)
-        set(APP_NAME "${CMAKE_MATCH_1}")
-        set_source_files_properties(${SRC} PROPERTIES
-            INCLUDE_DIRECTORIES "${CMAKE_CURRENT_BINARY_DIR}/cartridges/${APP_NAME}"
-        )
-    endif()
-endforeach()
-
 
 # sound asset exports (.rpp -> .mid -> song .h)
 if(PRISM_ASSET_AUTHORING AND Reaper_FOUND)

@@ -272,9 +272,6 @@ if(PICO_PLATFORM STREQUAL "host")
         PRISM_HOST_NEVER_GONNA_PACK_PATH="${beatline_never_gonna_pack_PRISM_PACK_FILE}"
     )
 
-    target_compile_options(shared PRIVATE -include ${CMAKE_CURRENT_LIST_DIR}/src/host/compat.h)
-    target_compile_options(prism PRIVATE -include ${CMAKE_CURRENT_LIST_DIR}/src/host/compat.h)
-
     target_include_directories(prism PRIVATE
         ${CMAKE_CURRENT_LIST_DIR}/src
         ${CMAKE_CURRENT_LIST_DIR}/tests
@@ -423,9 +420,6 @@ if(PICO_PLATFORM STREQUAL "host")
         )
         target_include_directories(prism_synth_analysis_sync_tests PRIVATE
             ${CMAKE_CURRENT_LIST_DIR}/src
-        )
-        target_compile_options(prism_synth_analysis_sync_tests PRIVATE
-            -include ${CMAKE_CURRENT_LIST_DIR}/src/host/compat.h
         )
         target_link_libraries(prism_synth_analysis_sync_tests PRIVATE
             Threads::Threads

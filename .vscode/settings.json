@@ -38,41 +38,9 @@
   "raspberry-pi-pico.cmakePath": "${HOME}/.pico-sdk/cmake/v3.31.5/bin/cmake",
   "raspberry-pi-pico.ninjaPath": "${HOME}/.pico-sdk/ninja/v1.12.1/ninja",
   "files.associations": {
-    "*.ejs": "html",
-    ".env": "plaintext",
-    "*.pyde": "python",
     "*.css": "tailwindcss",
     "*.h": "c",
-    "*.c": "c",
-    "cstdint": "c",
-    "cstdlib": "c",
-    "bitset": "c",
-    "chrono": "c",
-    "string_view": "c",
-    "algorithm": "c",
-    "random": "c",
-    "format": "c",
-    "istream": "c",
-    "limits": "c",
-    "numeric": "c",
-    "cmath": "c",
-    "ratio": "c",
-    "cinttypes": "c",
-    "typeinfo": "c",
-    "text_encoding": "c",
-    "array": "c",
-    "deque": "c",
-    "tuple": "c",
-    "utility": "c",
-    "vector": "c",
-    "compare": "c",
-    "__config": "c",
-    "__locale": "c",
-    "ios": "c"
+    "*.c": "c"
   },
-  "Lua.diagnostics.globals": ["reaper"],
-  "chat.tools.terminal.autoApprove": {
-    "cmake": true,
-    "&": true
-  }
+  "Lua.diagnostics.globals": ["reaper"]
 }

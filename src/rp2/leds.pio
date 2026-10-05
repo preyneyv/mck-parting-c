@@ -1,7 +1,6 @@
 .program led_write
-; PIO program for WS2812-compatible DOUT.
+; WS2812-compatible LED output. Pixels are sent in GRB byte order.
 ; Adapted from https://learn.adafruit.com/intro-to-rp2040-pio-with-circuitpython/using-pio-to-drive-a-neopixel
-; Byte order: GRB (why???)
 ; side_set: [DOUT]
 
 .define public T1 3

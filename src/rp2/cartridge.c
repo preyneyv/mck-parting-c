@@ -31,7 +31,8 @@ bool platform_cartridge_prepare(const prism_cartridge_t *cartridge,
     return true; /* Firmware-bundled descriptor. */
   uint32_t parent_stage = platform_watchdog_trace_stage();
   uint32_t parent_detail = platform_watchdog_trace_detail();
-  platform_watchdog_trace(0x50524550u, (uint32_t)(uintptr_t)cartridge);
+  platform_watchdog_trace(0x50524550u /* PREP */,
+                          (uint32_t)(uintptr_t)cartridge);
   bool prepared = cartridge_storage_prepare(cartridge, execution);
   platform_watchdog_trace(parent_stage, parent_detail);
   return prepared;
@@ -57,7 +58,8 @@ void platform_cartridge_call(const platform_cartridge_execution_t *execution,
   {
     uint32_t parent_stage = platform_watchdog_trace_stage();
     uint32_t parent_detail = platform_watchdog_trace_detail();
-    platform_watchdog_trace(0x43414c4cu, (uint32_t)(uintptr_t)function);
+    platform_watchdog_trace(0x43414c4cu /* CALL */,
+                            (uint32_t)(uintptr_t)function);
     prism_call_with_got(function, execution->got_base, context);
     platform_watchdog_trace(parent_stage, parent_detail);
   }

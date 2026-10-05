@@ -76,19 +76,15 @@ void engine_set_tick_callback(void (*callback)(void));
 bool engine_button_keydown(button_id_t button_id);
 bool engine_button_keyup(button_id_t button_id);
 bool engine_button_pressed(button_id_t button_id);
-bool engine_button_edge(button_id_t button_id);
 bool engine_button_app_keydown(button_id_t button_id);
 bool engine_button_app_keyup(button_id_t button_id);
 uint32_t engine_button_app_keydown_tick(button_id_t button_id);
 uint32_t engine_button_app_keyup_tick(button_id_t button_id);
-bool engine_button_released(button_id_t button_id);
 button_id_t engine_button_get_pressed_first(void);
 float engine_button_held_ratio(button_id_t button_id);
 
 #define BUTTON_KEYDOWN(button_id) engine_button_keydown(button_id)
 #define BUTTON_KEYUP(button_id) engine_button_keyup(button_id)
-#define BUTTON_PRESSED(button_id) engine_button_pressed(button_id)
-#define BUTTON_RELEASED(button_id) engine_button_released(button_id)
 
 typedef struct
 {

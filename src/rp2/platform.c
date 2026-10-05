@@ -13,8 +13,9 @@
 
 #include "config.h"
 
-void platform_init(void) {
-  // limit power draw until usb stack is initialized.
+void platform_init(void)
+{
+  // Disable battery charging to limit power draw until USB is up.
   gpio_init(PERIPH_BAT_CHG_EN_N);
   gpio_set_dir(PERIPH_BAT_CHG_EN_N, GPIO_OUT);
   gpio_put(PERIPH_BAT_CHG_EN_N, 1);
@@ -23,7 +24,7 @@ void platform_init(void) {
   stdio_init_all();
   sleep_ms(1000);
 
-  // initialize rng
+  // Seed the RNG.
   get_rand_32();
 
   platform_input_init();
@@ -32,7 +33,8 @@ void platform_init(void) {
   platform_leds_init();
 }
 
-void platform_task(void) {
+void platform_task(void)
+{
   tud_task();
   platform_peripheral_read_inputs();
 }

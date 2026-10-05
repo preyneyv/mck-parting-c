@@ -100,7 +100,6 @@ bool audio_synth_analysis_snapshot(
     const audio_synth_t *synth,
     int16_t samples[AUDIO_SYNTH_ANALYSIS_SAMPLE_COUNT], uint32_t *sequence);
 bool audio_synth_analysis_enabled(const audio_synth_t *synth);
-uint16_t audio_synth_message_queue_depth(const audio_synth_t *synth);
 uint16_t audio_synth_message_queue_take_peak(audio_synth_t *synth);
 uint32_t audio_synth_message_queue_full_count(const audio_synth_t *synth);
 uint32_t audio_synth_analysis_late_count(const audio_synth_t *synth);

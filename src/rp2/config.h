@@ -4,15 +4,15 @@
 
 #include <shared/config.h>
 
-//// SYSTEM CONFIGURATION ////
+// System
 #define SYS_CLOCK_HZ 132000000
 
-//// BUTTON CONFIGURATION ////
+// Buttons
 #define BUTTON_PIN_L 10
 #define BUTTON_PIN_R 11
 #define BUTTON_PIN_M 12
 
-//// DISPLAY CONFIGURATION ////
+// Display
 #define DISP_SPI_PORT spi0
 #define DISP_SPI_SPEED (100 * 1000 * 1000)
 #define DISP_RST 0
@@ -22,7 +22,7 @@
 #define DISP_DC 4
 #define DISP_REG_EN 5
 
-//// AUDIO CONFIGURATION ////
+// Audio
 #define AUDIO_I2S_LRCK 18
 #define AUDIO_I2S_BCLK 19
 #define AUDIO_I2S_DOUT 20
@@ -32,7 +32,7 @@
 #define AUDIO_BUFFER_SIZE 256
 #define AUDIO_BUFFER_RING_SLOTS 4
 
-//// PERIPHERAL CONFIGURATION ////
+// Power and battery
 #define PERIPH_PWR_EN 22
 #define PERIPH_BAT_CHG_EN_N 23
 #define PERIPH_BAT_CHG_N 25
@@ -40,14 +40,13 @@
 #define PERIPH_VSYS 26
 #define PERIPH_VSYS_ADC 0
 
-//// LED CONFIGURATION ////
+// LEDs. Color correction from
 // https://github.com/FastLED/FastLED/blob/d700beadf48f334dc299dd7b874ef459d590cad7/src/color.h
 #define LED_BITRATE_HZ 800000
-#define LED_CORRECTION 0xffa0f0 // correction for green cast in RGB LEDs
+#define LED_CORRECTION 0xffa0f0 // Tames the LEDs' green cast.
 #define LED_DOUT 13
 #define LED_PIO pio0
 
-//// VALIDATIONS ////
 static_assert(AUDIO_I2S_BCLK == AUDIO_I2S_LRCK + 1,
               "AUDIO_I2S_BCLK must be LRCK + 1");
 static_assert(AUDIO_BUFFER_RING_SLOTS >= 2 &&

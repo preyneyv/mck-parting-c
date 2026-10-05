@@ -47,10 +47,10 @@ slider29:0<0,5000,1>  Op 4 Env R
 // Constants
 // =========================
 @init
-// we just use @block to detect transport start
-// this prevents us from sending two sysex dumps if the track contains separate
-// takes when exporting
-ext_noinit = 1; 
+// Don't re-run @init on playback start; @block detects the transport starting
+// instead, so an export sends the patch once even if the track has several
+// takes.
+ext_noinit = 1;
 
 
 MFG = $x7D;
@@ -81,7 +81,8 @@ function gpush(ch0, pos, b) (
   gmem[gslot(ch0) + 1 + pos] = b & 255;
 );
 
-// 7-bit safe payload encoders (same as your protocol)
+// 7-bit little-endian encoders matching the firmware's SysEx parser
+// (src/shared/audio/midi.c).
 function enc7_u16_to_gmem(ch0, pos, v) (
   v = v|0;
   gpush(ch0, pos+0, (v      ) & 127);
@@ -108,7 +109,7 @@ function build_sysex_to_gmem(ch0) local(op, base, pos,
   // Header
   gpush(ch0, pos, $xF0); pos += 1;          // start byte
   gpush(ch0, pos, MFG); pos += 1;           // mfg id
-  gpush(ch0, pos, CMD_SET_PATCH); pos += 1; // command 
+  gpush(ch0, pos, CMD_SET_PATCH); pos += 1; // command
   gpush(ch0, pos, PROTO_VER); pos += 1;     // protocol version
   gpush(ch0, pos, ch0 & 15); pos += 1;      // channel
 
