@@ -16,7 +16,7 @@
 #define AUDIO_SYNTH_STOP_RELEASE_MS 5u
 #define AUDIO_SYNTH_DRAFT_BUFFER_SIZE 512u
 
-// Keep the audio core's hot buffers in its own scratch banks.
+// Keep the audio core's hot buffers in the scratch SRAM banks.
 static q1x15 PLATFORM_SCRATCH_Y("audio_synth") LUT_SINE[AUDIO_SYNTH_LUT_SIZE];
 static q1x15 PLATFORM_SCRATCH_X("audio_synth")
     draft_voice[AUDIO_SYNTH_DRAFT_BUFFER_SIZE];

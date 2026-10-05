@@ -184,8 +184,8 @@ platform_wake_result_t platform_sleep_enter(uint32_t quick_wake_ms)
     {
       platform_task();
       /* MIDI and plain serial traffic wake the device. WebUSB messages are
-       * handled in place and only wake it when one explicitly asks to, so
-       * heartbeats and mirror bookkeeping don't cause spurious wakes. */
+       * handled in place, and heartbeats, mirroring, and remote button
+       * releases don't wake it. */
       if (tud_midi_available() || tud_cdc_available() ||
           management_sleep_task())
         return (platform_wake_result_t){0};

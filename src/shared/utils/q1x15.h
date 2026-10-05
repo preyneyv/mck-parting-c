@@ -22,13 +22,39 @@ static inline q1x15 q1x15_clamp_s32(int32_t a)
   return (q1x15)a;
 }
 
+static inline q1x15 q1x15_abs(q1x15 a)
+{
+  if (a == INT16_MIN)
+    return INT16_MAX;
+  return (q1x15)(a < 0 ? -a : a);
+}
+
 static inline q1x15 q1x15_mul(q1x15 a, q1x15 b)
 {
   return (q1x15)(((int32_t)a * (int32_t)b) >> 15);
 }
 
+static inline q1x15 q1x15_div(q1x15 a, q1x15 b)
+{
+  return (q1x15)((((int32_t)(a) << 15) / (b)));
+}
+
+/* Add, saturating to the Q1.15 range. */
+static inline q1x15 q1x15_add(q1x15 a, q1x15 b)
+{
+  return q1x15_clamp_s32((int32_t)(a) + b);
+}
+
+/* Subtract, saturating to the Q1.15 range. */
+static inline q1x15 q1x15_sub(q1x15 a, q1x15 b)
+{
+  return q1x15_clamp_s32((int32_t)a - b);
+}
+
 /* Add without saturating. */
 static inline q1x15 q1x15_add_unchecked(q1x15 a, q1x15 b) { return a + b; }
+/* Subtract without saturating. */
+static inline q1x15 q1x15_sub_unchecked(q1x15 a, q1x15 b) { return a - b; }
 
 /* Convert a float in [-1.0, +1.0]. */
 static inline q1x15 q1x15_f(float a)
@@ -48,4 +74,10 @@ static inline q1x15 q1x15_d(double a)
 static inline q1x15 q1x15_mag(uint16_t a, uint16_t mag)
 {
   return (q1x15)((int32_t)a * (int32_t)Q1X15_ONE / mag);
+}
+
+/* Convert to a float in [-1.0, +1.0]. */
+static inline float q1x15_to_float(q1x15 a)
+{
+  return (float)(a) / (float)Q1X15_ONE;
 }

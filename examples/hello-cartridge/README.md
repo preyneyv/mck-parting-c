@@ -1,7 +1,8 @@
 # Hello cartridge
 
 A minimal standalone cartridge project. Copy this directory to start a new
-cartridge.
+cartridge, and change the `.id` in `app.c` to a reverse domain name you
+control.
 
 ```sh
 cmake -S . -B build -G Ninja -DPRISM_SDK_ROOT=/path/to/prism

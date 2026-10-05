@@ -127,11 +127,11 @@ available but blocks, so avoid it in lifecycle and rendering callbacks.
 
 ## Asset packs
 
-An asset pack is an uncompressed `.prismpack` archive stored in the same
-64 KiB storage blocks as cartridges. A pack declares its own reverse domain
-name ID, display name, 32-bit version, target cartridge ID, and an optional
-inclusive range of target versions. Versions follow the same rules as
-cartridges. A pack whose target is missing or outside the declared range stays
+An asset pack is an uncompressed `.prismpack` archive. Packs and cartridges
+share the device's 192 storage blocks of 64 KiB each. A pack declares its own
+reverse domain name ID, display name, 32-bit version, target cartridge ID, and
+an optional inclusive range of target versions. Versions follow the same rules
+as cartridges. A pack whose target is missing or outside the declared range stays
 installed but disabled, so it can still be listed and deleted.
 
 File paths are printable ASCII, such as `tracks/song.beatline`. There are no

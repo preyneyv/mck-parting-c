@@ -1,0 +1,5 @@
+* text=auto eol=lf
+
+# Keep vendored sources and REAPER projects byte-for-byte as committed.
+lib/** -text
+*.rpp -text

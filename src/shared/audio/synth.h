@@ -68,6 +68,11 @@ typedef enum
   AUDIO_SYNTH_OP_MODE_FREQ_MOD = 1,
 } audio_synth_operator_mode_t;
 
+typedef enum
+{
+  AUDIO_SYNTH_OP_WAVEFORM_SINE,
+} audio_synth_operator_waveform_t;
+
 typedef struct audio_synth_env_config_t
 {
   uint32_t a; // attack duration in timebase

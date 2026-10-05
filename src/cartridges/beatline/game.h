@@ -114,7 +114,7 @@ typedef struct
     // song playback
     beatline_song_player_t song_player;
     uint32_t game_start_tick;
-    int32_t av_offset_ticks; // BEATLINE_DEFAULT_AV_OFFSET_TICKS
+    int32_t av_offset_ticks; // Set to BEATLINE_DEFAULT_AV_OFFSET_TICKS.
 
     // note tracking
     const beatline_note_t *notes;
