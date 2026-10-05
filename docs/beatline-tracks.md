@@ -1,31 +1,23 @@
 # Beatline tracks
 
-Beatline tracks are pointer-free `.beatline` files stored inside ordinary
-Prism asset packs. Each file contains its title and artist, playback patches
-and events, and fully resolved normal and hard note arrays. Beatline scans
-compatible pack directories when needed and keeps the selected file in flash;
-the number or total size of installed songs therefore does not create a
-matching RAM allocation.
+Beatline tracks are `.beatline` files stored in ordinary Prism asset packs.
+Each file holds the title and artist, synth patches, playback events, and the
+fully resolved note lists for the normal and hard charts. The file contains no
+pointers. Beatline finds tracks by scanning compatible packs and plays the
+selected file straight from flash, so installing more or longer songs does not
+use more RAM.
 
-The bundled Golden and Never Gonna tracks are separate asset packs. They use
-the same discovery and playback path as user-installed tracks and are not
-compiled into `beatline.prism`.
+The bundled Golden and Never Gonna tracks are separate asset packs. They are
+not compiled into `beatline.prism` and load the same way as any installed
+track.
 
-Their initial registered IDs are:
+## Leaderboard IDs
 
-| Track | Track ID | Normal chart ID | Hard chart ID |
-| --- | ---: | ---: | ---: |
-| Never Gonna | 1 | 1 | 2 |
-| Golden | 2 | 3 | 4 |
+A `.beatline` file is playable without leaderboard IDs. Without them, the
+results screen shows the Beatline icon instead of a score QR code.
 
-## Registration
-
-A `.beatline` file is complete and playable without registration. An
-unregistered result screen shows the Beatline cartridge icon instead of a
-leaderboard QR.
-
-Leaderboard publication can add this optional binding without changing chart
-or audio contents:
+A ranked track sets the ranked flag in its header together with three nonzero
+IDs:
 
 ```c
 uint64_t track_id;
@@ -33,15 +25,21 @@ uint64_t normal_chart_id;
 uint64_t hard_chart_id;
 ```
 
-The ranked flag and all three nonzero IDs must appear together. Track identity
-belongs to the song, while each difficulty has an independent chart identity.
-A publishing service can retain a chart ID when its canonical digest is
-unchanged and assign a new ID only to a changed difficulty. The digest input is
-the difficulty, scoring ruleset, and each resolved note's hit tick, lane, type,
-and hold duration. Audio, title/artist metadata, pack identity, and asset path
-are excluded.
+The track ID identifies the song, and each difficulty has its own chart ID.
+Adding the IDs does not change the chart or audio data. When a chart is
+republished, it can keep its chart ID as long as its canonical digest is
+unchanged. The digest covers the difficulty, scoring ruleset, and each
+resolved note's hit tick, lane, type, and hold duration; audio, title, artist,
+pack identity, and file path are excluded.
 
-Ranked results use the existing Beatline leaderboard app ID and an exact
+The bundled tracks use these IDs:
+
+| Track | Track ID | Normal chart ID | Hard chart ID |
+| --- | ---: | ---: | ---: |
+| Never Gonna | 1 | 1 | 2 |
+| Golden | 2 | 3 | 4 |
+
+Ranked results are submitted under Beatline's leaderboard app ID (5) as a
 22-byte little-endian payload:
 
 ```c
@@ -54,13 +52,13 @@ uint16_t bad;
 uint16_t miss;
 ```
 
-Difficulty, track identity, and rank are resolved or derived server-side.
+The server derives the track, difficulty, and rank from these fields.
 
 ## Authoring
 
-`scripts/rea_midi_export.py --beatline-out` resolves the normal and hard rhythm
-channels at the 960-Hz engine timeline, removes those authoring channels from
-audio playback, and writes the compact file. Omitting the three ID options
-creates an unregistered track; passing `--track-id`, `--normal-chart-id`, and
-`--hard-chart-id` together creates a registered one. Partial bindings are
-rejected.
+`scripts/rea_midi_export.py --beatline-out` resolves the normal and hard
+rhythm channels on the 960 Hz engine timeline, removes those channels from the
+audio, and writes the `.beatline` file. It requires `--title` and `--artist`.
+Pass `--track-id`, `--normal-chart-id`, and `--hard-chart-id` together to make
+a ranked track, or none of them for an unranked one. Passing only some of them
+is an error.

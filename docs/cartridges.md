@@ -1,36 +1,29 @@
 # Prism cartridges
 
-A cartridge is position-independent ARM code packaged in a `.prism` file. The
-SDL host simulator runs that same ARM package through Unicorn, so cartridge
-authors get the same static-data lifecycle as hardware while iterating without
-the device.
-
-The main Prism simulator can also execute the packaged ARM artifact itself:
+A cartridge is position-independent Cortex-M0+ code in a `.prism` package. The
+same package runs on the device and in the host simulator, which executes it
+under Unicorn while the OS, display, audio, and input stay native:
 
 ```sh
 build_host/prism path/to/cartridge.prism
 ```
 
-In that mode the OS, display, audio, and input remain native desktop code while
-the cartridge's Cortex-M0+ lifecycle runs through Unicorn. This is the closest
-desktop test to installing the package on hardware; malformed packages are
-rejected before the simulator window starts.
+The simulator rejects malformed packages before it opens a window.
 
 ## Project shape
 
-Start with `examples/hello-cartridge`. A cartridge project needs an `app.c`, a
-36x36 monochrome icon, and a small `CMakeLists.txt` that calls
+Start from `examples/hello-cartridge`. A project needs an `app.c`, a 36x36
+monochrome icon, and a `CMakeLists.txt` that calls
 `prism_add_installable_cartridge`. Building the project produces the `.prism`
-file; there is no Prism-specific CLI.
+file.
 
-Include `<prism/sdk.h>` for the public API. Cartridge source may include
-`prism/*`, standard-library headers, and its own local headers. Both bundled and
-standalone builds reject direct includes from `shared`, `platform`, `host`, or
-`rp2`.
+Include `<prism/sdk.h>` for the public API. Cartridge sources may include
+`prism/*`, standard library headers, and their own headers. Both bundled and
+standalone builds reject includes from `shared`, `platform`, `host`, or `rp2`.
 
-## Cartridge declaration
+## Declaration
 
-Every cartridge exports one descriptor with named fields:
+Every cartridge exports one descriptor:
 
 ```c
 PRISM_CARTRIDGE(cartridge_example,
@@ -48,158 +41,152 @@ PRISM_CARTRIDGE(cartridge_example,
 );
 ```
 
-`id`, `name`, and `version` are the cartridge's three authored metadata fields.
-The ID is the stable identity and must be a canonical lowercase reverse-FQDN:
-1–253 ASCII bytes, dot-separated 1–63 byte labels, and only lowercase letters,
-digits, and interior hyphens. The mutable name is displayed to users, while the
-32-bit version controls updates. Reinstalling the same version is allowed;
-lower versions are rejected and higher versions replace the installed package.
+- `id` is the stable identity. It must be a lowercase reverse domain name:
+  1–253 ASCII bytes made of dot-separated 1–63 byte labels using lowercase
+  letters, digits, and interior hyphens.
+- `name` is shown to users and may change between versions.
+- `version` is a 32-bit number. Installing the same version again is allowed,
+  a higher version replaces the installed one, and a lower version is rejected.
 
-The descriptor is the sole source of truth for this metadata. The packager
-derives a 16-byte internal `app_key` from the complete ID for fixed-size lookup
-records. Authors do not choose or declare that key. A 36x36 monochrome `icon`
-and `frame` are also required. The packager rejects missing or malformed
-metadata, icons, or frame callbacks before producing a `.prism` file, and the
-runtime repeats those checks before launch. Other callbacks and sizes may be
-omitted and default to zero.
+The packager derives an internal 16-byte `app_key` from the ID for fixed-size
+lookups; authors never set it. `icon` and `frame` are required. The packager
+rejects missing or malformed metadata, icons, or frame callbacks, and the
+runtime checks them again before launch. Everything else may be omitted and
+defaults to zero.
 
-`tick_divider` controls how often `tick` runs relative to the public
-`PRISM_ENGINE_TICK_RATE` clock. A zero or omitted divider is normalized to the
-default of one. Divider 1 runs at 960 Hz, 2 at 480 Hz, 4 at 240 Hz, 8 at
-120 Hz, and 16 at 60 Hz. Arbitrary nonzero integer dividers are valid.
+`tick_divider` sets how often `tick` runs relative to the 960 Hz
+`PRISM_ENGINE_TICK_RATE`: 1 runs at 960 Hz, 8 at 120 Hz, 16 at 60 Hz, and so
+on. Any divider from 1 to 65535 works, and zero is treated as one.
 
-Use ordinary mutable static objects for launch-scoped state:
+## State
+
+Use ordinary static variables for state that lasts one launch:
 
 ```c
 static example_state_t state;
 static uint32_t attempts = 3;
 ```
 
-The package records the linked writable-data template and BSS size. Each
-launch recreates that image, so zero-initialized statics start at zero and
-explicit initializers return to their authored values after close/relaunch.
-`static const` data remains in the read-only image. Persistent state is
-separate and explicit: set `persistent_size` and
-`persistent_schema_version`, mutate `prism->persistent`, then call
-`prism_persist`. Writes are coalesced by the OS. Uninstalling a cartridge
-deletes its persistent state.
+The package records the initialized data and BSS size, and each launch
+rebuilds them. Zero-initialized statics start at zero and initialized statics
+return to their initial values on every launch. `static const` data stays in
+the read-only image.
+
+State that survives relaunches is explicit. Set `persistent_size` and
+`persistent_schema_version`, modify `prism->persistent`, then call
+`prism_persist`. The OS coalesces writes. Uninstalling a cartridge deletes its
+persistent state.
 
 ## Lifecycle
 
-- `enter`: initialize the cartridge after its mutable static image is ready.
+- `enter`: set up the cartridge. Statics are already initialized.
 - `tick`: handle input and simulation at `960 / tick_divider` Hz.
 - `frame`: draw the next 128x64 frame.
-- `pause` / `resume`: surround the system menu and sleep.
-- `leave`: release resources not owned by cartridge statics or persistence.
+- `pause` / `resume`: called around the system menu and sleep.
+- `leave`: release anything not held in statics or persistent state.
 
-Input is sampled at 960 Hz independently of the cartridge divider. Key-down
-and key-up transitions remain latched until the next cartridge tick, and their
-raw timestamps are available through `prism_button_keydown_tick` and
-`prism_button_keyup_tick`. A press and release between divided callbacks are
-therefore both preserved.
+Input is sampled at 960 Hz regardless of the divider. Key-down and key-up
+events stay latched until the next `tick`, so a press and release that both
+happen between two ticks are still seen. Their exact times are available from
+`prism_button_keydown_tick` and `prism_button_keyup_tick`.
 
-`prism_ticks` is an integer count of active 960 Hz engine ticks. It freezes
-while the cartridge is paused. `prism_millis` converts that same paused clock
-to integer milliseconds, while `prism_now_us` exposes wall-clock microseconds.
-Animation durations are always authored in milliseconds.
+`prism_ticks` counts active 960 Hz engine ticks and stops while the cartridge
+is paused. `prism_millis` is the same clock in milliseconds.
+`prism_now_us` is wall-clock time in microseconds. Animation durations are in
+milliseconds.
 
 ## Rendering and services
 
-`prism_display` returns the active `u8g2_t *`, giving cartridges the complete
-u8g2 drawing API. `<prism/sdk.h>` also exposes Elm, the layout helper used by
-the bundled cartridges and system UI.
+`prism_display` returns the `u8g2_t *` for the screen, so the full u8g2
+drawing API is available. `<prism/sdk.h>` also includes Elm, the layout helper
+used by the bundled cartridges and the system UI.
 
-Typed wrappers cover buttons, time, LEDs, audio, animation, power, sleep,
-persistence, and leaderboard QR generation. The runtime passes these services
-through a versioned function table; cartridges never access engine or hardware
-state directly.
+The SDK has wrappers for buttons, time, LEDs, audio, animation, power, sleep,
+persistence, and leaderboard QR codes. They call into the OS through a
+versioned function table; cartridges never touch engine or hardware state
+directly.
+
+## C runtime
+
+Cartridges use normal C operators and standard library functions without
+including Pico SDK headers. The package linker turns Cortex-M0+ compiler
+helpers into versioned imports. On the RP2040 these resolve to the Pico SDK's
+optimized divider, Boot ROM, and floating-point routines, and the simulator
+implements the same ARM EABI behavior.
+
+This covers 32- and 64-bit division and remainder, 64-bit multiplication,
+count-leading/trailing-zero and population-count builtins, compiler-generated
+memory copies and fills, and single- and double-precision arithmetic,
+comparisons, and conversions. Explicit `memcpy`, `memset`, and the supported
+single-precision math functions use the firmware implementations too.
+
+`printf`, `vprintf`, `puts`, `putchar`, `sprintf`, `snprintf`, and
+`vsnprintf` are available. On hardware, output goes to the firmware's Pico
+stdio backends; the simulator writes it to the console. `getchar` is also
+available but blocks, so avoid it in lifecycle and rendering callbacks.
 
 ## Asset packs
 
-An asset pack is an uncompressed `.prismpack` archive installed in the same
-64-KiB block arena as cartridges. A pack authors its own canonical reverse-FQDN
-ID, display name, 32-bit version, target cartridge ID, and optional inclusive
-target-version range. Its generated 16-byte `pack_key` is an internal catalog
-key, just like a cartridge's `app_key`. Reinstalling the same pack version is
-allowed, lower versions are rejected, and higher versions replace the pack.
-Packs whose target is missing or outside the declared version range remain
-installed but disabled so management can report and delete them.
+An asset pack is an uncompressed `.prismpack` archive stored in the same
+64 KiB storage blocks as cartridges. A pack declares its own reverse domain
+name ID, display name, 32-bit version, target cartridge ID, and an optional
+inclusive range of target versions. Versions follow the same rules as
+cartridges. A pack whose target is missing or outside the declared range stays
+installed but disabled, so it can still be listed and deleted.
 
-Files have canonical printable-ASCII paths such as `tracks/song.beatline`.
-There is no directory object, compression, extraction, or per-file allocation.
-The pack directory and file contents remain in flash on RP2040. A cartridge can
-enumerate compatible packs and files without building a RAM index:
+File paths are printable ASCII, such as `tracks/song.beatline`. There are no
+directory entries, compression, or extraction; on the RP2040 the pack's
+directory and file contents are read directly from flash. A cartridge can walk
+its compatible packs and files without building an index in RAM:
 
 ```c
-for (uint32_t pack_index = 0;
-     pack_index < prism_asset_pack_count(prism); ++pack_index) {
-    prism_asset_pack_info_t pack;
-    if (!prism_asset_pack_get(prism, pack_index, &pack))
-        continue;
-    for (uint32_t file_index = 0; file_index < pack.file_count; ++file_index) {
-        prism_asset_file_t file;
-        if (prism_asset_file_get(prism, pack.handle, file_index, &file)) {
-            // file.path, file.data, and file.size are valid for this launch.
-        }
+for (uint32_t pack_index = 0; pack_index < prism_asset_pack_count(prism);
+     ++pack_index)
+{
+  prism_asset_pack_info_t pack;
+  if (!prism_asset_pack_get(prism, pack_index, &pack))
+    continue;
+  for (uint32_t file_index = 0; file_index < pack.file_count; ++file_index)
+  {
+    prism_asset_file_t file;
+    if (prism_asset_file_get(prism, pack.handle, file_index, &file))
+    {
+      // file.path, file.data, and file.size are valid for this launch.
     }
+  }
 }
 ```
 
-Treat returned pointers as immutable and launch-scoped. Installing, deleting,
-or compacting storage closes the active cartridge before flash moves, so a
-cartridge never observes relocated XIP data. The host maps the same bundled
-pack data read-only into the Unicorn guest address space.
+Returned pointers are read-only and valid until the cartridge exits.
+Installing, deleting, or compacting storage closes the running cartridge
+before anything in flash moves. The simulator maps bundled pack data read-only
+into the emulated address space.
 
-SDK projects can call `prism_add_asset_pack`; its `FILES` arguments use
-`path=source` syntax. The underlying `scripts/package_assets.py` tool is also
-usable directly. Factory UF2 generation accepts `.prism` and `.prismpack`
-objects together and writes both through the ordinary catalog path.
-
-### Optimized C runtime
-
-Cartridges use ordinary C operators and standard functions; they do not include
-Pico SDK headers. The package linker turns Cortex-M0+ compiler helpers into
-versioned Prism imports. On RP2040 those imports resolve to the Pico SDK's
-optimized divider, Boot ROM, and numeric routines. Prism Host implements the
-same ARM EABI behavior for the packaged ARM program.
-
-This applies to 32- and 64-bit integer division and remainder, 64-bit
-multiplication, count-leading/trailing-zero and population-count builtins,
-compiler-generated memory copy/set operations, and the basic single- and
-double-precision arithmetic, comparison, and conversion helpers. Explicit
-`memcpy`, `memset`, and the supported single-precision math functions also use
-the firmware implementations. Constant expressions may still be folded or
-inlined by the compiler.
-
-Standard diagnostic output is available through `printf`, `vprintf`, `puts`,
-and `putchar`; formatted buffer functions include `sprintf`, `snprintf`, and
-`vsnprintf`. On hardware, console output uses the firmware's configured Pico
-stdio backends. Prism Host writes it to the host process console. `getchar` is
-also available but blocks, so cartridges should avoid it in lifecycle and
-rendering callbacks. A bounded Prism logging service is preferred for normal
-cartridge diagnostics once available.
+In CMake, `prism_add_asset_pack` builds a pack from `FILES` arguments written
+as `path=source`. It wraps `scripts/package_assets.py`, which can also be run
+directly.
 
 ## Packages
 
-The package header records the cartridge ABI, u8g2 ABI hash, generated
-`app_key`, image locations, imports, relocations, and persistence layout. It
-does not duplicate the descriptor's ID, name, or version. The packager rejects
-unsupported imports and malformed images. The device verifies the generated
-key against the descriptor's complete ID before exposing an installed
-cartridge to the launcher.
+The package header records the cartridge ABI version, a hash of the u8g2 ABI,
+the generated `app_key`, image locations, imports, relocations, and the
+persistence layout. The ID, name, and version are read from the descriptor and
+are not duplicated in the header. The packager rejects unsupported imports and
+malformed images, and the device checks the `app_key` against the descriptor's
+ID before showing the cartridge in the launcher.
 
-Cartridge ABI v1 and package format v1 define the initial compatibility
-baseline. Rebuild older development cartridges with the current SDK.
+This is cartridge ABI v1 and package format v1. Cartridges built against an
+earlier development SDK must be rebuilt.
 
-The RP2040 build keeps firmware and factory provisioning separate.
-`prism.uf2` contains no cartridge packages and can be reflashed without
-recreating an app the user uninstalled or changing cartridge storage.
-`prism_factory.uf2` can be applied directly to an existing device without a
-separate flash-nuke pass. It writes the first-party `.prism` packages directly
-and `.prismpack` archives into the same normal storage blocks, replaces both
-catalog slots, invalidates any
-interrupted-compaction journal, and resets cartridge persistence and device
-settings. Old package bytes outside the new catalog are harmless and are
-erased when their blocks are reused. Once provisioned, the objects carry no
-factory marker; they use the same update, deletion, and compaction paths as
-third-party objects of the same kind.
+The RP2040 build produces two firmware images:
+
+- `prism.uf2` contains only firmware. Flashing it leaves installed cartridges,
+  their saves, and device settings alone, and does not bring back cartridges
+  the user removed.
+- `prism_factory.uf2` installs the bundled `.prism` and `.prismpack` files
+  through the normal storage catalog. It replaces both catalog slots,
+  invalidates any interrupted compaction, and resets cartridge persistence and
+  device settings, so it can be flashed over an existing device without
+  erasing flash first. Bytes from old packages stay until their blocks are
+  reused. Factory-installed packages are not marked in any way and are
+  updated, deleted, and compacted like any other package.
